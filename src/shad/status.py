@@ -252,17 +252,16 @@ def _runtime_rows(path: Path) -> list[Row]:
         bin_path = shutil.which(binary) or _dim("—")
 
         if not installed:
-            rows.append([label, _dim("not in PATH"), _dim("—"), _dim("—"), bin_path])
+            rows.append([label, _dim("not in PATH"), _dim("—"), bin_path])
             continue
 
         lat = latest.get(label)
-        latest_str = lat or _dim("—")
         if lat:
-            status = _green("✓ up to date") if _norm(installed) == _norm(lat) else _yellow("update available")
+            status = _green("✓ up to date") if _norm(installed) == _norm(lat) else _yellow(f"update available → {lat}")
         else:
             status = _dim("—")
 
-        rows.append([label, installed, latest_str, status, bin_path])
+        rows.append([label, installed, status, bin_path])
 
     return rows
 
@@ -296,7 +295,7 @@ def print_status(project: Project) -> None:
     runtime_rows = _runtime_rows(project.path)
     if runtime_rows:
         print()
-        for line in _render_table("runtimes  runtime · installed · latest · status · path", runtime_rows):
+        for line in _render_table("runtimes  runtime · installed · status · path", runtime_rows):
             print(line)
 
     # opencode
