@@ -85,7 +85,9 @@ def _render_table(title: str, rows: list[Row]) -> list[str]:
     content_w = 1 + sum(col_widths) + 2 * (col_count - 1) + 1
 
     title_part = f"─ {title} "
-    fill = max(0, content_w - len(title_part))
+    # ensure the box is never narrower than the title
+    content_w = max(content_w, len(title_part))
+    fill = content_w - len(title_part)
     top    = f"┌{title_part}{'─' * fill}┐"
     bottom = f"└{'─' * content_w}┘"
 
@@ -219,9 +221,7 @@ def _runtime_rows(path: Path) -> list[Row]:
     ]
 
     detected: list[tuple[str, str, str]] = []  # (label, installed, binary)
-    for label, manifests, cmd in checks:
-        if not any((path / m).exists() for m in manifests):
-            continue
+    for label, _manifests, cmd in checks:
         version = _run(cmd)
         installed = version.splitlines()[0] if version else ""
         detected.append((label, installed, cmd[0]))
@@ -245,20 +245,22 @@ def _runtime_rows(path: Path) -> list[Row]:
                 latest[lbl] = None
 
     def _semver(v: str) -> str:
-        """Strip leading 'v' and drop any extra words (e.g. 'Python 3.14.3' → '3.14.3')."""
-        parts = v.lstrip("v").split()
-        for p in parts:
-            if p[0].isdigit():
-                return p
-        return parts[0] if parts else v
+        """Extract a clean version number from a runtime version string."""
+        for part in v.split():
+            # handle 'go1.24.2' style
+            s = part.lstrip("v")
+            if s.startswith("go") and s[2:3].isdigit():
+                return s[2:]
+            if s[:1].isdigit():
+                return s.split()[0]
+        return v.strip()
 
     rows: list[Row] = []
     for label, installed, binary in detected:
         bin_path = shutil.which(binary) or _dim("—")
 
         if not installed:
-            rows.append([label, _dim("—"), _dim("—"), bin_path])
-            continue
+            continue  # skip runtimes not in PATH
 
         installed_str = _semver(installed)
         lat = latest.get(label)
