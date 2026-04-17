@@ -20,6 +20,8 @@ from shad import __version__
 from shad.config import Config, load, resolve_prefix
 from shad.tmux import open_project
 from shad.status import print_status
+from shad.completion import print_completion
+from shad.init import cmd_init
 
 
 # ---------------------------------------------------------------------------
@@ -171,6 +173,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print project status instead of opening a tmux session.",
     )
 
+    p_completion = sub.add_parser(
+        "completion",
+        help="Print shell completion script",
+    )
+    p_completion.add_argument(
+        "shell",
+        choices=["bash", "zsh"],
+        help="Shell to generate completions for",
+    )
+
+    sub.add_parser(
+        "init",
+        help="Add a new project to the config interactively",
+    )
+
     return parser
 
 
@@ -181,6 +198,14 @@ def main() -> None:
     if args.command is None:
         parser.print_help()
         sys.exit(0)
+
+    if args.command == "completion":
+        print_completion(args.shell)
+        return
+
+    if args.command == "init":
+        cmd_init()
+        return
 
     cfg: Config = load()
 
