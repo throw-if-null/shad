@@ -86,11 +86,43 @@ Created once on first open, never rebuilt on subsequent attaches:
 ┌─────────────────────────────────┐
 │  top pane  (top_command)        │  ~65% height
 ├─────────────────────┬───────────┤
-│  bottom-left  (70%) │ right 30% │  ~35% height
+│  bottom-left  (70%) │  gitui    │  ~35% height
 └─────────────────────┴───────────┘
 ```
 
 If `shad` is run from **inside** an existing tmux session it uses `switch-client`; outside tmux it uses `attach-session`.
+
+### Navigating panes
+
+- `Ctrl+b` `h/j/k/l` — move left/down/up/right (vim-style, if configured)
+- `Ctrl+b` `o` — cycle through panes
+- `Ctrl+b` `q` — show pane numbers, press number to jump
+
+## Dependencies
+
+### gitui
+
+The bottom-right pane runs [gitui](https://github.com/gitui-org/gitui). Install the binary:
+
+```sh
+mkdir -p ~/.local/bin
+curl -sL https://github.com/gitui-org/gitui/releases/download/v0.28.1/gitui-linux-x86_64.tar.gz \
+  | tar -xz -C ~/.local/bin
+```
+
+Make sure `~/.local/bin` is on your `$PATH`.
+
+### gitui theme (optional)
+
+To match the catppuccin frappe color scheme used in tmux:
+
+```sh
+mkdir -p ~/.config/gitui
+curl -sL https://raw.githubusercontent.com/catppuccin/gitui/main/themes/catppuccin-frappe.ron \
+  -o ~/.config/gitui/theme.ron
+```
+
+Other available flavors: `catppuccin-latte`, `catppuccin-macchiato`, `catppuccin-mocha`.
 
 ## Project structure
 
