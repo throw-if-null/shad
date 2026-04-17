@@ -19,6 +19,7 @@ import sys
 from shad import __version__
 from shad.config import Config, load, resolve_prefix
 from shad.tmux import open_project
+from shad.status import print_status
 
 
 # ---------------------------------------------------------------------------
@@ -77,7 +78,10 @@ def cmd_projects(cfg: Config, args: argparse.Namespace) -> None:
             sys.exit(1)
 
         if match in cfg.projects:
-            open_project(cfg.projects[match], cfg.defaults)
+            if args.status:
+                print_status(cfg.projects[match])
+            else:
+                open_project(cfg.projects[match], cfg.defaults)
         else:
             # it's a group — list its sub-projects
             _list_group(cfg, match)
@@ -117,7 +121,10 @@ def cmd_projects(cfg: Config, args: argparse.Namespace) -> None:
             )
             sys.exit(1)
 
-        open_project(group_projects[proj_match], cfg.defaults)
+        if args.status:
+            print_status(group_projects[proj_match])
+        else:
+            open_project(group_projects[proj_match], cfg.defaults)
         return
 
     # --- too many tokens ---
@@ -157,6 +164,11 @@ def build_parser() -> argparse.ArgumentParser:
             "Omit to list all projects. "
             "Prefix matching is supported per level."
         ),
+    )
+    p_projects.add_argument(
+        "--status",
+        action="store_true",
+        help="Print project status instead of opening a tmux session.",
     )
 
     return parser
