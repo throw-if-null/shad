@@ -1,7 +1,7 @@
 """
 Project status reporting for shad.
 
-Prints a human-readable summary of:
+Prints a human-readable summary as a series of titled tables:
   - tmux session state
   - git: branch, latest tag, last 3 commits, dirty file count
   - detected runtimes (Python, Node, Go, Rust, Deno) based on
@@ -13,6 +13,7 @@ Prints a human-readable summary of:
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import urllib.request
@@ -23,56 +24,96 @@ from shad.config import Project
 from shad.tmux import session_exists
 
 
-# ── helpers ───────────────────────────────────────────────────────────────
+# ── ANSI helpers ──────────────────────────────────────────────────────────
 
-def _run(args: list[str], *, cwd: Path | None = None) -> str:
-    """Run a command and return stripped stdout, or '' on failure."""
-    try:
-        result = subprocess.run(args, capture_output=True, text=True, cwd=cwd)
-        return result.stdout.strip() if result.returncode == 0 else ""
-    except FileNotFoundError:
-        return ""
+_ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 
 
-def _fetch_json(url: str, timeout: int = 4) -> object:
-    """Fetch a URL and parse JSON, returning None on any failure."""
-    try:
-        with urllib.request.urlopen(url, timeout=timeout) as resp:
-            return json.loads(resp.read())
-    except Exception:
-        return None
+def _vlen(s: str) -> int:
+    """Visible length of a string, ignoring ANSI escape codes."""
+    return len(_ANSI_RE.sub("", s))
 
 
-def _section(title: str) -> str:
-    return f"\n\033[1;34m{title}\033[0m"
-
-
-def _row(label: str, value: str) -> str:
-    return f"  \033[2m{label:<18}\033[0m {value}"
+def _vpad(s: str, width: int) -> str:
+    """Pad *s* to *width* visible characters."""
+    return s + " " * max(0, width - _vlen(s))
 
 
 def _dim(text: str) -> str:
     return f"\033[2m{text}\033[0m"
 
 
-def _latest_badge(installed: str, latest: str | None) -> str:
-    """Return a coloured badge comparing installed vs latest."""
-    if not latest:
-        return installed
+def _green(text: str) -> str:
+    return f"\033[32m{text}\033[0m"
 
-    # normalise: strip leading 'v', take first word
-    def _norm(v: str) -> str:
-        return v.lstrip("v").split()[0]
 
-    inst_n = _norm(installed)
-    lat_n = _norm(latest)
+def _yellow(text: str) -> str:
+    return f"\033[33m{text}\033[0m"
 
-    if inst_n == lat_n:
-        badge = f"\033[32m✓ latest ({latest})\033[0m"
-    else:
-        badge = f"\033[33m latest: {latest}\033[0m"
 
-    return f"{installed}  {badge}"
+def _bold(text: str) -> str:
+    return f"\033[1m{text}\033[0m"
+
+
+# ── Table renderer ────────────────────────────────────────────────────────
+
+Row = list[str]  # one cell per column
+
+
+def _render_table(title: str, rows: list[Row]) -> list[str]:
+    """
+    Render *rows* as a box-drawing table with a titled top border.
+
+    ┌─ title ──────────────────┐
+    │ col1   col2   col3       │
+    │ ...                      │
+    └──────────────────────────┘
+    """
+    if not rows:
+        return []
+
+    col_count = max(len(r) for r in rows)
+    # normalise: all rows same length
+    padded_rows = [r + [""] * (col_count - len(r)) for r in rows]
+
+    col_widths = [0] * col_count
+    for row in padded_rows:
+        for i, cell in enumerate(row):
+            col_widths[i] = max(col_widths[i], _vlen(cell))
+
+    # content width = leading space + cells + 2-space separators + trailing space
+    content_w = 1 + sum(col_widths) + 2 * (col_count - 1) + 1
+
+    title_part = f"─ {title} "
+    fill = max(0, content_w - len(title_part))
+    top    = f"┌{title_part}{'─' * fill}┐"
+    bottom = f"└{'─' * content_w}┘"
+
+    lines = [top]
+    for row in padded_rows:
+        cells = [_vpad(cell, col_widths[i]) for i, cell in enumerate(row)]
+        inner = "  ".join(cells).rstrip()
+        lines.append(f"│ {_vpad(inner, content_w - 2)} │")
+    lines.append(bottom)
+    return lines
+
+
+# ── subprocess / fetch helpers ────────────────────────────────────────────
+
+def _run(args: list[str], *, cwd: Path | None = None) -> str:
+    try:
+        r = subprocess.run(args, capture_output=True, text=True, cwd=cwd)
+        return r.stdout.strip() if r.returncode == 0 else ""
+    except FileNotFoundError:
+        return ""
+
+
+def _fetch_json(url: str, timeout: int = 4) -> object:
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            return json.loads(resp.read())
+    except Exception:
+        return None
 
 
 # ── latest version fetchers ───────────────────────────────────────────────
@@ -123,148 +164,146 @@ _LATEST_FETCHERS: dict[str, object] = {
 }
 
 
-# ── tmux ──────────────────────────────────────────────────────────────────
+# ── section builders ──────────────────────────────────────────────────────
 
-def _tmux_status(project: Project) -> list[str]:
+def _tmux_rows(project: Project) -> list[Row]:
     running = session_exists(project.session)
-    state = "\033[32mrunning\033[0m" if running else _dim("not running")
-    return [
-        _section("tmux"),
-        _row("session", f"{project.session}  {state}"),
-    ]
+    state = _green("running") if running else _dim("not running")
+    return [["session", project.session, state]]
 
 
-# ── git ───────────────────────────────────────────────────────────────────
-
-def _git_status(path: Path) -> list[str]:
+def _git_rows(path: Path) -> list[Row] | None:
+    """Returns None if not a git repo."""
     if not (path / ".git").exists():
-        return [_section("git"), "  " + _dim("not a git repository")]
+        return None
 
-    lines: list[str] = [_section("git")]
+    rows: list[Row] = []
 
     branch = _run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=path)
-    lines.append(_row("branch", branch or _dim("unknown")))
+    rows.append(["branch", branch or _dim("unknown")])
 
     tag = _run(["git", "describe", "--tags", "--abbrev=0"], cwd=path)
-    lines.append(_row("latest tag", tag or _dim("no tags")))
+    rows.append(["latest tag", tag or _dim("—")])
 
     dirty = _run(["git", "status", "--short"], cwd=path)
     dirty_count = len([l for l in dirty.splitlines() if l.strip()])
-    if dirty_count:
-        lines.append(_row("uncommitted", f"\033[33m{dirty_count} file(s)\033[0m"))
-    else:
-        lines.append(_row("uncommitted", _dim("clean")))
+    rows.append([
+        "uncommitted",
+        _yellow(f"{dirty_count} file(s)") if dirty_count else _dim("clean"),
+    ])
 
+    # commits: separate columns for hash | subject | age
     log = _run(
-        ["git", "log", "--format=%C(yellow)%h%Creset %s %C(dim)(%cr)%Creset", "-3"],
+        ["git", "log", "--format=%h\x1f%s\x1f%cr", "-3"],
         cwd=path,
     )
     if log:
-        lines.append(_row("last commits", ""))
-        for entry in log.splitlines():
-            lines.append(f"    {entry}")
+        for i, entry in enumerate(log.splitlines()):
+            parts = entry.split("\x1f", 2)
+            h, subj, age = (parts + ["", "", ""])[:3]
+            label = "commits" if i == 0 else ""
+            rows.append([label, _yellow(h), subj, _dim(age)])
     else:
-        lines.append(_row("last commits", _dim("no commits")))
+        rows.append(["commits", _dim("none")])
 
-    return lines
-
-
-# ── runtimes ──────────────────────────────────────────────────────────────
-
-_RUNTIME_CHECKS: list[tuple[str, list[str], list[str]]] = [
-    (
-        "python",
-        ["pyproject.toml", "setup.py", "requirements.txt", ".python-version", "Pipfile"],
-        ["python3", "--version"],
-    ),
-    (
-        "node",
-        ["package.json", ".nvmrc", ".node-version"],
-        ["node", "--version"],
-    ),
-    (
-        "go",
-        ["go.mod"],
-        ["go", "version"],
-    ),
-    (
-        "rust",
-        ["Cargo.toml"],
-        ["rustc", "--version"],
-    ),
-    (
-        "deno",
-        ["deno.json", "deno.jsonc"],
-        ["deno", "--version"],
-    ),
-]
+    return rows
 
 
-def _detect_runtimes(path: Path) -> list[str]:
-    detected: list[tuple[str, str]] = []  # (label, installed_version)
-    for label, manifests, cmd in _RUNTIME_CHECKS:
+def _runtime_rows(path: Path) -> list[Row]:
+    checks: list[tuple[str, list[str], list[str]]] = [
+        ("python", ["pyproject.toml", "setup.py", "requirements.txt", ".python-version", "Pipfile"], ["python3", "--version"]),
+        ("node",   ["package.json", ".nvmrc", ".node-version"], ["node", "--version"]),
+        ("go",     ["go.mod"],        ["go", "version"]),
+        ("rust",   ["Cargo.toml"],    ["rustc", "--version"]),
+        ("deno",   ["deno.json", "deno.jsonc"], ["deno", "--version"]),
+    ]
+
+    detected: list[tuple[str, str, str]] = []  # (label, installed, binary)
+    for label, manifests, cmd in checks:
         if not any((path / m).exists() for m in manifests):
             continue
         version = _run(cmd)
-        detected.append((label, version.splitlines()[0] if version else ""))
+        installed = version.splitlines()[0] if version else ""
+        detected.append((label, installed, cmd[0]))
 
     if not detected:
         return []
 
     # fetch latest versions in parallel
     latest: dict[str, str | None] = {}
-    with ThreadPoolExecutor(max_workers=len(detected)) as pool:
+    with ThreadPoolExecutor(max_workers=max(1, len(detected))) as pool:
         futures = {
             pool.submit(_LATEST_FETCHERS[label]): label  # type: ignore[operator]
-            for label, _ in detected
+            for label, _, _ in detected
             if label in _LATEST_FETCHERS
         }
         for future in as_completed(futures):
-            label = futures[future]
+            lbl = futures[future]
             try:
-                latest[label] = future.result()
+                latest[lbl] = future.result()
             except Exception:
-                latest[label] = None
+                latest[lbl] = None
 
-    lines: list[str] = [_section("runtimes")]
-    for label, installed in detected:
+    def _norm(v: str) -> str:
+        return v.lstrip("v").split()[0]
+
+    rows: list[Row] = []
+    for label, installed, binary in detected:
+        bin_path = shutil.which(binary) or _dim("—")
+
         if not installed:
-            lines.append(_row(label, _dim("not found in PATH")))
+            rows.append([label, _dim("not in PATH"), _dim("—"), _dim("—"), bin_path])
+            continue
+
+        lat = latest.get(label)
+        latest_str = lat or _dim("—")
+        if lat:
+            status = _green("✓ up to date") if _norm(installed) == _norm(lat) else _yellow("update available")
         else:
-            # find the binary used for this runtime
-            binary = _RUNTIME_CHECKS[[r[0] for r in _RUNTIME_CHECKS].index(label)][2][0]
-            path_str = shutil.which(binary)
-            location = f"  \033[2m{path_str}\033[0m" if path_str else ""
-            lines.append(_row(label, _latest_badge(installed, latest.get(label)) + location))
+            status = _dim("—")
 
-    return lines
+        rows.append([label, installed, latest_str, status, bin_path])
+
+    return rows
 
 
-# ── opencode ──────────────────────────────────────────────────────────────
-
-def _opencode_status() -> list[str]:
+def _opencode_rows() -> list[Row]:
     version = _run(["opencode", "--version"])
     if not version:
         return []
-    return [_section("opencode"), _row("version", version.splitlines()[0])]
+    return [["version", version.splitlines()[0]]]
 
 
 # ── public entry point ────────────────────────────────────────────────────
 
 def print_status(project: Project) -> None:
-    path = project.path
+    print(f"\n{_bold(project.display_name)}  {_dim(str(project.path))}\n")
 
-    print(f"\033[1m{project.display_name}\033[0m  \033[2m{path}\033[0m")
+    # tmux
+    for line in _render_table("tmux", _tmux_rows(project)):
+        print(line)
 
-    sections: list[list[str]] = [
-        _tmux_status(project),
-        _git_status(path),
-        _detect_runtimes(path),
-        _opencode_status(),
-    ]
+    # git
+    git_rows = _git_rows(project.path)
+    if git_rows is None:
+        print("\n" + _dim("  (not a git repository)"))
+    else:
+        print()
+        for line in _render_table("git", git_rows):
+            print(line)
 
-    for section in sections:
-        for line in section:
+    # runtimes
+    runtime_rows = _runtime_rows(project.path)
+    if runtime_rows:
+        print()
+        for line in _render_table("runtimes  runtime · installed · latest · status · path", runtime_rows):
+            print(line)
+
+    # opencode
+    oc_rows = _opencode_rows()
+    if oc_rows:
+        print()
+        for line in _render_table("opencode", oc_rows):
             print(line)
 
     print()
