@@ -38,17 +38,13 @@ _shad_complete() {
         return
     fi
 
-    # Collect project tokens from `shad projects` (each line is either a bare
-    # project key or "  <group> <key>").  We parse them into two lists:
-    #   _shad_top   – top-level keys and group names
-    #   _shad_subs  – "group key" pairs (as single entries)
+    # Collect project tokens from `shad projects`.
     local raw
     raw=$(shad projects 2>/dev/null)
 
     local top_keys=()
     local group_keys=()
     while IFS= read -r line; do
-        # lines starting with two spaces are "  group key"
         if [[ "$line" =~ ^"  "([^ ]+)" "([^ ]+)$ ]]; then
             group_keys+=("${BASH_REMATCH[1]} ${BASH_REMATCH[2]}")
         elif [[ -n "$line" ]]; then
@@ -56,24 +52,39 @@ _shad_complete() {
         fi
     done <<< "$raw"
 
+    local actions="status stop"
+
     # shad projects <TAB>  →  top-level keys + group names
     if [[ ${COMP_CWORD} -eq 2 ]]; then
         COMPREPLY=($(compgen -W "${top_keys[*]}" -- "$cur"))
         return
     fi
 
-    # shad projects <group> <TAB>  →  sub-keys for that group
+    # shad projects <token> <TAB>
+    # Could be: sub-key of a group, OR action on a top-level project
     if [[ ${COMP_CWORD} -eq 3 ]]; then
-        local group_tok="${words[2]}"
+        local tok="${words[2]}"
+        # Check if tok matches a group
         local sub_candidates=()
         for entry in "${group_keys[@]}"; do
             local g="${entry%% *}"
             local k="${entry##* }"
-            if [[ "$g" == "$group_tok"* ]]; then
+            if [[ "$g" == "$tok"* ]]; then
                 sub_candidates+=("$k")
             fi
         done
-        COMPREPLY=($(compgen -W "${sub_candidates[*]}" -- "$cur"))
+        if [[ ${#sub_candidates[@]} -gt 0 ]]; then
+            COMPREPLY=($(compgen -W "${sub_candidates[*]}" -- "$cur"))
+        else
+            # tok is a top-level project — offer actions
+            COMPREPLY=($(compgen -W "$actions" -- "$cur"))
+        fi
+        return
+    fi
+
+    # shad projects <group> <project> <TAB>  →  actions
+    if [[ ${COMP_CWORD} -eq 4 ]]; then
+        COMPREPLY=($(compgen -W "$actions" -- "$cur"))
         return
     fi
 }
@@ -115,12 +126,20 @@ _shad() {
                         fi
                     done <<< "$raw"
 
+                    local actions=(status stop)
+
                     if [[ ${#words} -eq 3 ]]; then
                         _values 'project' "${top_keys[@]}"
                     elif [[ ${#words} -eq 4 ]]; then
-                        local grp="${words[3]}"
-                        local subs=(${=group_map[$grp]})
-                        _values 'project' "${subs[@]}"
+                        local tok="${words[3]}"
+                        local subs=(${=group_map[$tok]})
+                        if [[ ${#subs} -gt 0 ]]; then
+                            _values 'project' "${subs[@]}"
+                        else
+                            _values 'action' "${actions[@]}"
+                        fi
+                    elif [[ ${#words} -eq 5 ]]; then
+                        _values 'action' "${actions[@]}"
                     fi
                     ;;
             esac

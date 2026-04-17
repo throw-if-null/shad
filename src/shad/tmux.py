@@ -103,3 +103,12 @@ def open_project(project: Project, defaults: Defaults) -> None:
     if not session_exists(project.session):
         _create_session(project, defaults)
     _attach(project.session)
+
+
+def stop_project(project: Project) -> None:
+    """Kill the tmux session for a project, if it is running."""
+    if not session_exists(project.session):
+        print(f"session '{project.session}' is not running")
+        return
+    _run(["tmux", "kill-session", "-t", project.session])
+    print(f"session '{project.session}' stopped")
