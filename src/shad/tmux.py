@@ -74,9 +74,15 @@ def _create_session(project: Project, defaults: Defaults) -> None:
     # 6. Run gitui in the bottom-right pane
     _run(["tmux", "send-keys", "-t", f"{session}:0.2", "gitui\n"])
 
-    # 7. Select the top pane so focus lands there on attach
-    _run(["tmux", "select-pane", "-t", f"{session}:0.0"])
+    # 7. Run status in the bottom-left pane
+    if project.group:
+        status_cmd = f"shad projects {project.group} {project.key} --status"
+    else:
+        status_cmd = f"shad projects {project.key} --status"
+    _run(["tmux", "send-keys", "-t", f"{session}:0.1", status_cmd + "\n"])
 
+    # 8. Select the top pane so focus lands there on attach
+    _run(["tmux", "select-pane", "-t", f"{session}:0.0"])
 
 def _attach(session: str) -> None:
     """Attach or switch to the named tmux session."""

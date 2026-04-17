@@ -51,6 +51,10 @@ def _yellow(text: str) -> str:
     return f"\033[33m{text}\033[0m"
 
 
+def _red(text: str) -> str:
+    return f"\033[31m{text}\033[0m"
+
+
 def _bold(text: str) -> str:
     return f"\033[1m{text}\033[0m"
 
@@ -255,6 +259,23 @@ def _runtime_rows(path: Path) -> list[Row]:
                 return s.split()[0]
         return v.strip()
 
+    def _version_tuple(v: str) -> tuple[int, ...]:
+        try:
+            return tuple(int(x) for x in v.split("."))
+        except ValueError:
+            return ()
+
+    def _colorize_latest(installed_v: str, latest_v: str) -> str:
+        i = _version_tuple(installed_v)
+        l = _version_tuple(latest_v)
+        if not i or not l or i == l:
+            return latest_v
+        if l[0] != i[0]:
+            return _red(latest_v)
+        if len(l) > 1 and len(i) > 1 and l[1] != i[1]:
+            return _yellow(latest_v)
+        return _green(latest_v)
+
     rows: list[Row] = []
     for label, installed, binary in detected:
         bin_path = shutil.which(binary) or _dim("—")
@@ -264,7 +285,11 @@ def _runtime_rows(path: Path) -> list[Row]:
 
         installed_str = _semver(installed)
         lat = latest.get(label)
-        latest_str = _semver(lat) if lat else _dim("—")
+        if lat:
+            latest_v = _semver(lat)
+            latest_str = _colorize_latest(installed_str, latest_v)
+        else:
+            latest_str = _dim("—")
 
         rows.append([label, installed_str, latest_str, bin_path])
 
