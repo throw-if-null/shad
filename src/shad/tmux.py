@@ -5,7 +5,7 @@ Layout on first creation:
   ┌─────────────────────────────────┐
   │  top pane  (top_command)        │  65% height
   ├─────────────────────┬───────────┤
-  │  bottom-left  (70%) │ right 30% │  35% height
+  │  bottom-left  (70%) │  gitui    │  35% height
   └─────────────────────┴───────────┘
 
 If run inside an existing tmux session ($TMUX is set), uses
@@ -71,7 +71,10 @@ def _create_session(project: Project, defaults: Defaults) -> None:
     ])
     # After split: pane 0 = top, pane 1 = bottom-left, pane 2 = bottom-right
 
-    # 6. Select the top pane so focus lands there on attach
+    # 6. Run gitui in the bottom-right pane
+    _run(["tmux", "send-keys", "-t", f"{session}:0.2", "gitui\n"])
+
+    # 7. Select the top pane so focus lands there on attach
     _run(["tmux", "select-pane", "-t", f"{session}:0.0"])
 
 
