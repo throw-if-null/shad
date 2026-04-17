@@ -1,0 +1,38 @@
+# shad.example.toml
+# Copy to ~/.config/shad/shad.toml and adjust paths.
+
+[defaults]
+top_command    = "opencode -c"
+bottom_percent = 35   # bottom area takes this % of window height
+right_percent  = 30   # right pane takes this % of bottom width
+
+# ── Top-level projects ────────────────────────────────────────────────────
+# Access: shad projects kb
+
+[projects.kb]
+path    = "/home/backsippan/gh/kb"
+# session = "kb"  ← omit to use the project key as the session name
+
+[projects.orfe]
+path    = "/home/backsippan/gh/tin/orfe"
+
+# ── Grouped projects ──────────────────────────────────────────────────────
+# Access: shad projects alvr db
+#         shad projects alvr kb
+#         shad projects al d    (prefix matching works per level)
+
+[projects.alvr.db]
+path    = "/home/backsippan/gh/alvr/db"
+# session = "alvr-db"  ← omit to default to "<group>-<key>"
+
+[projects.alvr.kb]
+path    = "/home/backsippan/gh/alvr/kb"
+
+[projects.alvr.migrators]
+path    = "/home/backsippan/gh/alvr/migrators"
+
+[projects.alvr.portal]
+path    = "/home/backsippan/gh/alvr/portal"
+
+[projects.alvr.swisher]
+path    = "/home/backsippan/gh/alvr/swisher"

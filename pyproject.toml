@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "shad"
+version = "0.1.0"
+description = "Attach or create project-specific tmux sessions from the current terminal"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+shad = "shad.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
