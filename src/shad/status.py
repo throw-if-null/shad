@@ -244,24 +244,27 @@ def _runtime_rows(path: Path) -> list[Row]:
             except Exception:
                 latest[lbl] = None
 
-    def _norm(v: str) -> str:
-        return v.lstrip("v").split()[0]
+    def _semver(v: str) -> str:
+        """Strip leading 'v' and drop any extra words (e.g. 'Python 3.14.3' → '3.14.3')."""
+        parts = v.lstrip("v").split()
+        for p in parts:
+            if p[0].isdigit():
+                return p
+        return parts[0] if parts else v
 
     rows: list[Row] = []
     for label, installed, binary in detected:
         bin_path = shutil.which(binary) or _dim("—")
 
         if not installed:
-            rows.append([label, _dim("not in PATH"), _dim("—"), bin_path])
+            rows.append([label, _dim("—"), _dim("—"), bin_path])
             continue
 
+        installed_str = _semver(installed)
         lat = latest.get(label)
-        if lat:
-            status = _green("✓ up to date") if _norm(installed) == _norm(lat) else _yellow(f"update available → {lat}")
-        else:
-            status = _dim("—")
+        latest_str = _semver(lat) if lat else _dim("—")
 
-        rows.append([label, installed, status, bin_path])
+        rows.append([label, installed_str, latest_str, bin_path])
 
     return rows
 
@@ -295,7 +298,7 @@ def print_status(project: Project) -> None:
     runtime_rows = _runtime_rows(project.path)
     if runtime_rows:
         print()
-        for line in _render_table("runtimes  runtime · installed · status · path", runtime_rows):
+        for line in _render_table("runtimes  name · installed · latest · path", runtime_rows):
             print(line)
 
     # opencode
