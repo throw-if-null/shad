@@ -26,6 +26,7 @@ from shad.tmux import open_project, stop_project
 from shad.status import print_status
 from shad.completion import print_completion
 from shad.init import cmd_init
+from shad.cheat import cmd_cheat
 
 ACTIONS = ("status", "stop")
 
@@ -215,6 +216,19 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
+    sub.add_parser(
+        "cheat",
+        help="Show a tmux cheat sheet in a popup (or stdout if outside tmux)",
+        description=(
+            "Display a tmux key-binding reference.\n\n"
+            "Inside tmux  : opens a floating popup; dismiss with q\n"
+            "Outside tmux : prints the cheat sheet to stdout\n\n"
+            "Recommended ~/.tmux.conf binding:\n"
+            "  bind-key F12 run-shell \"shad cheat\""
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+
     return parser
 
 
@@ -232,6 +246,10 @@ def main() -> None:
 
     if args.command == "init":
         cmd_init()
+        return
+
+    if args.command == "cheat":
+        cmd_cheat()
         return
 
     cfg: Config = load()

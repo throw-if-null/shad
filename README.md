@@ -76,6 +76,26 @@ shad projects alvr
 # Open a grouped project
 shad projects alvr db
 shad projects al d      # prefix matching per level
+
+# Show a tmux cheat sheet popup
+shad cheat
+```
+
+## tmux cheat sheet
+
+`shad cheat` opens a floating tmux popup with a key-binding reference.
+Dismiss it with `q`.
+
+Add this line to `~/.tmux.conf` to trigger it with `prefix + F12`:
+
+```
+bind-key F12 run-shell "shad cheat"
+```
+
+Then reload your config (`prefix + r` if you have a reload binding, or):
+
+```sh
+tmux source-file ~/.tmux.conf
 ```
 
 ## tmux layout
