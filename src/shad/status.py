@@ -20,88 +20,15 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+from rich.console import Console
+from rich.table import Table
+from rich.text import Text
+from rich import box
+
 from shad.config import Project
 from shad.tmux import session_exists
 
-
-# ── ANSI helpers ──────────────────────────────────────────────────────────
-
-_ANSI_RE = re.compile(r"\033\[[0-9;]*m")
-
-
-def _vlen(s: str) -> int:
-    """Visible length of a string, ignoring ANSI escape codes."""
-    return len(_ANSI_RE.sub("", s))
-
-
-def _vpad(s: str, width: int) -> str:
-    """Pad *s* to *width* visible characters."""
-    return s + " " * max(0, width - _vlen(s))
-
-
-def _dim(text: str) -> str:
-    return f"\033[2m{text}\033[0m"
-
-
-def _green(text: str) -> str:
-    return f"\033[32m{text}\033[0m"
-
-
-def _yellow(text: str) -> str:
-    return f"\033[33m{text}\033[0m"
-
-
-def _red(text: str) -> str:
-    return f"\033[31m{text}\033[0m"
-
-
-def _bold(text: str) -> str:
-    return f"\033[1m{text}\033[0m"
-
-
-# ── Table renderer ────────────────────────────────────────────────────────
-
-Row = list[str]  # one cell per column
-
-
-def _render_table(title: str, rows: list[Row]) -> list[str]:
-    """
-    Render *rows* as a box-drawing table with a titled top border.
-
-    ┌─ title ──────────────────┐
-    │ col1   col2   col3       │
-    │ ...                      │
-    └──────────────────────────┘
-    """
-    if not rows:
-        return []
-
-    col_count = max(len(r) for r in rows)
-    # normalise: all rows same length
-    padded_rows = [r + [""] * (col_count - len(r)) for r in rows]
-
-    col_widths = [0] * col_count
-    for row in padded_rows:
-        for i, cell in enumerate(row):
-            col_widths[i] = max(col_widths[i], _vlen(cell))
-
-    # content width = leading space + cells + 2-space separators + trailing space
-    content_w = 1 + sum(col_widths) + 2 * (col_count - 1) + 1
-
-    title_part = f"─ {title} "
-    # ensure the box is never narrower than the title
-    content_w = max(content_w, len(title_part))
-    fill = content_w - len(title_part)
-    top    = f"┌{title_part}{'─' * fill}┐"
-    bottom = f"└{'─' * content_w}┘"
-
-    lines = [top]
-    for row in padded_rows:
-        cells = [_vpad(cell, col_widths[i]) for i, cell in enumerate(row)]
-        inner = "  ".join(cells).rstrip()
-        lines.append(f"│ {_vpad(inner, content_w - 2)} │")
-    lines.append(bottom)
-    return lines
+console = Console()
 
 
 # ── subprocess / fetch helpers ────────────────────────────────────────────
@@ -170,52 +97,74 @@ _LATEST_FETCHERS: dict[str, object] = {
 }
 
 
+# ── table helpers ─────────────────────────────────────────────────────────
+
+def _make_table(title: str) -> Table:
+    t = Table(
+        title=title,
+        box=box.ROUNDED,
+        show_header=False,
+        title_justify="left",
+        title_style="bold cyan",
+        border_style="bright_black",
+        pad_edge=True,
+        show_edge=True,
+        padding=(0, 1),
+    )
+    return t
+
+
 # ── section builders ──────────────────────────────────────────────────────
 
-def _tmux_rows(project: Project) -> list[Row]:
+def _print_tmux(project: Project) -> None:
+    t = _make_table("tmux")
     running = session_exists(project.session)
-    state = _green("running") if running else _dim("not running")
-    return [["session", project.session, state]]
+    state = Text("running", style="bold green") if running else Text("not running", style="dim")
+    t.add_row(Text("session", style="dim"), Text(project.session), state)
+    console.print(t)
 
 
-def _git_rows(path: Path) -> list[Row] | None:
-    """Returns None if not a git repo."""
+def _print_git(path: Path) -> None:
     if not (path / ".git").exists():
-        return None
+        console.print(Text("  (not a git repository)", style="dim"))
+        return
 
-    rows: list[Row] = []
+    t = _make_table("git")
 
     branch = _run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=path)
-    rows.append(["branch", branch or _dim("unknown")])
+    t.add_row(Text("branch", style="dim"), Text(branch or "unknown", style="dim"))
 
     tag = _run(["git", "describe", "--tags", "--abbrev=0"], cwd=path)
-    rows.append(["latest tag", tag or _dim("—")])
+    t.add_row(Text("latest tag", style="dim"), Text(tag if tag else "—", style="" if tag else "dim"))
 
     dirty = _run(["git", "status", "--short"], cwd=path)
     dirty_count = len([l for l in dirty.splitlines() if l.strip()])
-    rows.append([
-        "uncommitted",
-        _yellow(f"{dirty_count} file(s)") if dirty_count else _dim("clean"),
-    ])
+    if dirty_count:
+        dirty_val = Text(f"{dirty_count} file(s)", style="yellow")
+    else:
+        dirty_val = Text("clean", style="dim")
+    t.add_row(Text("uncommitted", style="dim"), dirty_val)
 
-    # commits: separate columns for hash | subject | age
-    log = _run(
-        ["git", "log", "--format=%h\x1f%s\x1f%cr", "-3"],
-        cwd=path,
-    )
+    log = _run(["git", "log", "--format=%h\x1f%s\x1f%cr", "-3"], cwd=path)
     if log:
         for i, entry in enumerate(log.splitlines()):
             parts = entry.split("\x1f", 2)
             h, subj, age = (parts + ["", "", ""])[:3]
-            label = "commits" if i == 0 else ""
-            rows.append([label, _yellow(h), subj, _dim(age)])
+            label = Text("commits", style="dim") if i == 0 else Text("")
+            row = Text()
+            row.append(h, style="yellow")
+            row.append("  ")
+            row.append(subj)
+            row.append("  ")
+            row.append(age, style="dim")
+            t.add_row(label, row)
     else:
-        rows.append(["commits", _dim("none")])
+        t.add_row(Text("commits", style="dim"), Text("none", style="dim"))
 
-    return rows
+    console.print(t)
 
 
-def _runtime_rows(path: Path) -> list[Row]:
+def _print_runtimes(path: Path) -> None:
     checks: list[tuple[str, list[str], list[str]]] = [
         ("python", ["pyproject.toml", "setup.py", "requirements.txt", ".python-version", "Pipfile"], ["python3", "--version"]),
         ("node",   ["package.json", ".nvmrc", ".node-version"], ["node", "--version"]),
@@ -224,14 +173,16 @@ def _runtime_rows(path: Path) -> list[Row]:
         ("deno",   ["deno.json", "deno.jsonc"], ["deno", "--version"]),
     ]
 
-    detected: list[tuple[str, str, str]] = []  # (label, installed, binary)
+    detected: list[tuple[str, str, str]] = []
     for label, _manifests, cmd in checks:
         version = _run(cmd)
         installed = version.splitlines()[0] if version else ""
         detected.append((label, installed, cmd[0]))
 
+    # filter out runtimes not in PATH
+    detected = [(l, v, b) for l, v, b in detected if v]
     if not detected:
-        return []
+        return
 
     # fetch latest versions in parallel
     latest: dict[str, str | None] = {}
@@ -249,9 +200,7 @@ def _runtime_rows(path: Path) -> list[Row]:
                 latest[lbl] = None
 
     def _semver(v: str) -> str:
-        """Extract a clean version number from a runtime version string."""
         for part in v.split():
-            # handle 'go1.24.2' style
             s = part.lstrip("v")
             if s.startswith("go") and s[2:3].isdigit():
                 return s[2:]
@@ -265,74 +214,61 @@ def _runtime_rows(path: Path) -> list[Row]:
         except ValueError:
             return ()
 
-    def _colorize_latest(installed_v: str, latest_v: str) -> str:
+    def _version_style(installed_v: str, latest_v: str) -> str:
         i = _version_tuple(installed_v)
         l = _version_tuple(latest_v)
         if not i or not l or i == l:
-            return latest_v
+            return "dim"
         if l[0] != i[0]:
-            return _red(latest_v)
+            return "red"
         if len(l) > 1 and len(i) > 1 and l[1] != i[1]:
-            return _yellow(latest_v)
-        return _green(latest_v)
+            return "yellow"
+        return "green"
 
-    rows: list[Row] = []
+    t = _make_table("runtimes")
+    t.add_column(style="dim")       # name
+    t.add_column()                  # installed
+    t.add_column()                  # latest
+    t.add_column(style="dim")       # path
+
     for label, installed, binary in detected:
-        bin_path = shutil.which(binary) or _dim("—")
-
-        if not installed:
-            continue  # skip runtimes not in PATH
-
+        bin_path = shutil.which(binary) or "—"
         installed_str = _semver(installed)
         lat = latest.get(label)
         if lat:
             latest_v = _semver(lat)
-            latest_str = _colorize_latest(installed_str, latest_v)
+            style = _version_style(installed_str, latest_v)
+            latest_text = Text(latest_v, style=style)
         else:
-            latest_str = _dim("—")
+            latest_text = Text("—", style="dim")
 
-        rows.append([label, installed_str, latest_str, bin_path])
+        t.add_row(label, installed_str, latest_text, bin_path)
 
-    return rows
+    console.print(t)
 
 
-def _opencode_rows() -> list[Row]:
+def _print_opencode() -> None:
     version = _run(["opencode", "--version"])
     if not version:
-        return []
-    return [["version", version.splitlines()[0]]]
+        return
+    t = _make_table("opencode")
+    t.add_row(Text("version", style="dim"), Text(version.splitlines()[0]))
+    console.print(t)
 
 
 # ── public entry point ────────────────────────────────────────────────────
 
 def print_status(project: Project) -> None:
-    print(f"\n{_bold(project.display_name)}  {_dim(str(project.path))}\n")
-
-    # tmux
-    for line in _render_table("tmux", _tmux_rows(project)):
-        print(line)
-
-    # git
-    git_rows = _git_rows(project.path)
-    if git_rows is None:
-        print("\n" + _dim("  (not a git repository)"))
-    else:
-        print()
-        for line in _render_table("git", git_rows):
-            print(line)
-
-    # runtimes
-    runtime_rows = _runtime_rows(project.path)
-    if runtime_rows:
-        print()
-        for line in _render_table("runtimes  name · installed · latest · path", runtime_rows):
-            print(line)
-
-    # opencode
-    oc_rows = _opencode_rows()
-    if oc_rows:
-        print()
-        for line in _render_table("opencode", oc_rows):
-            print(line)
-
-    print()
+    console.print()
+    console.print(
+        Text(project.display_name, style="bold bright_white") +
+        Text(f"  {project.path}", style="dim")
+    )
+    console.print()
+    _print_tmux(project)
+    console.print()
+    _print_git(project.path)
+    console.print()
+    _print_runtimes(project.path)
+    _print_opencode()
+    console.print()

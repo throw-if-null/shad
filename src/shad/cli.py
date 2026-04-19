@@ -20,6 +20,9 @@ from __future__ import annotations
 import argparse
 import sys
 
+from rich.console import Console
+from rich.text import Text
+
 from shad import __version__
 from shad.config import Config, load, resolve_prefix
 from shad.tmux import open_project, stop_project
@@ -27,6 +30,10 @@ from shad.status import print_status
 from shad.completion import print_completion
 from shad.init import cmd_init
 from shad.cheat import cmd_cheat
+from shad.banner import print_banner
+
+console = Console()
+err_console = Console(stderr=True)
 
 ACTIONS = ("status", "stop")
 
@@ -37,42 +44,41 @@ ACTIONS = ("status", "stop")
 
 def _list_all(cfg: Config) -> None:
     """Print every project and group to stdout."""
-    items: list[str] = []
+    if not cfg.projects and not cfg.groups:
+        console.print(Text("no projects configured", style="dim"))
+        return
 
     for key in sorted(cfg.projects):
-        items.append(key)
+        console.print(Text("  ● ", style="cyan") + Text(key, style="bright_white"))
 
     for group in sorted(cfg.groups):
-        items.append(group)          # group header
+        console.print(Text(f"  ◆ {group}", style="bold cyan"))
         for sub in sorted(cfg.groups[group]):
-            items.append(f"  {group} {sub}")
-
-    if not items:
-        print("no projects configured")
-    else:
-        print("\n".join(items))
+            console.print(Text("    ● ", style="cyan") + Text(f"{group} {sub}", style="white"))
 
 
 def _list_group(cfg: Config, group_name: str) -> None:
     """Print sub-projects belonging to *group_name*."""
     group = cfg.groups[group_name]
     if not group:
-        print(f"group '{group_name}' has no sub-projects")
+        console.print(Text(f"group '{group_name}' has no sub-projects", style="dim"))
     else:
+        console.print(Text(f"  ◆ {group_name}", style="bold cyan"))
         for key in sorted(group):
-            print(f"{group_name} {key}")
+            console.print(Text("    ● ", style="cyan") + Text(f"{group_name} {key}", style="white"))
 
 
 def _run_action(cfg: Config, project, action: str | None) -> None:
     """Dispatch open / status / stop for a resolved project."""
     if action is None or action == "open":
+        print_banner()
         open_project(project, cfg.defaults)
     elif action == "status":
         print_status(project)
     elif action == "stop":
         stop_project(project)
     else:
-        print(f"error: unknown action '{action}'; available: status, stop", file=sys.stderr)
+        err_console.print(Text(f"✗ unknown action '{action}'; available: status, stop", style="bold red"))
         sys.exit(1)
 
 
@@ -98,14 +104,14 @@ def cmd_projects(cfg: Config, args: argparse.Namespace) -> None:
         match = resolve_prefix(top_candidates, token)
 
         if match is None:
-            print(f"error: no project or group matching '{token}'", file=sys.stderr)
+            err_console.print(Text(f"✗ no project or group matching '{token}'", style="bold red"))
             sys.exit(1)
 
         if match in cfg.projects:
             _run_action(cfg, cfg.projects[match], action)
         else:
             if action:
-                print(f"error: '{match}' is a group, not a project; specify a project within the group", file=sys.stderr)
+                err_console.print(Text(f"✗ '{match}' is a group, not a project; specify a project within the group", style="bold red"))
                 sys.exit(1)
             _list_group(cfg, match)
         return
@@ -117,34 +123,34 @@ def cmd_projects(cfg: Config, args: argparse.Namespace) -> None:
         group_match = resolve_prefix(list(cfg.groups), group_token)
         if group_match is None:
             if group_token in cfg.projects or any(k.startswith(group_token) for k in cfg.projects):
-                print(
-                    f"error: '{group_token}' resolves to a top-level project, "
-                    f"not a group; did you mean: shad projects {group_token}?",
-                    file=sys.stderr,
-                )
+                err_console.print(Text(
+                    f"✗ '{group_token}' resolves to a top-level project, not a group; "
+                    f"did you mean: shad projects {group_token}?",
+                    style="bold red",
+                ))
             else:
-                print(f"error: no group matching '{group_token}'", file=sys.stderr)
+                err_console.print(Text(f"✗ no group matching '{group_token}'", style="bold red"))
             sys.exit(1)
 
         group_projects = cfg.groups[group_match]
         proj_match = resolve_prefix(list(group_projects), proj_token)
         if proj_match is None:
-            print(
-                f"error: no project matching '{proj_token}' in group '{group_match}'; "
+            err_console.print(Text(
+                f"✗ no project matching '{proj_token}' in group '{group_match}'; "
                 f"available: {', '.join(sorted(group_projects))}",
-                file=sys.stderr,
-            )
+                style="bold red",
+            ))
             sys.exit(1)
 
         _run_action(cfg, group_projects[proj_match], action)
         return
 
     # --- too many tokens ---
-    print(
-        f"error: too many arguments ({len(parts)}); "
+    err_console.print(Text(
+        f"✗ too many arguments ({len(parts)}); "
         "usage: shad projects [<group>] [<name>] [status|stop]",
-        file=sys.stderr,
-    )
+        style="bold red",
+    ))
     sys.exit(1)
 
 

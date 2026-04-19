@@ -2,7 +2,7 @@
 OpenCode session picker for shad.
 
 Queries the opencode SQLite database for recent sessions associated with a
-project path, then presents an interactive arrow-key picker (via curses).
+project path, then presents an interactive arrow-key picker rendered with Rich.
 
 Public API
 ----------
@@ -15,25 +15,28 @@ pick_opencode_cmd(project_path, base_opencode_cmd) -> str
 
 from __future__ import annotations
 
-import curses
 import re
 import sqlite3
 import sys
+import os
+import tty
+import termios
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+
+from io import StringIO
+
+from rich.console import Console
+from rich.text import Text
+from rich.panel import Panel
 
 DB_PATH = Path.home() / ".local" / "share" / "opencode" / "opencode.db"
 SESSION_LIMIT = 5
 
 _NEW_SESSION_RE = re.compile(r"^New session\s*-\s*\d{4}-\d{2}-\d{2}T[\d:.]+Z$")
 
-# ── ANSI colour helpers (used outside curses for fallback) ─────────────────
-_RESET  = "\033[0m"
-_BOLD   = "\033[1m"
-_DIM    = "\033[2m"
-_CYAN   = "\033[36m"
-_GREEN  = "\033[32m"
+_TITLE_MAX = 52
 
 
 @dataclass
@@ -80,129 +83,148 @@ def _query_sessions(project_path: Path, limit: int = SESSION_LIMIT) -> list[OcSe
         return []
 
 
-# ── Curses picker ──────────────────────────────────────────────────────────
-
-_TITLE_MAX = 52  # max title chars before truncation
-
-
 def _truncate(text: str, max_len: int) -> str:
     return text if len(text) <= max_len else text[: max_len - 1] + "…"
 
 
-def _run_picker(stdscr, sessions: list[OcSession], project_name: str) -> int | None:
+def _render_picker(sessions: list[OcSession], selected: int, project_name: str) -> Panel:
+    """Build the Rich renderable for the current picker state."""
+    items = [None] + sessions  # index 0 = new session sentinel
+
+    lines = Text()
+    for i, item in enumerate(items):
+        is_sel = i == selected
+        pointer = "❯ " if is_sel else "  "
+
+        if item is None:
+            row = Text()
+            row.append(pointer, style="bold bright_green" if is_sel else "dim")
+            row.append("+ New session", style="bold" if is_sel else "dim")
+        else:
+            date_part = item.updated_str + "  "
+            title_part = _truncate(item.display_title, _TITLE_MAX)
+
+            row = Text()
+            row.append(pointer, style="bold bright_green" if is_sel else "")
+            row.append(date_part, style="dim")
+            row.append(title_part, style="bold bright_white" if is_sel else "white")
+
+        lines.append_text(row)
+        lines.append("\n")
+
+    footer = Text("\n ↑↓ / j k  navigate   Enter  select   q  cancel", style="dim")
+    lines.append_text(footer)
+
+    return Panel(
+        lines,
+        title=f"[bold cyan]opencode session[/bold cyan]  [dim]─[/dim]  [bright_white]{project_name}[/bright_white]",
+        border_style="cyan",
+        padding=(0, 1),
+    )
+
+
+def _read_key(fd: int) -> str:
+    """Read a single keypress (including escape sequences) from file descriptor."""
+    ch = os.read(fd, 1)
+    if ch == b"\x1b":
+        # try to read escape sequence
+        try:
+            rest = os.read(fd, 2)
+            return (ch + rest).decode("utf-8", errors="replace")
+        except Exception:
+            return "\x1b"
+    return ch.decode("utf-8", errors="replace")
+
+
+def _render_panel(sessions: list[OcSession], selected: int, project_name: str, width: int) -> bytes:
+    """Render picker panel to ANSI bytes."""
+    buf = StringIO()
+    Console(file=buf, force_terminal=True, width=width, highlight=False).print(
+        _render_picker(sessions, selected, project_name)
+    )
+    return buf.getvalue().encode()
+
+
+def _run_picker(sessions: list[OcSession], project_name: str) -> int | None:
     """
-    Curses UI.  Returns the index into [NEW_SESSION] + sessions, or None if
-    cancelled.  Index 0 = New session, 1..n = sessions[0..n-1].
+    Picker using cursor-save/restore redraw via os.write directly to tty fd.
+    Returns index into [NEW_SESSION] + sessions, or None if cancelled.
+    Index 0 = New session, 1..n = sessions[0..n-1].
     """
-    curses.curs_set(0)
-    curses.use_default_colors()
+    import shutil as _shutil
 
-    # colour pairs
-    curses.init_pair(1, curses.COLOR_CYAN,  -1)   # header
-    curses.init_pair(2, curses.COLOR_GREEN, -1)   # selected row pointer
-    curses.init_pair(3, curses.COLOR_WHITE, -1)   # dim date
-
-    items = [None] + sessions   # index 0 = new session sentinel
-
-    selected = 0
+    items = [None] + sessions
     total = len(items)
-
-    while True:
-        stdscr.erase()
-        height, width = stdscr.getmaxyx()
-
-        # ── header ──
-        header = f" opencode session  ─  {project_name} "
-        stdscr.addstr(0, 0, header, curses.color_pair(1) | curses.A_BOLD)
-        stdscr.addstr(1, 0, " " + "─" * (len(header) - 2))
-
-        # ── rows ──
-        for i, item in enumerate(items):
-            row = 3 + i
-            if row >= height - 2:
-                break
-
-            is_sel = i == selected
-            pointer = "❯ " if is_sel else "  "
-
-            if item is None:
-                label = "+ New session"
-                attr = curses.A_BOLD if is_sel else curses.A_DIM
-                stdscr.addstr(row, 2, pointer + label, attr)
-            else:
-                date_part = item.updated_str + "  "
-                title_part = _truncate(item.display_title, _TITLE_MAX)
-
-                if is_sel:
-                    stdscr.addstr(row, 2, pointer, curses.color_pair(2) | curses.A_BOLD)
-                    stdscr.addstr(row, 4, date_part, curses.A_DIM)
-                    stdscr.addstr(row, 4 + len(date_part), title_part, curses.A_BOLD)
-                else:
-                    stdscr.addstr(row, 2, pointer)
-                    stdscr.addstr(row, 4, date_part, curses.A_DIM)
-                    stdscr.addstr(row, 4 + len(date_part), title_part)
-
-        # ── footer ──
-        footer = " ↑↓ navigate   Enter select   q cancel "
-        stdscr.addstr(height - 1, 0, footer, curses.A_DIM)
-
-        stdscr.refresh()
-
-        key = stdscr.getch()
-
-        if key in (curses.KEY_UP, ord("k")):
-            selected = (selected - 1) % total
-        elif key in (curses.KEY_DOWN, ord("j")):
-            selected = (selected + 1) % total
-        elif key in (curses.KEY_ENTER, ord("\n"), ord("\r")):
-            return selected
-        elif key in (ord("q"), ord("Q"), 27):  # 27 = Esc
-            return None
-
-
-def _pick_with_curses(sessions: list[OcSession], project_name: str) -> int | None:
-    """Wrapper that opens curses on /dev/tty so it works even when stdout is piped."""
-    import os
+    selected = 0
 
     try:
-        # Open the controlling terminal directly so curses has a real TTY
         tty_fd = os.open("/dev/tty", os.O_RDWR)
-        tty = open(tty_fd, "rb+", buffering=0)
-        old_stdin  = sys.stdin
-        old_stdout = sys.stdout
-        sys.stdin  = open("/dev/tty", "r")
-        sys.stdout = open("/dev/tty", "w")
+    except OSError:
+        return None
 
-        result = curses.wrapper(lambda s: _run_picker(s, sessions, project_name))
+    term_width = _shutil.get_terminal_size().columns
+    old_settings = termios.tcgetattr(tty_fd)
 
-        sys.stdin  = old_stdin
-        sys.stdout = old_stdout
-        tty.close()
-        return result
+    SAVE    = b"\033[s"       # save cursor position
+    RESTORE = b"\033[u"       # restore cursor position
+    CLEAR   = b"\033[J"       # clear from cursor to end of screen
+
+    def draw(first: bool = False) -> None:
+        content = _render_panel(sessions, selected, project_name, term_width)
+        if first:
+            os.write(tty_fd, SAVE + content)
+        else:
+            os.write(tty_fd, RESTORE + CLEAR + content)
+
+    def cleanup() -> None:
+        os.write(tty_fd, RESTORE + CLEAR)
+        termios.tcsetattr(tty_fd, termios.TCSADRAIN, old_settings)
+        os.close(tty_fd)
+
+    try:
+        tty.setraw(tty_fd)
+        draw(first=True)
+
+        while True:
+            key = _read_key(tty_fd)
+
+            if key in ("\x1b[A", "k"):
+                selected = (selected - 1) % total
+                draw()
+            elif key in ("\x1b[B", "j"):
+                selected = (selected + 1) % total
+                draw()
+            elif key in ("\r", "\n"):
+                cleanup()
+                return selected
+            elif key in ("q", "Q", "\x1b"):
+                cleanup()
+                return None
     except Exception:
+        termios.tcsetattr(tty_fd, termios.TCSADRAIN, old_settings)
+        os.close(tty_fd)
         return None
 
 
 # ── Public API ─────────────────────────────────────────────────────────────
 
-def pick_opencode_cmd(project_path: Path, base_cmd: str) -> str:
+def pick_opencode_cmd(project_path: Path, base_cmd: str) -> str | None:
     """
     Show an interactive session picker and return the opencode command to run.
 
-    Falls back to *base_cmd* (new session) on cancel, error, or no sessions.
+    Returns None if the user explicitly cancelled (q / Esc).
+    Falls back to base_cmd on error or no sessions.
     """
     sessions = _query_sessions(project_path)
     if not sessions:
         return base_cmd
 
     project_name = project_path.name
-    chosen = _pick_with_curses(sessions, project_name)
+    chosen = _run_picker(sessions, project_name)
 
     if chosen is None:
-        # cancelled
-        return base_cmd
+        return None  # user cancelled — caller should abort
     if chosen == 0:
-        # New session
         return base_cmd
 
     session = sessions[chosen - 1]

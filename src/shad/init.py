@@ -16,20 +16,15 @@ import sys
 import tomllib
 from pathlib import Path
 
+from rich.console import Console
+from rich.text import Text
+from rich.panel import Panel
+from rich.prompt import Prompt, Confirm
+
 from shad.config import CONFIG_PATH
 
-
-def _prompt(label: str, default: str | None = None, required: bool = True) -> str:
-    hint = f" [{default}]" if default else ""
-    while True:
-        raw = input(f"  {label}{hint}: ").strip()
-        if raw:
-            return raw
-        if default is not None:
-            return default
-        if not required:
-            return ""
-        print(f"    ! {label} is required")
+console = Console()
+err_console = Console(stderr=True)
 
 
 def _expand(p: str) -> Path:
@@ -68,54 +63,56 @@ def _key_exists(config_path: Path, group: str | None, key: str) -> bool:
 
 
 def cmd_init() -> None:
-    print("\nshad init — add a new project\n")
+    console.print()
+    console.print(Text("shad init", style="bold cyan") + Text(" — add a new project", style="dim"))
+    console.print()
 
     # --- path ---
     while True:
-        raw_path = _prompt("path (e.g. ~/gh/myproject)")
+        raw_path = Prompt.ask("[cyan]  path[/cyan] [dim](e.g. ~/gh/myproject)[/dim]")
         project_path = _expand(raw_path)
         if project_path.exists():
             break
-        print(f"    ! path does not exist: {project_path}")
+        err_console.print(Text(f"  ✗ path does not exist: {project_path}", style="bold red"))
 
     default_key = project_path.name
 
     # --- group ---
-    group = _prompt("group (leave blank for top-level)", default="", required=False) or None
+    group = Prompt.ask("[cyan]  group[/cyan] [dim](leave blank for top-level)[/dim]", default="") or None
 
     # --- key ---
-    key = _prompt("key", default=default_key)
+    key = Prompt.ask("[cyan]  key[/cyan]", default=default_key)
 
     # --- session ---
     default_session = f"{group}-{key}" if group else key
-    session = _prompt("session name", default=default_session)
+    session = Prompt.ask("[cyan]  session name[/cyan]", default=default_session)
 
     # --- check for duplicates ---
     if _key_exists(CONFIG_PATH, group, key):
         loc = f"projects.{group}.{key}" if group else f"projects.{key}"
-        print(f"\n  ! [{loc}] already exists in {CONFIG_PATH}", file=sys.stderr)
+        err_console.print(Text(f"\n  ✗ [{loc}] already exists in {CONFIG_PATH}", style="bold red"))
         sys.exit(1)
 
     # --- confirm ---
-    print()
-    if group:
-        print(f"  [{f'projects.{group}.{key}'}]")
-    else:
-        print(f"  [projects.{key}]")
-    print(f"  path    = {project_path}")
-    print(f"  session = {session}")
-    print()
+    toml_key = f"projects.{group}.{key}" if group else f"projects.{key}"
+    console.print()
+    console.print(Panel(
+        f"[dim]\\[{toml_key}][/dim]\n"
+        f"[dim]path    =[/dim] [bright_white]{project_path}[/bright_white]\n"
+        f"[dim]session =[/dim] [bright_white]{session}[/bright_white]",
+        border_style="cyan",
+        padding=(0, 2),
+    ))
 
-    confirm = input("  Add to config? [Y/n]: ").strip().lower()
-    if confirm not in ("", "y", "yes"):
-        print("  Aborted.")
+    if not Confirm.ask("  Add to config?", default=True):
+        console.print(Text("  Aborted.", style="dim"))
         sys.exit(0)
 
     CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     _append_toml(CONFIG_PATH, group, key, project_path, session)
 
-    print(f"\n  Done. Added to {CONFIG_PATH}")
-    if group:
-        print(f"  Open with: shad projects {group} {key}\n")
-    else:
-        print(f"  Open with: shad projects {key}\n")
+    console.print()
+    console.print(Text(f"  ✓ Added to {CONFIG_PATH}", style="bold green"))
+    open_cmd = f"shad projects {group} {key}" if group else f"shad projects {key}"
+    console.print(Text(f"  Open with: ", style="dim") + Text(open_cmd, style="cyan"))
+    console.print()
