@@ -133,4 +133,6 @@ def show_session_menu(project_path: Path, tmux_session: str, base_opencode_cmd: 
             resume_cmd = _send_cmd(tmux_session, f"{base_opencode_cmd} -s {s.id}")
             menu_args += [s.menu_label, key, resume_cmd]
 
-    subprocess.run(menu_args)
+    result = subprocess.run(menu_args)
+    if result.returncode != 0:
+        print(f"[shad] display-menu failed (rc={result.returncode})", file=__import__('sys').stderr)
