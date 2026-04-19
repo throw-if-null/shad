@@ -208,11 +208,12 @@ def _run_picker(sessions: list[OcSession], project_name: str) -> int | None:
 
 # ── Public API ─────────────────────────────────────────────────────────────
 
-def pick_opencode_cmd(project_path: Path, base_cmd: str) -> str:
+def pick_opencode_cmd(project_path: Path, base_cmd: str) -> str | None:
     """
     Show an interactive session picker and return the opencode command to run.
 
-    Falls back to *base_cmd* (new session) on cancel, error, or no sessions.
+    Returns None if the user explicitly cancelled (q / Esc).
+    Falls back to base_cmd on error or no sessions.
     """
     sessions = _query_sessions(project_path)
     if not sessions:
@@ -222,7 +223,7 @@ def pick_opencode_cmd(project_path: Path, base_cmd: str) -> str:
     chosen = _run_picker(sessions, project_name)
 
     if chosen is None:
-        return base_cmd
+        return None  # user cancelled — caller should abort
     if chosen == 0:
         return base_cmd
 

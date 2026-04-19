@@ -111,6 +111,10 @@ def open_project(project: Project, defaults: Defaults) -> None:
     # Prompt the user to pick an opencode session before touching tmux.
     top_command = pick_opencode_cmd(project.path, base_cmd)
 
+    if top_command is None:
+        # User cancelled the picker — do nothing.
+        sys.exit(0)
+
     if not session_exists(project.session):
         _create_session(project, defaults, top_command)
     else:
