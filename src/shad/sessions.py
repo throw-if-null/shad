@@ -1,33 +1,31 @@
 """
-OpenCode session picker for shad — uses tmux display-menu (no extra deps).
+OpenCode session picker for shad.
 
-The menu is shown in the current tmux pane BEFORE switching to the target
-session.  Each item sends the appropriate `opencode` command directly into
-pane 0 of the target tmux session, so opencode is already starting by the
-time the user lands there.
+Queries the opencode SQLite database for recent sessions associated with a
+project path, then presents a numbered prompt so the user can pick one (or
+start a new session).
 
 Public API
 ----------
-show_session_menu(project_path, tmux_session)
-    Build and display the menu.  Returns immediately after the user makes a
-    selection (or presses Escape).  No-ops gracefully if we're outside tmux
-    or the opencode DB is unavailable.
+pick_opencode_cmd(project_path, base_opencode_cmd) -> str
+    Prints a session list, reads a choice, and returns the full opencode
+    command string to run (e.g. "opencode" or "opencode -s <id>").
+    Falls back to base_opencode_cmd if the DB is unavailable or there are
+    no sessions.
 """
 
 from __future__ import annotations
 
-import os
 import re
 import sqlite3
-import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-_NEW_SESSION_RE = re.compile(r"^New session\s*-\s*\d{4}-\d{2}-\d{2}T[\d:.]+Z$")
-
 DB_PATH = Path.home() / ".local" / "share" / "opencode" / "opencode.db"
 SESSION_LIMIT = 5
+
+_NEW_SESSION_RE = re.compile(r"^New session\s*-\s*\d{4}-\d{2}-\d{2}T[\d:.]+Z$")
 
 
 @dataclass
@@ -43,17 +41,9 @@ class OcSession:
 
     @property
     def display_title(self) -> str:
-        """Human-readable title — collapses unset 'New session - <iso>' placeholders."""
         if _NEW_SESSION_RE.match(self.title):
             return "(untitled)"
         return self.title
-
-    @property
-    def menu_label(self) -> str:
-        """Short label for display-menu — date + title, truncated to fit."""
-        title = self.display_title
-        title = title if len(title) <= 45 else title[:42] + "…"
-        return f"{self.updated_str}  {title}"
 
 
 def _query_sessions(project_path: Path, limit: int = SESSION_LIMIT) -> list[OcSession]:
@@ -82,57 +72,39 @@ def _query_sessions(project_path: Path, limit: int = SESSION_LIMIT) -> list[OcSe
         return []
 
 
-def _send_cmd(tmux_session: str, cmd: str) -> str:
-    """Return a tmux run-shell string that sends *cmd* to pane 0 of *tmux_session*."""
-    escaped = cmd.replace("'", "'\\''")
-    return f"run-shell 'tmux send-keys -t {tmux_session}:0.0 \"{escaped}\" Enter'"
-
-
-def _current_tmux_client() -> str | None:
-    """Return the name of the tmux client attached to the current terminal."""
-    try:
-        result = subprocess.run(
-            ["tmux", "display-message", "-p", "#{client_name}"],
-            capture_output=True, text=True,
-        )
-        name = result.stdout.strip()
-        return name if name else None
-    except Exception:
-        return None
-
-
-def show_session_menu(project_path: Path, tmux_session: str, base_opencode_cmd: str) -> None:
+def pick_opencode_cmd(project_path: Path, base_cmd: str) -> str:
     """
-    Display a tmux menu to pick an opencode session.
+    Print a session picker and return the opencode command to run.
 
-    If we're outside tmux or no sessions exist the function is a no-op and
-    the caller should fall back to starting opencode normally.
+    Returns *base_cmd* unchanged if there are no sessions or the user
+    presses Ctrl-C / enters an invalid choice.
     """
-    if not os.environ.get("TMUX"):
-        return
-
     sessions = _query_sessions(project_path)
+    if not sessions:
+        return base_cmd
 
-    # Resolve the current client so the menu is shown in the right terminal.
-    client = _current_tmux_client()
+    print()
+    print("  opencode session:")
+    print("    n) New session")
+    for i, s in enumerate(sessions, 1):
+        title = s.display_title
+        if len(title) > 50:
+            title = title[:47] + "…"
+        print(f"    {i}) {s.updated_str}  {title}")
 
-    # Build display-menu arguments:
-    # format per item:  "label"  "shortcut-key"  "tmux-command"
-    menu_args: list[str] = ["tmux", "display-menu", "-T", "#[bold]opencode session"]
-    if client:
-        menu_args += ["-c", client]
+    valid = {"n"} | {str(i) for i in range(1, len(sessions) + 1)}
+    prompt = f"  Pick [n/{'/' .join(str(i) for i in range(1, len(sessions) + 1))}]: "
 
-    # "New session" is always first
-    new_cmd = _send_cmd(tmux_session, base_opencode_cmd)
-    menu_args += ["New session", "n", new_cmd]
+    try:
+        choice = input(prompt).strip().lower()
+    except (KeyboardInterrupt, EOFError):
+        print()
+        return base_cmd
 
-    if sessions:
-        menu_args += ["", "", ""]  # separator
-        for i, s in enumerate(sessions):
-            key = str(i + 1)
-            resume_cmd = _send_cmd(tmux_session, f"{base_opencode_cmd} -s {s.id}")
-            menu_args += [s.menu_label, key, resume_cmd]
+    print()
 
-    result = subprocess.run(menu_args)
-    if result.returncode != 0:
-        print(f"[shad] display-menu failed (rc={result.returncode})", file=__import__('sys').stderr)
+    if choice == "n" or choice not in valid:
+        return base_cmd
+
+    idx = int(choice) - 1
+    return f"{base_cmd} -s {sessions[idx].id}"

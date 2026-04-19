@@ -19,7 +19,7 @@ import subprocess
 import sys
 
 from shad.config import Defaults, Project
-from shad.sessions import show_session_menu
+from shad.sessions import pick_opencode_cmd
 
 
 def _run(args: list[str], *, check: bool = True) -> subprocess.CompletedProcess:
@@ -39,12 +39,8 @@ def _base_opencode_cmd(top_command: str) -> str:
     return cmd
 
 
-def _create_session(project: Project, defaults: Defaults) -> None:
-    """Create a new tmux session with the standard 3-pane layout.
-
-    The top pane is left as a plain shell — opencode is started separately
-    via the session picker menu so the user can choose which session to open.
-    """
+def _create_session(project: Project, defaults: Defaults, top_command: str) -> None:
+    """Create a new tmux session with the standard 3-pane layout."""
     session = project.session
     cwd = str(project.path)
 
@@ -60,7 +56,10 @@ def _create_session(project: Project, defaults: Defaults) -> None:
     # 2. Disable automatic window rename
     _run(["tmux", "set-option", "-t", session, "allow-rename", "off"])
 
-    # 3. Split top/bottom — bottom takes bottom_percent% of the window height
+    # 3. Run top_command in the top pane
+    _run(["tmux", "send-keys", "-t", f"{session}:0.0", top_command + "\n"])
+
+    # 4. Split top/bottom — bottom takes bottom_percent% of the window height
     _run([
         "tmux", "split-window",
         "-t", f"{session}:0.0",
@@ -107,17 +106,18 @@ def _attach(session: str) -> None:
 
 def open_project(project: Project, defaults: Defaults) -> None:
     """Attach to project session, creating it with the default layout if needed."""
-    if not session_exists(project.session):
-        _create_session(project, defaults)
-
-    # Derive the base opencode command (without any session flags)
     base_cmd = _base_opencode_cmd(defaults.top_command)
 
-    # Show a tmux display-menu to pick an opencode session.
-    # The menu sends the chosen opencode command directly to the top pane,
-    # so opencode is already starting when the user arrives in the session.
-    # Falls back gracefully (no-op) if outside tmux or DB is unavailable.
-    show_session_menu(project.path, project.session, base_cmd)
+    # Prompt the user to pick an opencode session before touching tmux.
+    top_command = pick_opencode_cmd(project.path, base_cmd)
+
+    if not session_exists(project.session):
+        _create_session(project, defaults, top_command)
+    else:
+        # Session already exists — interrupt whatever is in the top pane
+        # and relaunch opencode with the chosen session.
+        _run(["tmux", "send-keys", "-t", f"{project.session}:0.0", "C-c", ""])
+        _run(["tmux", "send-keys", "-t", f"{project.session}:0.0", top_command + "\n"])
 
     _attach(project.session)
 
