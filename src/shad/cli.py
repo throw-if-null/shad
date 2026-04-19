@@ -27,6 +27,7 @@ from shad.status import print_status
 from shad.completion import print_completion
 from shad.init import cmd_init
 from shad.cheat import cmd_cheat
+from shad.banner import print_banner
 
 ACTIONS = ("status", "stop")
 
@@ -66,6 +67,7 @@ def _list_group(cfg: Config, group_name: str) -> None:
 def _run_action(cfg: Config, project, action: str | None) -> None:
     """Dispatch open / status / stop for a resolved project."""
     if action is None or action == "open":
+        print_banner()
         open_project(project, cfg.defaults)
     elif action == "status":
         print_status(project)
