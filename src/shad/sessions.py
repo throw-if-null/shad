@@ -88,6 +88,19 @@ def _send_cmd(tmux_session: str, cmd: str) -> str:
     return f"run-shell 'tmux send-keys -t {tmux_session}:0.0 \"{escaped}\" Enter'"
 
 
+def _current_tmux_client() -> str | None:
+    """Return the name of the tmux client attached to the current terminal."""
+    try:
+        result = subprocess.run(
+            ["tmux", "display-message", "-p", "#{client_name}"],
+            capture_output=True, text=True,
+        )
+        name = result.stdout.strip()
+        return name if name else None
+    except Exception:
+        return None
+
+
 def show_session_menu(project_path: Path, tmux_session: str, base_opencode_cmd: str) -> None:
     """
     Display a tmux menu to pick an opencode session.
@@ -100,12 +113,14 @@ def show_session_menu(project_path: Path, tmux_session: str, base_opencode_cmd: 
 
     sessions = _query_sessions(project_path)
 
+    # Resolve the current client so the menu is shown in the right terminal.
+    client = _current_tmux_client()
+
     # Build display-menu arguments:
     # format per item:  "label"  "shortcut-key"  "tmux-command"
-    menu_args: list[str] = [
-        "tmux", "display-menu",
-        "-T", "#[bold]opencode session",
-    ]
+    menu_args: list[str] = ["tmux", "display-menu", "-T", "#[bold]opencode session"]
+    if client:
+        menu_args += ["-c", client]
 
     # "New session" is always first
     new_cmd = _send_cmd(tmux_session, base_opencode_cmd)
