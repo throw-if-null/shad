@@ -12,6 +12,29 @@ A small CLI to attach or create project-specific tmux sessions from the current 
 
 ## Install
 
+### From GitHub (recommended for other machines)
+
+Install directly from the GitHub repository — no cloning required:
+
+```sh
+pip install git+https://github.com/throw-if-null/shad.git
+```
+
+Or with `pipx` (keeps the CLI isolated in its own environment):
+
+```sh
+pipx install git+https://github.com/throw-if-null/shad.git
+```
+
+To install a specific version or commit:
+
+```sh
+pip install git+https://github.com/throw-if-null/shad.git@v0.1.0
+pip install git+https://github.com/throw-if-null/shad.git@abc1234
+```
+
+### From a local clone
+
 ```sh
 pip install -e /path/to/shad
 ```
