@@ -4,9 +4,9 @@ Config loading for shad.
 Schema (shad.toml):
 
   [defaults]
-  top_command    = "opencode -c"
-  bottom_percent = 35
-  right_percent  = 30
+  oc_position   = "top"   # top | bottom | left | right
+  panel_percent = 35      # % of window the git+bash bundle takes
+  split_percent = 35      # % of the bundle that gitui takes (bash gets the rest)
 
   # top-level project (no group)
   [projects.kb]
@@ -32,12 +32,14 @@ from pathlib import Path
 
 CONFIG_PATH = Path.home() / ".config" / "shad" / "shad.toml"
 
+OC_POSITIONS = ("top", "bottom", "left")
+
 
 @dataclass
 class Defaults:
-    top_command: str = "opencode -c"
-    bottom_percent: int = 35
-    right_percent: int = 30
+    oc_position: str = "top"
+    panel_percent: int = 35
+    split_percent: int = 35
 
 
 @dataclass
@@ -93,10 +95,17 @@ def load(path: Path = CONFIG_PATH) -> Config:
 
     # --- defaults ---
     d = raw.get("defaults", {})
+    oc_position = d.get("oc_position", "top")
+    if oc_position not in OC_POSITIONS:
+        print(
+            f"error: invalid oc_position '{oc_position}'; must be one of: {', '.join(OC_POSITIONS)}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     defaults = Defaults(
-        top_command=d.get("top_command", "opencode -c"),
-        bottom_percent=int(d.get("bottom_percent", 35)),
-        right_percent=int(d.get("right_percent", 30)),
+        oc_position=oc_position,
+        panel_percent=int(d.get("panel_percent", 35)),
+        split_percent=int(d.get("split_percent", 35)),
     )
 
     # --- projects ---

@@ -27,6 +27,29 @@ console = Console()
 err_console = Console(stderr=True)
 
 
+_DEFAULTS_BLOCK = """\
+# ~/.config/shad/shad.toml
+
+[defaults]
+# Which side opencode occupies. The git+bash bundle takes the opposite side.
+# Allowed values: top | bottom | left
+# oc_position = "top"
+
+# How much of the window the git+bash bundle takes (%).
+# panel_percent = 35
+
+# How much of the bundle gitui takes (%). Bash gets the rest.
+# split_percent = 35
+
+"""
+
+
+def _write_defaults_block(config_path: Path) -> None:
+    """Prepend a commented [defaults] block to a newly created config file."""
+    with config_path.open("w") as fh:
+        fh.write(_DEFAULTS_BLOCK)
+
+
 def _expand(p: str) -> Path:
     return Path(p).expanduser().resolve()
 
@@ -109,6 +132,9 @@ def cmd_init() -> None:
         sys.exit(0)
 
     CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    is_new_file = not CONFIG_PATH.exists()
+    if is_new_file:
+        _write_defaults_block(CONFIG_PATH)
     _append_toml(CONFIG_PATH, group, key, project_path, session)
 
     console.print()

@@ -216,8 +216,16 @@ def build_parser() -> argparse.ArgumentParser:
         "init",
         help="Add a new project to the config interactively",
         description=(
-            "Interactive wizard that prompts for project details and appends\n"
-            f"a new entry to ~/.config/shad/shad.toml."
+            "Interactive wizard that adds a new project to ~/.config/shad/shad.toml.\n"
+            "Creates the config file with a commented [defaults] block if it does not exist yet.\n\n"
+            "Prompts:\n"
+            "  path         Absolute path to the project root (must exist)\n"
+            "  group        Optional group name; leave blank for a top-level project\n"
+            "  key          Short project name; defaults to the directory name\n"
+            "  session      tmux session name; defaults to <key> or <group>-<key>\n\n"
+            "Examples:\n"
+            "  shad init                         add a top-level project\n"
+            "  shad init                         add a grouped project (enter group at prompt)"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )

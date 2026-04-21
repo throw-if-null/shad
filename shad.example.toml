@@ -2,9 +2,18 @@
 # Copy to ~/.config/shad/shad.toml and adjust paths.
 
 [defaults]
-top_command    = "opencode -c"
-bottom_percent = 35   # bottom area takes this % of window height
-right_percent  = 30   # right pane takes this % of bottom width
+# Which side opencode occupies. The git+bash bundle takes the opposite side.
+# Allowed values: top | bottom | left
+oc_position   = "top"
+
+# How much of the window the git+bash bundle takes (%).
+# The opencode panel gets the remaining space.
+panel_percent = 35
+
+# How much of the bundle gitui takes (%). Bash gets the rest.
+# When bundle is horizontal (oc top/bottom): gitui is on the right.
+# When bundle is vertical   (oc left/right): gitui is on the bottom.
+split_percent = 35
 
 # ── Top-level projects ────────────────────────────────────────────────────
 # Access: shad projects kb

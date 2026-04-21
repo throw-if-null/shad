@@ -3,7 +3,7 @@
 A small CLI to attach or create project-specific tmux sessions from the current terminal.
 
 - No new windows, no launchers — works inside your current terminal tab.
-- Session is created with a standard 3-pane layout on first use; subsequent calls just attach.
+- Session is created with a configurable 3-pane layout on first use; subsequent calls just attach.
 
 ## Requirements
 
@@ -49,42 +49,95 @@ pip install -e ~/gh/tin/shad
 
 ## Config
 
-Copy the example config and edit it:
+Config is read from `~/.config/shad/shad.toml`.
+
+### First time setup
+
+Run the interactive wizard:
+
+```sh
+shad init
+```
+
+It will prompt for a project path, key, and optional group, then create `~/.config/shad/shad.toml` with a commented `[defaults]` block and your first project entry. Uncomment and adjust the defaults if you want a different layout.
+
+To add more projects later, run `shad init` again.
+
+### Manual setup
+
+If you prefer to edit the file directly, create it and use the annotated example below as your reference:
 
 ```sh
 mkdir -p ~/.config/shad
-cp shad.example.toml ~/.config/shad/shad.toml
+touch ~/.config/shad/shad.toml
 ```
 
-Config path: `~/.config/shad/shad.toml`
-
-### Schema
+### Full annotated example
 
 ```toml
+# ~/.config/shad/shad.toml
+
 [defaults]
-top_command    = "opencode -c"
-bottom_percent = 35   # bottom area height as % of window
-right_percent  = 30   # right pane width as % of bottom strip
+# Which side opencode occupies. The git+bash bundle takes the opposite side.
+# Allowed values: top | bottom | left
+# oc_position = "top"
 
-# Top-level project
+# How much of the window the git+bash bundle takes (%).
+# The opencode panel gets the remaining space.
+# panel_percent = 35
+
+# How much of the bundle gitui takes (%). Bash gets the rest.
+# When bundle is horizontal (oc_position top/bottom): gitui is on the right.
+# When bundle is vertical   (oc_position left):       gitui is on the bottom.
+# split_percent = 35
+
+
+# ── Top-level projects ────────────────────────────────────────────────
+# Accessed with:  shad projects <key>
+
 [projects.kb]
-path = "/home/user/gh/kb"
-# session = "kb"   ← optional; defaults to project key
+path    = "/home/user/gh/kb"       # required — absolute path to the project root
+# session = "kb"                   # optional — tmux session name; defaults to the key ("kb")
 
-# Grouped project  →  shad projects alvr db
+[projects.orfe]
+path    = "/home/user/gh/tin/orfe"
+
+
+# ── Grouped projects ──────────────────────────────────────────────────
+# Accessed with:  shad projects <group> <key>
+# Maximum depth: one group level (group → project).
+
 [projects.alvr.db]
-path = "/home/user/gh/alvr/db"
-# session = "alvr-db"  ← optional; defaults to "<group>-<key>"
+path    = "/home/user/gh/alvr/db"
+# session = "alvr-db"              # optional; defaults to "<group>-<key>" ("alvr-db")
+
+[projects.alvr.portal]
+path    = "/home/user/gh/alvr/portal"
 ```
 
-- `path` is **required** for every project.
-- `session` is optional; defaults to the project key (top-level) or `<group>-<key>` (grouped).
-- Maximum two levels: `[projects.<group>.<key>]`.
+### Field reference
+
+| Field | Required | Default | Description |
+|---|---|---|---|
+| `[defaults] oc_position` | no | `"top"` | Side opencode occupies: `top`, `bottom`, or `left` |
+| `[defaults] panel_percent` | no | `35` | % of the window the git+bash bundle takes |
+| `[defaults] split_percent` | no | `35` | % of the bundle that gitui takes (bash gets the rest) |
+| `path` | **yes** | — | Absolute path to the project root |
+| `session` | no | key or `<group>-<key>` | tmux session name; must be unique across all projects |
+
+### How session names are resolved
+
+- Top-level project `[projects.kb]` → session `kb`
+- Grouped project `[projects.alvr.db]` → session `alvr-db`
+- Override either by setting `session = "my-name"` explicitly.
 
 ## Usage
 
 ```
 shad --help
+
+# Add a new project interactively (creates config if missing)
+shad init
 
 # List all configured projects and groups
 shad projects
@@ -100,8 +153,32 @@ shad projects alvr
 shad projects alvr db
 shad projects al d      # prefix matching per level
 
+# Show session status without opening
+shad projects kb status
+shad projects alvr db status
+
+# Kill a session
+shad projects kb stop
+shad projects alvr db stop
+
 # Show a tmux cheat sheet popup
 shad cheat
+```
+
+## Shell completion
+
+`shad` supports tab completion for bash and zsh.
+
+### bash
+
+```sh
+shad completion bash >> ~/.bashrc && source ~/.bashrc
+```
+
+### zsh
+
+```sh
+shad completion zsh >> ~/.zshrc && source ~/.zshrc
 ```
 
 ## tmux cheat sheet
@@ -123,15 +200,36 @@ tmux source-file ~/.tmux.conf
 
 ## tmux layout
 
-Created once on first open, never rebuilt on subsequent attaches:
+Created once on first open, never rebuilt on subsequent attaches. The layout depends on `oc_position`:
 
+**`oc_position = "top"` (default)**
 ```
 ┌─────────────────────────────────┐
-│  top pane  (top_command)        │  ~65% height
+│  opencode                       │  ~65% height
 ├─────────────────────┬───────────┤
-│  bottom-left  (70%) │  gitui    │  ~35% height
+│  bash         (~65%)│  gitui    │  ~35% height
 └─────────────────────┴───────────┘
 ```
+
+**`oc_position = "bottom"`**
+```
+┌─────────────────────┬───────────┐
+│  bash         (~65%)│  gitui    │  ~65% height
+├─────────────────────┴───────────┤
+│  opencode                       │  ~35% height
+└─────────────────────────────────┘
+```
+
+**`oc_position = "left"`**
+```
+┌──────────┬──────────────────────┐
+│          │  bash                │  ~65% of bundle height
+│opencode  ├──────────────────────┤
+│          │  gitui               │  ~35% of bundle height
+└──────────┴──────────────────────┘
+```
+
+`panel_percent` controls how much of the window the git+bash bundle takes; `split_percent` controls the gitui/bash split within it.
 
 If `shad` is run from **inside** an existing tmux session it uses `switch-client`; outside tmux it uses `attach-session`.
 
@@ -177,7 +275,13 @@ shad/
 └── src/
     └── shad/
         ├── __init__.py
+        ├── banner.py
+        ├── cheat.py
         ├── cli.py
+        ├── completion.py
         ├── config.py
+        ├── init.py
+        ├── sessions.py
+        ├── status.py
         └── tmux.py
 ```
