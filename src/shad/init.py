@@ -17,8 +17,9 @@ import shutil
 import subprocess
 import tomllib
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 from rich.console import Console
 from rich.text import Text
@@ -38,6 +39,7 @@ OPEN_CODE_INSTALL_URL = "https://github.com/anomalyco/opencode/releases/latest/d
 class Dependency:
     binary: str
     package: str | None = None
+    installer: Callable[[], None] | None = field(default=None, compare=False, hash=False)
 
 
 _DEFAULTS_BLOCK = """\
@@ -56,12 +58,8 @@ _DEFAULTS_BLOCK = """\
 
 """
 
-DEPENDENCIES = (
-    Dependency(binary="tmux", package="tmux"),
-    Dependency(binary="gitui", package="gitui"),
-    Dependency(binary="opencode"),
-)
 
+# ── config helpers ────────────────────────────────────────────────────────
 
 def _write_defaults_block(config_path: Path) -> None:
     """Prepend a commented [defaults] block to a newly created config file."""
@@ -104,11 +102,12 @@ def _key_exists(config_path: Path, group: str | None, key: str) -> bool:
     return key in projects
 
 
+# ── dependency installation ───────────────────────────────────────────────
+
 def _detect_fedora() -> bool:
     os_release = Path("/etc/os-release")
     if not os_release.exists():
         return False
-
     text = os_release.read_text()
     return 'ID=fedora' in text or 'ID_LIKE="fedora"' in text or 'ID_LIKE=fedora' in text
 
@@ -120,15 +119,18 @@ def _is_root() -> bool:
     return geteuid() == 0
 
 
-def _missing_dependencies() -> list[Dependency]:
-    return [dep for dep in DEPENDENCIES if shutil.which(dep.binary) is None]
-
-
 def _run_install_command(command: list[str], description: str) -> None:
     console.print(Text(f"  → {description}", style="cyan"))
     result = subprocess.run(command)
     if result.returncode != 0:
         raise ShadError(f"command failed: {' '.join(command)}")
+
+
+def _install_via_dnf(package: str) -> Callable[[], None]:
+    """Return an installer callable that installs a single dnf package."""
+    def _install() -> None:
+        _run_install_command(["dnf", "install", "-y", package], f"installing {package} with dnf")
+    return _install
 
 
 def _install_opencode_systemwide() -> None:
@@ -144,10 +146,25 @@ def _install_opencode_systemwide() -> None:
 
         _run_install_command(["tar", "-xzf", str(archive), "-C", str(tmp_dir)], "extracting opencode release")
         _run_install_command(["install", "-m", "0755", str(binary), "/usr/local/bin/opencode"], "copying opencode binary")
+    except ShadError:
+        raise
     except Exception as exc:
         raise ShadError(f"failed to install opencode: {exc}") from exc
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def _build_dependencies() -> tuple[Dependency, ...]:
+    """Build the dependency list with per-dep install strategies."""
+    return (
+        Dependency(binary="tmux", package="tmux", installer=_install_via_dnf("tmux")),
+        Dependency(binary="gitui", package="gitui", installer=_install_via_dnf("gitui")),
+        Dependency(binary="opencode", installer=_install_opencode_systemwide),
+    )
+
+
+def _missing_dependencies() -> list[Dependency]:
+    return [dep for dep in _build_dependencies() if shutil.which(dep.binary) is None]
 
 
 def ensure_dependencies_installed() -> None:
@@ -165,15 +182,14 @@ def ensure_dependencies_installed() -> None:
             "    try: sudo shad init --install-deps"
         )
 
-    packages = [dep.package for dep in missing if dep.package]
-    if packages:
-        _run_install_command(["dnf", "install", "-y", *packages], f"installing {', '.join(packages)} with dnf")
-
-    if any(dep.binary == "opencode" for dep in missing):
-        _install_opencode_systemwide()
+    for dep in missing:
+        if dep.installer is not None:
+            dep.installer()
 
     console.print(Text("  ✓ dependencies installed", style="bold green"))
 
+
+# ── interactive wizard ────────────────────────────────────────────────────
 
 def cmd_init(*, install_deps: bool = False) -> None:
     console.print()

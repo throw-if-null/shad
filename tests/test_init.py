@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import sys
 import unittest
+import unittest.mock
 from pathlib import Path
 from unittest.mock import patch
 
@@ -43,26 +44,26 @@ class InstallDepsTests(unittest.TestCase):
         self.assertIn("sudo", str(ctx.exception))
 
     def test_install_deps_installs_missing_packages_and_opencode(self) -> None:
+        tmux_installer = unittest.mock.MagicMock()
+        gitui_installer = unittest.mock.MagicMock()
+        opencode_installer = unittest.mock.MagicMock()
+
         missing = [
-            Dependency(binary="tmux", package="tmux"),
-            Dependency(binary="gitui", package="gitui"),
-            Dependency(binary="opencode"),
+            Dependency(binary="tmux", package="tmux", installer=tmux_installer),
+            Dependency(binary="gitui", package="gitui", installer=gitui_installer),
+            Dependency(binary="opencode", installer=opencode_installer),
         ]
 
         with patch("shad.init._missing_dependencies", return_value=missing), patch(
             "shad.init._detect_fedora", return_value=True
         ), patch("shad.init._is_root", return_value=True), patch(
-            "shad.init._run_install_command"
-        ) as run_install, patch("shad.init._install_opencode_systemwide") as install_opencode, patch(
             "shad.init.console.print"
         ):
             ensure_dependencies_installed()
 
-        run_install.assert_called_once_with(
-            ["dnf", "install", "-y", "tmux", "gitui"],
-            "installing tmux, gitui with dnf",
-        )
-        install_opencode.assert_called_once_with()
+        tmux_installer.assert_called_once_with()
+        gitui_installer.assert_called_once_with()
+        opencode_installer.assert_called_once_with()
 
     def test_install_deps_skips_work_when_everything_is_present(self) -> None:
         with patch("shad.init._missing_dependencies", return_value=[]), patch("shad.init.console.print") as print_mock:
