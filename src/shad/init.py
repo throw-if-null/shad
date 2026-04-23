@@ -141,8 +141,8 @@ def _install_opencode_systemwide() -> None:
     tmp_dir.mkdir(parents=True, exist_ok=True)
     try:
         console.print(Text("  → installing opencode to /usr/local/bin/opencode", style="cyan"))
-        with urllib.request.urlopen(OPEN_CODE_INSTALL_URL) as response:
-            archive.write_bytes(response.read())
+        with urllib.request.urlopen(OPEN_CODE_INSTALL_URL) as response, archive.open("wb") as fh:
+            shutil.copyfileobj(response, fh)
 
         _run_install_command(["tar", "-xzf", str(archive), "-C", str(tmp_dir)], "extracting opencode release")
         _run_install_command(["install", "-m", "0755", str(binary), "/usr/local/bin/opencode"], "copying opencode binary")
@@ -189,6 +189,11 @@ def ensure_dependencies_installed() -> None:
     console.print(Text("  ✓ dependencies installed", style="bold green"))
 
 
+def _toml_key(group: str | None, key: str) -> str:
+    """Return the dotted TOML key for a project entry."""
+    return f"projects.{group}.{key}" if group else f"projects.{key}"
+
+
 # ── interactive wizard ────────────────────────────────────────────────────
 
 def cmd_init(*, install_deps: bool = False) -> None:
@@ -222,11 +227,10 @@ def cmd_init(*, install_deps: bool = False) -> None:
 
     # --- check for duplicates ---
     if _key_exists(CONFIG_PATH, group, key):
-        loc = f"projects.{group}.{key}" if group else f"projects.{key}"
-        raise ShadError(f"[{loc}] already exists in {CONFIG_PATH}")
+        raise ShadError(f"[{_toml_key(group, key)}] already exists in {CONFIG_PATH}")
 
     # --- confirm ---
-    toml_key = f"projects.{group}.{key}" if group else f"projects.{key}"
+    toml_key = _toml_key(group, key)
     console.print()
     console.print(Panel(
         f"[dim]\\[{toml_key}][/dim]\n"
