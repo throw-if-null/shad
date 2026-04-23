@@ -25,10 +25,11 @@ Maximum supported depth: group → project  (2 levels).
 
 from __future__ import annotations
 
-import sys
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from shad.errors import ShadError
 
 CONFIG_PATH = Path.home() / ".config" / "shad" / "shad.toml"
 
@@ -83,12 +84,10 @@ def _parse_project(key: str, data: dict, group: str | None = None) -> Project:
 
 def load(path: Path = CONFIG_PATH) -> Config:
     if not path.exists():
-        print(
-            f"error: config file not found: {path}\n"
-            f"       create it or copy shad.example.toml to get started.",
-            file=sys.stderr,
+        raise ShadError(
+            f"config file not found: {path}\n"
+            f"       create it or copy shad.example.toml to get started."
         )
-        sys.exit(1)
 
     with path.open("rb") as fh:
         raw = tomllib.load(fh)
@@ -97,11 +96,9 @@ def load(path: Path = CONFIG_PATH) -> Config:
     d = raw.get("defaults", {})
     oc_position = d.get("oc_position", "top")
     if oc_position not in OC_POSITIONS:
-        print(
-            f"error: invalid oc_position '{oc_position}'; must be one of: {', '.join(OC_POSITIONS)}",
-            file=sys.stderr,
+        raise ShadError(
+            f"invalid oc_position '{oc_position}'; must be one of: {', '.join(OC_POSITIONS)}"
         )
-        sys.exit(1)
     defaults = Defaults(
         oc_position=oc_position,
         panel_percent=int(d.get("panel_percent", 35)),
@@ -114,8 +111,7 @@ def load(path: Path = CONFIG_PATH) -> Config:
 
     for key, value in raw.get("projects", {}).items():
         if not isinstance(value, dict):
-            print(f"error: [projects.{key}] must be a TOML table", file=sys.stderr)
-            sys.exit(1)
+            raise ShadError(f"[projects.{key}] must be a TOML table")
 
         if "path" in value:
             # top-level project
@@ -125,11 +121,9 @@ def load(path: Path = CONFIG_PATH) -> Config:
             group_projects: dict[str, Project] = {}
             for sub_key, sub_value in value.items():
                 if not isinstance(sub_value, dict):
-                    print(
-                        f"error: [projects.{key}.{sub_key}] must be a TOML table",
-                        file=sys.stderr,
+                    raise ShadError(
+                        f"[projects.{key}.{sub_key}] must be a TOML table"
                     )
-                    sys.exit(1)
                 group_projects[sub_key] = _parse_project(sub_key, sub_value, group=key)
             groups[key] = group_projects
 
@@ -149,9 +143,7 @@ def resolve_prefix(candidates: list[str], token: str) -> str | None:
     if len(matches) == 1:
         return matches[0]
     if len(matches) > 1:
-        print(
-            f"error: '{token}' is ambiguous; matches: {', '.join(sorted(matches))}",
-            file=sys.stderr,
+        raise ShadError(
+            f"'{token}' is ambiguous; matches: {', '.join(sorted(matches))}"
         )
-        sys.exit(1)
     return None  # caller decides how to handle "not found"

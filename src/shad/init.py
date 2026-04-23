@@ -15,7 +15,6 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-import sys
 import tomllib
 import urllib.request
 from dataclasses import dataclass
@@ -27,6 +26,7 @@ from rich.panel import Panel
 from rich.prompt import Prompt, Confirm
 
 from shad.config import CONFIG_PATH
+from shad.errors import ShadError
 
 console = Console()
 err_console = Console(stderr=True)
@@ -128,8 +128,7 @@ def _run_install_command(command: list[str], description: str) -> None:
     console.print(Text(f"  → {description}", style="cyan"))
     result = subprocess.run(command)
     if result.returncode != 0:
-        err_console.print(Text(f"  ✗ failed: {' '.join(command)}", style="bold red"))
-        sys.exit(result.returncode or 1)
+        raise ShadError(f"command failed: {' '.join(command)}")
 
 
 def _install_opencode_systemwide() -> None:
@@ -146,8 +145,7 @@ def _install_opencode_systemwide() -> None:
         _run_install_command(["tar", "-xzf", str(archive), "-C", str(tmp_dir)], "extracting opencode release")
         _run_install_command(["install", "-m", "0755", str(binary), "/usr/local/bin/opencode"], "copying opencode binary")
     except Exception as exc:
-        err_console.print(Text(f"  ✗ failed to install opencode: {exc}", style="bold red"))
-        sys.exit(1)
+        raise ShadError(f"failed to install opencode: {exc}") from exc
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
@@ -159,13 +157,13 @@ def ensure_dependencies_installed() -> None:
         return
 
     if not _detect_fedora():
-        err_console.print(Text("  ✗ --install-deps currently supports Fedora only", style="bold red"))
-        sys.exit(1)
+        raise ShadError("--install-deps currently supports Fedora only")
 
     if not _is_root():
-        err_console.print(Text("  ✗ --install-deps must be run with sudo on Fedora", style="bold red"))
-        err_console.print(Text("    try: sudo shad init --install-deps", style="dim"))
-        sys.exit(1)
+        raise ShadError(
+            "--install-deps must be run with sudo on Fedora\n"
+            "    try: sudo shad init --install-deps"
+        )
 
     packages = [dep.package for dep in missing if dep.package]
     if packages:
@@ -209,8 +207,7 @@ def cmd_init(*, install_deps: bool = False) -> None:
     # --- check for duplicates ---
     if _key_exists(CONFIG_PATH, group, key):
         loc = f"projects.{group}.{key}" if group else f"projects.{key}"
-        err_console.print(Text(f"\n  ✗ [{loc}] already exists in {CONFIG_PATH}", style="bold red"))
-        sys.exit(1)
+        raise ShadError(f"[{loc}] already exists in {CONFIG_PATH}")
 
     # --- confirm ---
     toml_key = f"projects.{group}.{key}" if group else f"projects.{key}"
@@ -225,7 +222,7 @@ def cmd_init(*, install_deps: bool = False) -> None:
 
     if not Confirm.ask("  Add to config?", default=True):
         console.print(Text("  Aborted.", style="dim"))
-        sys.exit(0)
+        return
 
     CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     is_new_file = not CONFIG_PATH.exists()

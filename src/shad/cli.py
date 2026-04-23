@@ -25,6 +25,7 @@ from rich.text import Text
 
 from shad import __version__
 from shad.config import Config, load, resolve_prefix
+from shad.errors import ShadError
 from shad.tmux import open_project, stop_project
 from shad.status import print_status
 from shad.completion import print_completion
@@ -78,8 +79,7 @@ def _run_action(cfg: Config, project, action: str | None) -> None:
     elif action == "stop":
         stop_project(project)
     else:
-        err_console.print(Text(f"✗ unknown action '{action}'; available: status, stop", style="bold red"))
-        sys.exit(1)
+        raise ShadError(f"unknown action '{action}'; available: status, stop")
 
 
 def cmd_projects(cfg: Config, args: argparse.Namespace) -> None:
@@ -104,15 +104,13 @@ def cmd_projects(cfg: Config, args: argparse.Namespace) -> None:
         match = resolve_prefix(top_candidates, token)
 
         if match is None:
-            err_console.print(Text(f"✗ no project or group matching '{token}'", style="bold red"))
-            sys.exit(1)
+            raise ShadError(f"no project or group matching '{token}'")
 
         if match in cfg.projects:
             _run_action(cfg, cfg.projects[match], action)
         else:
             if action:
-                err_console.print(Text(f"✗ '{match}' is a group, not a project; specify a project within the group", style="bold red"))
-                sys.exit(1)
+                raise ShadError(f"'{match}' is a group, not a project; specify a project within the group")
             _list_group(cfg, match)
         return
 
@@ -123,35 +121,29 @@ def cmd_projects(cfg: Config, args: argparse.Namespace) -> None:
         group_match = resolve_prefix(list(cfg.groups), group_token)
         if group_match is None:
             if group_token in cfg.projects or any(k.startswith(group_token) for k in cfg.projects):
-                err_console.print(Text(
-                    f"✗ '{group_token}' resolves to a top-level project, not a group; "
-                    f"did you mean: shad projects {group_token}?",
-                    style="bold red",
-                ))
+                raise ShadError(
+                    f"'{group_token}' resolves to a top-level project, not a group; "
+                    f"did you mean: shad projects {group_token}?"
+                )
             else:
-                err_console.print(Text(f"✗ no group matching '{group_token}'", style="bold red"))
-            sys.exit(1)
+                raise ShadError(f"no group matching '{group_token}'")
 
         group_projects = cfg.groups[group_match]
         proj_match = resolve_prefix(list(group_projects), proj_token)
         if proj_match is None:
-            err_console.print(Text(
-                f"✗ no project matching '{proj_token}' in group '{group_match}'; "
-                f"available: {', '.join(sorted(group_projects))}",
-                style="bold red",
-            ))
-            sys.exit(1)
+            raise ShadError(
+                f"no project matching '{proj_token}' in group '{group_match}'; "
+                f"available: {', '.join(sorted(group_projects))}"
+            )
 
         _run_action(cfg, group_projects[proj_match], action)
         return
 
     # --- too many tokens ---
-    err_console.print(Text(
-        f"✗ too many arguments ({len(parts)}); "
-        "usage: shad projects [<group>] [<name>] [status|stop]",
-        style="bold red",
-    ))
-    sys.exit(1)
+    raise ShadError(
+        f"too many arguments ({len(parts)}); "
+        "usage: shad projects [<group>] [<name>] [status|stop]"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -262,19 +254,24 @@ def main() -> None:
         parser.print_help()
         sys.exit(0)
 
-    if args.command == "completion":
-        print_completion(args.shell)
-        return
+    try:
+        if args.command == "completion":
+            print_completion(args.shell)
+            return
 
-    if args.command == "init":
-        cmd_init(install_deps=args.install_deps)
-        return
+        if args.command == "init":
+            cmd_init(install_deps=args.install_deps)
+            return
 
-    if args.command == "cheat":
-        cmd_cheat()
-        return
+        if args.command == "cheat":
+            cmd_cheat()
+            return
 
-    cfg: Config = load()
+        cfg: Config = load()
 
-    if args.command == "projects":
-        cmd_projects(cfg, args)
+        if args.command == "projects":
+            cmd_projects(cfg, args)
+
+    except ShadError as exc:
+        err_console.print(Text(f"✗ {exc}", style="bold red"))
+        sys.exit(1)

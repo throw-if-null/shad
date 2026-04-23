@@ -9,6 +9,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from shad.cli import build_parser
+from shad.errors import ShadError
 from shad.init import Dependency, ensure_dependencies_installed
 
 
@@ -23,23 +24,23 @@ class InitCliTests(unittest.TestCase):
 
 
 class InstallDepsTests(unittest.TestCase):
-    def test_install_deps_exits_when_not_fedora(self) -> None:
+    def test_install_deps_raises_when_not_fedora(self) -> None:
         with patch("shad.init._missing_dependencies", return_value=[Dependency(binary="tmux", package="tmux")]), patch(
             "shad.init._detect_fedora", return_value=False
-        ), patch("shad.init.err_console.print"):
-            with self.assertRaises(SystemExit) as ctx:
+        ):
+            with self.assertRaises(ShadError) as ctx:
                 ensure_dependencies_installed()
 
-        self.assertEqual(ctx.exception.code, 1)
+        self.assertIn("Fedora", str(ctx.exception))
 
-    def test_install_deps_exits_when_not_root(self) -> None:
+    def test_install_deps_raises_when_not_root(self) -> None:
         with patch("shad.init._missing_dependencies", return_value=[Dependency(binary="tmux", package="tmux")]), patch(
             "shad.init._detect_fedora", return_value=True
-        ), patch("shad.init._is_root", return_value=False), patch("shad.init.err_console.print"):
-            with self.assertRaises(SystemExit) as ctx:
+        ), patch("shad.init._is_root", return_value=False):
+            with self.assertRaises(ShadError) as ctx:
                 ensure_dependencies_installed()
 
-        self.assertEqual(ctx.exception.code, 1)
+        self.assertIn("sudo", str(ctx.exception))
 
     def test_install_deps_installs_missing_packages_and_opencode(self) -> None:
         missing = [
