@@ -16,6 +16,7 @@ pick_opencode_target(project_path, base_opencode_cmd) -> OpencodeTarget
 from __future__ import annotations
 
 import re
+import shutil
 import sqlite3
 import os
 import tty
@@ -68,22 +69,21 @@ def _query_sessions(project_path: Path, limit: int = SESSION_LIMIT) -> list[OcSe
     if not DB_PATH.exists():
         return []
     try:
-        con = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
-        cur = con.cursor()
-        cur.execute(
-            """
-            SELECT s.id, s.title, s.time_updated
-            FROM session s
-            JOIN project p ON s.project_id = p.id
-            WHERE p.worktree = ?
-              AND s.time_archived IS NULL
-            ORDER BY s.time_updated DESC
-            LIMIT ?
-            """,
-            (str(project_path), limit),
-        )
-        rows = cur.fetchall()
-        con.close()
+        with sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True) as con:
+            cur = con.cursor()
+            cur.execute(
+                """
+                SELECT s.id, s.title, s.time_updated
+                FROM session s
+                JOIN project p ON s.project_id = p.id
+                WHERE p.worktree = ?
+                  AND s.time_archived IS NULL
+                ORDER BY s.time_updated DESC
+                LIMIT ?
+                """,
+                (str(project_path), limit),
+            )
+            rows = cur.fetchall()
         return [OcSession(id=r[0], title=r[1], time_updated=r[2]) for r in rows]
     except sqlite3.DatabaseError as exc:
         warnings.warn(f"shad: could not read opencode session DB: {exc}", stacklevel=2)
@@ -158,8 +158,6 @@ def _run_picker(sessions: list[OcSession], project_name: str) -> int | None:
     Returns index into [NEW_SESSION] + sessions, or None if cancelled.
     Index 0 = New session, 1..n = sessions[0..n-1].
     """
-    import shutil as _shutil
-
     items = [None] + sessions
     total = len(items)
     selected = 0
@@ -169,7 +167,7 @@ def _run_picker(sessions: list[OcSession], project_name: str) -> int | None:
     except OSError:
         return None
 
-    term_width = _shutil.get_terminal_size().columns
+    term_width = shutil.get_terminal_size().columns
     old_settings = termios.tcgetattr(tty_fd)
 
     SAVE    = b"\033[s"       # save cursor position
