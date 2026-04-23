@@ -22,9 +22,11 @@ class ProjectsCommandTests(unittest.TestCase):
         cfg = Config(defaults=Defaults(), groups={"tin": {"shad": project}})
         args = type("Args", (), {"name": ["tin", "shad"]})()
 
-        with patch("shad.cli.print_banner"), patch("shad.cli.open_project") as open_project:
-            cmd_projects(cfg, args)
+        with patch("shad.cli.print_banner"), patch("shad.cli.open_project", return_value=0) as open_project:
+            with self.assertRaises(SystemExit) as ctx:
+                cmd_projects(cfg, args)
 
+        self.assertEqual(ctx.exception.code, 0)
         open_project.assert_called_once_with(project, cfg.defaults)
 
     def test_top_level_project_open_dispatches_to_open_project(self) -> None:
@@ -37,9 +39,11 @@ class ProjectsCommandTests(unittest.TestCase):
         cfg = Config(defaults=Defaults(), projects={"shad": project})
         args = type("Args", (), {"name": ["shad"]})()
 
-        with patch("shad.cli.print_banner"), patch("shad.cli.open_project") as open_project:
-            cmd_projects(cfg, args)
+        with patch("shad.cli.print_banner"), patch("shad.cli.open_project", return_value=0) as open_project:
+            with self.assertRaises(SystemExit) as ctx:
+                cmd_projects(cfg, args)
 
+        self.assertEqual(ctx.exception.code, 0)
         open_project.assert_called_once_with(project, cfg.defaults)
 
 

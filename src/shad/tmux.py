@@ -34,7 +34,6 @@ from __future__ import annotations
 import os
 import re
 import subprocess
-import sys
 
 from shad.config import Defaults, Project
 from shad.sessions import OpencodeTarget, pick_opencode_target
@@ -134,8 +133,8 @@ def _create_session(project: Project, defaults: Defaults, top_command: str, sess
     _run(["tmux", "select-pane", "-t", oc_pane])
 
 
-def _attach(session: str) -> None:
-    """Attach or switch to the named tmux session."""
+def _attach(session: str) -> int:
+    """Attach or switch to the named tmux session. Returns the exit code."""
     inside_tmux = os.environ.get("TMUX") is not None
 
     if inside_tmux:
@@ -144,26 +143,25 @@ def _attach(session: str) -> None:
         cmd = ["tmux", "attach-session", "-t", session]
 
     result = subprocess.run(cmd)
-    sys.exit(result.returncode)
+    return result.returncode
 
 
-def open_project(project: Project, defaults: Defaults) -> bool:
+def open_project(project: Project, defaults: Defaults) -> int | None:
     """Attach to project session, creating it with the configured layout if needed.
 
-    Returns True if the session was attached, False if the user cancelled.
+    Returns the tmux exit code on success, or None if the user cancelled.
     """
     target = pick_opencode_target(project.path, "opencode")
 
     if target is None:
-        return False
+        return None
 
     session = project_session_name(project.session, target)
 
     if not session_exists(session):
         _create_session(project, defaults, target.command, session)
 
-    _attach(session)
-    return True
+    return _attach(session)
 
 
 def stop_project(project: Project) -> None:
