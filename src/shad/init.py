@@ -12,8 +12,13 @@ Then appends the new [projects.*] entry to shad.toml.
 
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess
 import sys
 import tomllib
+import urllib.request
+from dataclasses import dataclass
 from pathlib import Path
 
 from rich.console import Console
@@ -25,6 +30,14 @@ from shad.config import CONFIG_PATH
 
 console = Console()
 err_console = Console(stderr=True)
+
+OPEN_CODE_INSTALL_URL = "https://github.com/anomalyco/opencode/releases/latest/download/opencode-linux-x64.tar.gz"
+
+
+@dataclass(frozen=True)
+class Dependency:
+    binary: str
+    package: str | None = None
 
 
 _DEFAULTS_BLOCK = """\
@@ -42,6 +55,12 @@ _DEFAULTS_BLOCK = """\
 # split_percent = 35
 
 """
+
+DEPENDENCIES = (
+    Dependency(binary="tmux", package="tmux"),
+    Dependency(binary="gitui", package="gitui"),
+    Dependency(binary="opencode"),
+)
 
 
 def _write_defaults_block(config_path: Path) -> None:
@@ -85,10 +104,87 @@ def _key_exists(config_path: Path, group: str | None, key: str) -> bool:
     return key in projects
 
 
-def cmd_init() -> None:
+def _detect_fedora() -> bool:
+    os_release = Path("/etc/os-release")
+    if not os_release.exists():
+        return False
+
+    text = os_release.read_text()
+    return 'ID=fedora' in text or 'ID_LIKE="fedora"' in text or 'ID_LIKE=fedora' in text
+
+
+def _is_root() -> bool:
+    geteuid = getattr(os, "geteuid", None)
+    if geteuid is None:
+        return False
+    return geteuid() == 0
+
+
+def _missing_dependencies() -> list[Dependency]:
+    return [dep for dep in DEPENDENCIES if shutil.which(dep.binary) is None]
+
+
+def _run_install_command(command: list[str], description: str) -> None:
+    console.print(Text(f"  → {description}", style="cyan"))
+    result = subprocess.run(command)
+    if result.returncode != 0:
+        err_console.print(Text(f"  ✗ failed: {' '.join(command)}", style="bold red"))
+        sys.exit(result.returncode or 1)
+
+
+def _install_opencode_systemwide() -> None:
+    tmp_dir = Path("/tmp") / f"shad-opencode-{os.getpid()}"
+    archive = tmp_dir / "opencode-linux-x64.tar.gz"
+    binary = tmp_dir / "opencode"
+
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        console.print(Text("  → installing opencode to /usr/local/bin/opencode", style="cyan"))
+        with urllib.request.urlopen(OPEN_CODE_INSTALL_URL) as response:
+            archive.write_bytes(response.read())
+
+        _run_install_command(["tar", "-xzf", str(archive), "-C", str(tmp_dir)], "extracting opencode release")
+        _run_install_command(["install", "-m", "0755", str(binary), "/usr/local/bin/opencode"], "copying opencode binary")
+    except Exception as exc:
+        err_console.print(Text(f"  ✗ failed to install opencode: {exc}", style="bold red"))
+        sys.exit(1)
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def ensure_dependencies_installed() -> None:
+    missing = _missing_dependencies()
+    if not missing:
+        console.print(Text("  ✓ dependencies already installed", style="bold green"))
+        return
+
+    if not _detect_fedora():
+        err_console.print(Text("  ✗ --install-deps currently supports Fedora only", style="bold red"))
+        sys.exit(1)
+
+    if not _is_root():
+        err_console.print(Text("  ✗ --install-deps must be run with sudo on Fedora", style="bold red"))
+        err_console.print(Text("    try: sudo shad init --install-deps", style="dim"))
+        sys.exit(1)
+
+    packages = [dep.package for dep in missing if dep.package]
+    if packages:
+        _run_install_command(["dnf", "install", "-y", *packages], f"installing {', '.join(packages)} with dnf")
+
+    if any(dep.binary == "opencode" for dep in missing):
+        _install_opencode_systemwide()
+
+    console.print(Text("  ✓ dependencies installed", style="bold green"))
+
+
+def cmd_init(*, install_deps: bool = False) -> None:
     console.print()
     console.print(Text("shad init", style="bold cyan") + Text(" — add a new project", style="dim"))
     console.print()
+
+    if install_deps:
+        ensure_dependencies_installed()
+        console.print()
 
     # --- path ---
     while True:

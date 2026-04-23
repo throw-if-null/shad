@@ -59,6 +59,12 @@ Run the interactive wizard:
 shad init
 ```
 
+On Fedora you can also ask `shad` to install missing runtime dependencies first:
+
+```sh
+sudo shad init --install-deps
+```
+
 It will prompt for a project path, key, and optional group, then create `~/.config/shad/shad.toml` with a commented `[defaults]` block and your first project entry. Uncomment and adjust the defaults if you want a different layout.
 
 To add more projects later, run `shad init` again.
@@ -243,6 +249,20 @@ If `shad` is run from **inside** an existing tmux session it uses `switch-client
 - `Ctrl+b` `q` — show pane numbers, press number to jump
 
 ## Dependencies
+
+### Fedora bootstrap
+
+`shad init --install-deps` is tailored for Fedora and installs missing dependencies before starting the init wizard.
+
+- `tmux` via `dnf`
+- `gitui` via `dnf`
+- `opencode` by downloading the latest Linux x64 release into `/usr/local/bin/opencode`
+
+Run it with `sudo`:
+
+```sh
+sudo shad init --install-deps
+```
 
 ### gitui
 

@@ -212,12 +212,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Shell to generate completions for",
     )
 
-    sub.add_parser(
+    p_init = sub.add_parser(
         "init",
         help="Add a new project to the config interactively",
         description=(
             "Interactive wizard that adds a new project to ~/.config/shad/shad.toml.\n"
             "Creates the config file with a commented [defaults] block if it does not exist yet.\n\n"
+            "Options:\n"
+            "  --install-deps  install missing tmux, opencode, and gitui dependencies on Fedora\n\n"
             "Prompts:\n"
             "  path         Absolute path to the project root (must exist)\n"
             "  group        Optional group name; leave blank for a top-level project\n"
@@ -225,9 +227,15 @@ def build_parser() -> argparse.ArgumentParser:
             "  session      tmux session name; defaults to <key> or <group>-<key>\n\n"
             "Examples:\n"
             "  shad init                         add a top-level project\n"
+            "  sudo shad init --install-deps     install Fedora deps, then run init\n"
             "  shad init                         add a grouped project (enter group at prompt)"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_init.add_argument(
+        "--install-deps",
+        action="store_true",
+        help="Install missing tmux, opencode, and gitui dependencies on Fedora before prompting",
     )
 
     sub.add_parser(
@@ -259,7 +267,7 @@ def main() -> None:
         return
 
     if args.command == "init":
-        cmd_init()
+        cmd_init(install_deps=args.install_deps)
         return
 
     if args.command == "cheat":
