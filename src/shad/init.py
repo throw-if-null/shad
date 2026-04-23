@@ -13,6 +13,7 @@ Then appends the new [projects.*] entry to shad.toml.
 from __future__ import annotations
 
 import os
+import platform
 import shutil
 import subprocess
 import tomllib
@@ -32,7 +33,10 @@ from shad.errors import ShadError
 console = Console()
 err_console = Console(stderr=True)
 
-OPEN_CODE_INSTALL_URL = "https://github.com/anomalyco/opencode/releases/latest/download/opencode-linux-x64.tar.gz"
+OPEN_CODE_INSTALL_URL = (
+    "https://github.com/anomalyco/opencode/releases/latest/download/"
+    f"opencode-linux-{platform.machine().replace('x86_64', 'x64')}.tar.gz"
+)
 
 
 @dataclass(frozen=True)
@@ -109,7 +113,12 @@ def _detect_fedora() -> bool:
     if not os_release.exists():
         return False
     text = os_release.read_text()
-    return 'ID=fedora' in text or 'ID_LIKE="fedora"' in text or 'ID_LIKE=fedora' in text
+    lines = {line.strip() for line in text.splitlines()}
+    return (
+        "ID=fedora" in lines
+        or 'ID_LIKE="fedora"' in lines
+        or "ID_LIKE=fedora" in lines
+    )
 
 
 def _is_root() -> bool:
@@ -135,7 +144,7 @@ def _install_via_dnf(package: str) -> Callable[[], None]:
 
 def _install_opencode_systemwide() -> None:
     tmp_dir = Path("/tmp") / f"shad-opencode-{os.getpid()}"
-    archive = tmp_dir / "opencode-linux-x64.tar.gz"
+    archive = tmp_dir / OPEN_CODE_INSTALL_URL.rsplit("/", 1)[-1]
     binary = tmp_dir / "opencode"
 
     tmp_dir.mkdir(parents=True, exist_ok=True)
