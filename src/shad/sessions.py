@@ -17,10 +17,10 @@ from __future__ import annotations
 
 import re
 import sqlite3
-import sys
 import os
 import tty
 import termios
+import warnings
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -85,7 +85,8 @@ def _query_sessions(project_path: Path, limit: int = SESSION_LIMIT) -> list[OcSe
         rows = cur.fetchall()
         con.close()
         return [OcSession(id=r[0], title=r[1], time_updated=r[2]) for r in rows]
-    except Exception:
+    except sqlite3.DatabaseError as exc:
+        warnings.warn(f"shad: could not read opencode session DB: {exc}", stacklevel=2)
         return []
 
 
@@ -137,7 +138,7 @@ def _read_key(fd: int) -> str:
         try:
             rest = os.read(fd, 2)
             return (ch + rest).decode("utf-8", errors="replace")
-        except Exception:
+        except OSError:
             return "\x1b"
     return ch.decode("utf-8", errors="replace")
 
@@ -206,9 +207,13 @@ def _run_picker(sessions: list[OcSession], project_name: str) -> int | None:
             elif key in ("q", "Q", "\x1b"):
                 cleanup()
                 return None
-    except Exception:
-        termios.tcsetattr(tty_fd, termios.TCSADRAIN, old_settings)
-        os.close(tty_fd)
+    except (OSError, termios.error) as exc:
+        warnings.warn(f"shad: picker failed: {exc}", stacklevel=2)
+        try:
+            termios.tcsetattr(tty_fd, termios.TCSADRAIN, old_settings)
+            os.close(tty_fd)
+        except OSError:
+            pass
         return None
 
 

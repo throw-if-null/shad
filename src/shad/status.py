@@ -16,7 +16,9 @@ import json
 import re
 import shutil
 import subprocess
+import urllib.error
 import urllib.request
+import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -40,12 +42,12 @@ def _run(args: list[str], *, cwd: Path | None = None) -> str:
     except FileNotFoundError:
         return ""
 
-
 def _fetch_json(url: str, timeout: int = 4) -> object:
     try:
         with urllib.request.urlopen(url, timeout=timeout) as resp:
             return json.loads(resp.read())
-    except Exception:
+    except (urllib.error.URLError, json.JSONDecodeError, OSError) as exc:
+        warnings.warn(f"shad: version fetch failed ({url}): {exc}", stacklevel=2)
         return None
 
 
@@ -206,7 +208,8 @@ def _print_runtimes(path: Path) -> None:
             lbl = futures[future]
             try:
                 latest[lbl] = future.result()
-            except Exception:
+            except Exception as exc:
+                warnings.warn(f"shad: latest version fetch failed for {lbl}: {exc}", stacklevel=2)
                 latest[lbl] = None
 
     def _semver(v: str) -> str:
