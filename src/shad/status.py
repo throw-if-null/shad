@@ -186,7 +186,9 @@ def _print_runtimes(path: Path) -> None:
     ]
 
     detected: list[tuple[str, str, str]] = []
-    for label, _manifests, cmd in checks:
+    for label, manifests, cmd in checks:
+        if not any((path / m).exists() for m in manifests):
+            continue
         version = _run(cmd)
         installed = version.splitlines()[0] if version else ""
         detected.append((label, installed, cmd[0]))
