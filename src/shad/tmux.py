@@ -35,8 +35,13 @@ import os
 import re
 import subprocess
 
+from rich.console import Console
+from rich.text import Text
+
 from shad.config import Defaults, Project
 from shad.sessions import OpencodeTarget, pick_opencode_target
+
+console = Console()
 
 
 _SESSION_KEY_RE = re.compile(r"[^A-Za-z0-9_-]+")
@@ -168,13 +173,13 @@ def stop_project(project: Project) -> None:
     """Kill tmux sessions for a project, if any are running."""
     sessions = list_project_sessions(project.session)
     if not sessions:
-        print(f"session '{project.session}' is not running")
+        console.print(Text(f"session '{project.session}' is not running", style="dim"))
         return
 
     for session in sessions:
         _run(["tmux", "kill-session", "-t", session])
 
     if len(sessions) == 1:
-        print(f"session '{sessions[0]}' stopped")
+        console.print(Text(f"session '{sessions[0]}' stopped", style="bold green"))
     else:
-        print(f"stopped {len(sessions)} sessions for '{project.session}'")
+        console.print(Text(f"stopped {len(sessions)} sessions for '{project.session}'", style="bold green"))

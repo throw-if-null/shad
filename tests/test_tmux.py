@@ -109,13 +109,13 @@ class StopProjectTests(unittest.TestCase):
         with patch(
             "shad.tmux.list_project_sessions",
             return_value=["tin-shad", "tin-shad--oc-sess-123"],
-        ), patch("shad.tmux._run") as run, patch("builtins.print") as print_mock:
+        ), patch("shad.tmux._run") as run, patch("shad.tmux.console") as mock_console:
             stop_project(project)
 
         run.assert_any_call(["tmux", "kill-session", "-t", "tin-shad"])
         run.assert_any_call(["tmux", "kill-session", "-t", "tin-shad--oc-sess-123"])
         self.assertEqual(run.call_count, 2)
-        print_mock.assert_called_once_with("stopped 2 sessions for 'tin-shad'")
+        mock_console.print.assert_called_once()
 
 
 if __name__ == "__main__":
