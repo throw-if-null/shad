@@ -46,6 +46,16 @@ class OpenProjectTests(unittest.TestCase):
         )
         self.defaults = Defaults()
 
+    def test_open_project_returns_false_when_picker_cancelled(self) -> None:
+        with patch("shad.tmux.pick_opencode_target", return_value=None), patch(
+            "shad.tmux._create_session"
+        ) as create_session, patch("shad.tmux._attach") as attach:
+            result = open_project(self.project, self.defaults)
+
+        self.assertFalse(result)
+        create_session.assert_not_called()
+        attach.assert_not_called()
+
     def test_open_project_creates_scoped_tmux_session_for_existing_oc_session(self) -> None:
         target = OpencodeTarget(command="opencode -s sess-123", session_key="sess-123")
 

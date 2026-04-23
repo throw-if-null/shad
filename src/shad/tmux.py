@@ -147,13 +147,15 @@ def _attach(session: str) -> None:
     sys.exit(result.returncode)
 
 
-def open_project(project: Project, defaults: Defaults) -> None:
-    """Attach to project session, creating it with the configured layout if needed."""
+def open_project(project: Project, defaults: Defaults) -> bool:
+    """Attach to project session, creating it with the configured layout if needed.
+
+    Returns True if the session was attached, False if the user cancelled.
+    """
     target = pick_opencode_target(project.path, "opencode")
 
     if target is None:
-        # User cancelled the picker — do nothing.
-        sys.exit(0)
+        return False
 
     session = project_session_name(project.session, target)
 
@@ -161,6 +163,7 @@ def open_project(project: Project, defaults: Defaults) -> None:
         _create_session(project, defaults, target.command, session)
 
     _attach(session)
+    return True
 
 
 def stop_project(project: Project) -> None:

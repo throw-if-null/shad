@@ -73,7 +73,8 @@ def _run_action(cfg: Config, project, action: str | None) -> None:
     """Dispatch open / status / stop for a resolved project."""
     if action is None or action == "open":
         print_banner()
-        open_project(project, cfg.defaults)
+        if not open_project(project, cfg.defaults):
+            return  # user cancelled the picker — exit cleanly
     elif action == "status":
         print_status(project)
     elif action == "stop":
