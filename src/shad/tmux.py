@@ -69,7 +69,7 @@ def list_project_sessions(base_session: str) -> list[str]:
     if result.returncode != 0:
         return []
 
-    prefix = f"{base_session}--"
+    prefix = f"{base_session}--oc-"
     return [
         line.strip()
         for line in result.stdout.splitlines()

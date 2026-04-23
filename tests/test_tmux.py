@@ -26,13 +26,14 @@ class TmuxHelpersTests(unittest.TestCase):
         result = subprocess.CompletedProcess(
             args=["tmux", "list-sessions"],
             returncode=0,
-            stdout="tin-shad\ntin-shad--oc-sess-123\nother\n",
+            stdout="tin-shad\ntin-shad--oc-sess-123\ntin-shad-extra\nother\n",
             stderr="",
         )
 
         with patch("shad.tmux._run", return_value=result):
             sessions = list_project_sessions("tin-shad")
 
+        # tin-shad-extra must NOT be included (no --oc- separator)
         self.assertEqual(sessions, ["tin-shad", "tin-shad--oc-sess-123"])
 
 
