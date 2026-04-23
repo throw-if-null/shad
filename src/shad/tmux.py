@@ -68,6 +68,17 @@ def project_session_name(base_session: str, target: OpencodeTarget) -> str:
     return f"{base_session}--oc-{session_key}"
 
 
+def _tmux_server_running() -> bool:
+    """Return True if a tmux server is currently running."""
+    result = _run(["tmux", "list-sessions"], check=False)
+    # tmux exits 1 with "no server running" when the server is not up;
+    # it also exits 1 with "no sessions" when running but empty — both are fine.
+    if result.returncode == 0:
+        return True
+    stderr = result.stderr.lower()
+    return "no server" not in stderr and "error" not in stderr
+
+
 def list_project_sessions(base_session: str) -> list[str]:
     """Return tmux sessions belonging to the project's base session name."""
     result = _run(["tmux", "list-sessions", "-F", "#S"], check=False)
