@@ -4,7 +4,7 @@ Config loading for shad.
 Schema (shad.toml):
 
   [defaults]
-  oc_position   = "top"   # top | bottom | left | right
+  oc_position   = "top"   # top | bottom | left
   panel_percent = 35      # % of window the git+bash bundle takes
   split_percent = 35      # % of the bundle that gitui takes (bash gets the rest)
 

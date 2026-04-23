@@ -24,7 +24,7 @@ from rich.console import Console
 from rich.text import Text
 
 from shad import __version__
-from shad.config import Config, load, resolve_prefix
+from shad.config import Config, Project, load, resolve_prefix
 from shad.errors import ShadError
 from shad.tmux import open_project, stop_project
 from shad.status import print_status
@@ -69,7 +69,7 @@ def _list_group(cfg: Config, group_name: str) -> None:
             console.print(Text("    ● ", style="cyan") + Text(f"{group_name} {key}", style="white"))
 
 
-def _run_action(cfg: Config, project, action: str | None) -> None:
+def _run_action(cfg: Config, project: Project, action: str | None) -> None:
     """Dispatch open / status / stop for a resolved project."""
     if action is None or action == "open":
         print_banner()
