@@ -26,7 +26,7 @@ from rich.text import Text
 from rich import box
 
 from shad.config import Project
-from shad.tmux import session_exists
+from shad.tmux import list_project_sessions
 
 console = Console()
 
@@ -118,9 +118,19 @@ def _make_table(title: str) -> Table:
 
 def _print_tmux(project: Project) -> None:
     t = _make_table("tmux")
-    running = session_exists(project.session)
-    state = Text("running", style="bold green") if running else Text("not running", style="dim")
-    t.add_row(Text("session", style="dim"), Text(project.session), state)
+    running = list_project_sessions(project.session)
+    if not running:
+        t.add_row(Text("session", style="dim"), Text(project.session), Text("not running", style="dim"))
+        console.print(t)
+        return
+
+    for index, session in enumerate(running):
+        label = Text("session", style="dim") if index == 0 else Text("")
+        display = Text(session)
+        if session == project.session:
+            display.append("  (base)", style="dim")
+        t.add_row(label, display, Text("running", style="bold green"))
+
     console.print(t)
 
 

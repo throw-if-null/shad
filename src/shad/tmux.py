@@ -32,11 +32,15 @@ If run inside an existing tmux session ($TMUX is set), uses
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 
 from shad.config import Defaults, Project
-from shad.sessions import pick_opencode_cmd
+from shad.sessions import OpencodeTarget, pick_opencode_target
+
+
+_SESSION_KEY_RE = re.compile(r"[^A-Za-z0-9_-]+")
 
 
 def _run(args: list[str], *, check: bool = True) -> subprocess.CompletedProcess:
@@ -48,9 +52,34 @@ def session_exists(name: str) -> bool:
     return result.returncode == 0
 
 
-def _create_session(project: Project, defaults: Defaults, top_command: str) -> None:
+def project_session_name(base_session: str, target: OpencodeTarget) -> str:
+    """Resolve the tmux session name for a project and opencode target."""
+    if not target.session_key:
+        return base_session
+
+    session_key = _SESSION_KEY_RE.sub("_", target.session_key).strip("_")
+    if not session_key:
+        session_key = "session"
+
+    return f"{base_session}--oc-{session_key}"
+
+
+def list_project_sessions(base_session: str) -> list[str]:
+    """Return tmux sessions belonging to the project's base session name."""
+    result = _run(["tmux", "list-sessions", "-F", "#S"], check=False)
+    if result.returncode != 0:
+        return []
+
+    prefix = f"{base_session}--"
+    return [
+        line.strip()
+        for line in result.stdout.splitlines()
+        if line.strip() == base_session or line.strip().startswith(prefix)
+    ]
+
+
+def _create_session(project: Project, defaults: Defaults, top_command: str, session: str) -> None:
     """Create a new tmux session with the configured layout."""
-    session = project.session
     cwd = str(project.path)
     pos = defaults.oc_position
     panel_percent = defaults.panel_percent   # bundle's share of the window
@@ -120,27 +149,31 @@ def _attach(session: str) -> None:
 
 def open_project(project: Project, defaults: Defaults) -> None:
     """Attach to project session, creating it with the configured layout if needed."""
-    top_command = pick_opencode_cmd(project.path, "opencode")
+    target = pick_opencode_target(project.path, "opencode")
 
-    if top_command is None:
+    if target is None:
         # User cancelled the picker — do nothing.
         sys.exit(0)
 
-    if not session_exists(project.session):
-        _create_session(project, defaults, top_command)
-    else:
-        # Session already exists — interrupt whatever is in the top pane
-        # and relaunch opencode with the chosen session.
-        _run(["tmux", "send-keys", "-t", f"{project.session}:0.0", "C-c", ""])
-        _run(["tmux", "send-keys", "-t", f"{project.session}:0.0", top_command + "\n"])
+    session = project_session_name(project.session, target)
 
-    _attach(project.session)
+    if not session_exists(session):
+        _create_session(project, defaults, target.command, session)
+
+    _attach(session)
 
 
 def stop_project(project: Project) -> None:
-    """Kill the tmux session for a project, if it is running."""
-    if not session_exists(project.session):
+    """Kill tmux sessions for a project, if any are running."""
+    sessions = list_project_sessions(project.session)
+    if not sessions:
         print(f"session '{project.session}' is not running")
         return
-    _run(["tmux", "kill-session", "-t", project.session])
-    print(f"session '{project.session}' stopped")
+
+    for session in sessions:
+        _run(["tmux", "kill-session", "-t", session])
+
+    if len(sessions) == 1:
+        print(f"session '{sessions[0]}' stopped")
+    else:
+        print(f"stopped {len(sessions)} sessions for '{project.session}'")

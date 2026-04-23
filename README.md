@@ -130,6 +130,7 @@ path    = "/home/user/gh/alvr/portal"
 - Top-level project `[projects.kb]` → session `kb`
 - Grouped project `[projects.alvr.db]` → session `alvr-db`
 - Override either by setting `session = "my-name"` explicitly.
+- If you reopen the same project and choose an existing OpenCode session, `shad` uses a scoped tmux session name like `alvr-db--oc-<session-id>` so multiple OpenCode sessions can stay open side by side.
 
 ## Usage
 
@@ -157,7 +158,7 @@ shad projects al d      # prefix matching per level
 shad projects kb status
 shad projects alvr db status
 
-# Kill a session
+# Kill a project's tmux sessions
 shad projects kb stop
 shad projects alvr db stop
 
@@ -200,7 +201,7 @@ tmux source-file ~/.tmux.conf
 
 ## tmux layout
 
-Created once on first open, never rebuilt on subsequent attaches. The layout depends on `oc_position`:
+Created once per tmux session on first open, never rebuilt on subsequent attaches. The layout depends on `oc_position`:
 
 **`oc_position = "top"` (default)**
 ```
@@ -232,6 +233,8 @@ Created once on first open, never rebuilt on subsequent attaches. The layout dep
 `panel_percent` controls how much of the window the git+bash bundle takes; `split_percent` controls the gitui/bash split within it.
 
 If `shad` is run from **inside** an existing tmux session it uses `switch-client`; outside tmux it uses `attach-session`.
+
+`shad projects <name> status` lists all tmux sessions that belong to the configured project session name, including scoped sessions created for specific OpenCode session ids. `shad projects <name> stop` stops all of them.
 
 ### Navigating panes
 

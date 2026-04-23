@@ -6,9 +6,9 @@ project path, then presents an interactive arrow-key picker rendered with Rich.
 
 Public API
 ----------
-pick_opencode_cmd(project_path, base_opencode_cmd) -> str
-    Shows an interactive picker and returns the full opencode command string
-    to run (e.g. "opencode" or "opencode -s <id>").
+pick_opencode_target(project_path, base_opencode_cmd) -> OpencodeTarget
+    Shows an interactive picker and returns the opencode command plus an
+    optional session key used to scope the tmux session.
     Falls back to base_opencode_cmd if the DB is unavailable or there are
     no sessions.
 """
@@ -55,6 +55,12 @@ class OcSession:
         if _NEW_SESSION_RE.match(self.title):
             return "(untitled)"
         return self.title
+
+
+@dataclass(frozen=True)
+class OpencodeTarget:
+    command: str
+    session_key: str | None = None
 
 
 def _query_sessions(project_path: Path, limit: int = SESSION_LIMIT) -> list[OcSession]:
@@ -208,16 +214,16 @@ def _run_picker(sessions: list[OcSession], project_name: str) -> int | None:
 
 # ── Public API ─────────────────────────────────────────────────────────────
 
-def pick_opencode_cmd(project_path: Path, base_cmd: str) -> str | None:
+def pick_opencode_target(project_path: Path, base_cmd: str) -> OpencodeTarget | None:
     """
-    Show an interactive session picker and return the opencode command to run.
+    Show an interactive session picker and return the opencode target to run.
 
     Returns None if the user explicitly cancelled (q / Esc).
     Falls back to base_cmd on error or no sessions.
     """
     sessions = _query_sessions(project_path)
     if not sessions:
-        return base_cmd
+        return OpencodeTarget(command=base_cmd)
 
     project_name = project_path.name
     chosen = _run_picker(sessions, project_name)
@@ -225,7 +231,7 @@ def pick_opencode_cmd(project_path: Path, base_cmd: str) -> str | None:
     if chosen is None:
         return None  # user cancelled — caller should abort
     if chosen == 0:
-        return base_cmd
+        return OpencodeTarget(command=base_cmd)
 
     session = sessions[chosen - 1]
-    return f"{base_cmd} -s {session.id}"
+    return OpencodeTarget(command=f"{base_cmd} -s {session.id}", session_key=session.id)
