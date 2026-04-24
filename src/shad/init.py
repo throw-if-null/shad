@@ -228,15 +228,15 @@ def cmd_init(*, install_deps: bool = False) -> None:
     group = Prompt.ask("[cyan]  group[/cyan] [dim](leave blank for top-level)[/dim]", default="") or None
 
     # --- key ---
-    key = Prompt.ask("[cyan]  key[/cyan]", default=default_key)
+    while True:
+        key = Prompt.ask("[cyan]  key[/cyan]", default=default_key)
+        if not _key_exists(CONFIG_PATH, group, key):
+            break
+        err_console.print(Text(f"  ✗ [{_toml_key(group, key)}] already exists in {CONFIG_PATH}", style="bold red"))
 
     # --- session ---
     default_session = f"{group}-{key}" if group else key
     session = Prompt.ask("[cyan]  session name[/cyan]", default=default_session)
-
-    # --- check for duplicates ---
-    if _key_exists(CONFIG_PATH, group, key):
-        raise ShadError(f"[{_toml_key(group, key)}] already exists in {CONFIG_PATH}")
 
     # --- confirm ---
     toml_key = _toml_key(group, key)
