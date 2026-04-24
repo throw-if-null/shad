@@ -94,7 +94,7 @@ def list_project_sessions(base_session: str) -> list[str]:
     ]
 
 
-def _create_session(project: Project, defaults: Defaults, top_command: str, session: str) -> None:
+def _create_session(project: Project, defaults: Defaults, oc_command: str, session: str) -> None:
     """Create a new tmux session with the configured layout."""
     cwd = str(project.path)
     pos = defaults.oc_position
@@ -107,7 +107,7 @@ def _create_session(project: Project, defaults: Defaults, top_command: str, sess
 
     if pos == "top":
         # OC top, bundle below — horizontal split within bundle
-        _run(["tmux", "send-keys", "-t", f"{session}:0.0", top_command + "\n"])
+        _run(["tmux", "send-keys", "-t", f"{session}:0.0", oc_command + "\n"])
         _run(["tmux", "split-window", "-t", f"{session}:0.0",
               "-v", "-p", str(panel_percent), "-c", cwd])
         _run(["tmux", "split-window", "-t", f"{session}:0.1",
@@ -126,11 +126,11 @@ def _create_session(project: Project, defaults: Defaults, top_command: str, sess
               "-h", "-p", str(split_percent), "-c", cwd])
         # pane 0 = bash, pane 1 = git, pane 2 = OC
         bash_pane, git_pane, oc_pane = f"{session}:0.0", f"{session}:0.1", f"{session}:0.2"
-        _run(["tmux", "send-keys", "-t", oc_pane, top_command + "\n"])
+        _run(["tmux", "send-keys", "-t", oc_pane, oc_command + "\n"])
 
     else:  # left
         # OC on left, bundle on right — vertical split within bundle (bash top, gitui bottom)
-        _run(["tmux", "send-keys", "-t", f"{session}:0.0", top_command + "\n"])
+        _run(["tmux", "send-keys", "-t", f"{session}:0.0", oc_command + "\n"])
         _run(["tmux", "split-window", "-t", f"{session}:0.0",
               "-h", "-p", str(panel_percent), "-c", cwd])
         _run(["tmux", "split-window", "-t", f"{session}:0.1",
