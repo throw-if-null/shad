@@ -27,7 +27,7 @@ _shad_complete() {
 
     # shad <TAB>  →  top-level subcommands
     if [[ ${COMP_CWORD} -eq 1 ]]; then
-        COMPREPLY=($(compgen -W "projects completion init" -- "$cur"))
+        COMPREPLY=($(compgen -W "projects completion init cheat" -- "$cur"))
         return
     fi
 
@@ -105,7 +105,7 @@ _shad() {
 
     case $state in
         cmd)
-            _values 'command' projects completion init
+            _values 'command' projects completion init cheat
             ;;
         args)
             case $words[2] in
