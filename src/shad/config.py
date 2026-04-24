@@ -99,10 +99,19 @@ def load(path: Path = CONFIG_PATH) -> Config:
         raise ShadError(
             f"invalid oc_position '{oc_position}'; must be one of: {', '.join(OC_POSITIONS)}"
         )
+    def _int_setting(name: str, default: int) -> int:
+        raw_val = d.get(name, default)
+        try:
+            return int(raw_val)
+        except (TypeError, ValueError):
+            raise ShadError(
+                f"invalid value for '{name}' in [defaults]: expected an integer, got {raw_val!r}"
+            )
+
     defaults = Defaults(
         oc_position=oc_position,
-        panel_percent=int(d.get("panel_percent", 35)),
-        split_percent=int(d.get("split_percent", 35)),
+        panel_percent=_int_setting("panel_percent", 35),
+        split_percent=_int_setting("split_percent", 35),
     )
 
     # --- projects ---
