@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+import argparse
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from shad.cli import build_parser, cmd_projects, main, _run_action
+from shad.cli import cmd_projects, main, _run_action
 from shad.shared.config import Config, Defaults, Project
 from shad.shared.errors import ShadError
 
 
-def _make_project(key: str, group: str | None = None, session: str | None = None) -> Project:
+def _make_project(
+    key: str, group: str | None = None, session: str | None = None
+) -> Project:
     return Project(
         key=key,
         group=group,
@@ -18,13 +21,14 @@ def _make_project(key: str, group: str | None = None, session: str | None = None
     )
 
 
-def _make_args(name: list[str]) -> object:
-    return type("Args", (), {"name": name})()
+def _make_args(name: list[str]) -> argparse.Namespace:
+    return argparse.Namespace(name=name)
 
 
 # ---------------------------------------------------------------------------
 # cmd_projects dispatch
 # ---------------------------------------------------------------------------
+
 
 class ProjectsCommandTests(unittest.TestCase):
     def test_grouped_project_open_dispatches_to_open_project(self) -> None:
@@ -32,7 +36,10 @@ class ProjectsCommandTests(unittest.TestCase):
         cfg = Config(defaults=Defaults(), groups={"tin": {"shad": project}})
         args = _make_args(["tin", "shad"])
 
-        with patch("shad.cli.print_banner"), patch("shad.cli.open_project", return_value=0) as open_project:
+        with (
+            patch("shad.cli.print_banner"),
+            patch("shad.cli.open_project", return_value=0) as open_project,
+        ):
             with self.assertRaises(SystemExit) as ctx:
                 cmd_projects(cfg, args)
 
@@ -44,7 +51,10 @@ class ProjectsCommandTests(unittest.TestCase):
         cfg = Config(defaults=Defaults(), projects={"shad": project})
         args = _make_args(["shad"])
 
-        with patch("shad.cli.print_banner"), patch("shad.cli.open_project", return_value=0) as open_project:
+        with (
+            patch("shad.cli.print_banner"),
+            patch("shad.cli.open_project", return_value=0) as open_project,
+        ):
             with self.assertRaises(SystemExit) as ctx:
                 cmd_projects(cfg, args)
 
@@ -140,7 +150,9 @@ class ProjectsListTests(unittest.TestCase):
 
         mock_stop.assert_called_once_with(project)
 
-    def test_group_token_resolves_to_top_level_project_raises_helpful_error(self) -> None:
+    def test_group_token_resolves_to_top_level_project_raises_helpful_error(
+        self,
+    ) -> None:
         cfg = Config(
             defaults=Defaults(),
             projects={"shad": _make_project("shad")},
@@ -188,10 +200,11 @@ class ProjectsListTests(unittest.TestCase):
         cfg = Config(defaults=Defaults(), projects={"shad": project})
         args = _make_args(["shad"])
 
-        with patch("shad.cli.print_banner"), patch("shad.cli.open_project", return_value=None):
-            result = cmd_projects(cfg, args)
-
-        self.assertIsNone(result)
+        with (
+            patch("shad.cli.print_banner"),
+            patch("shad.cli.open_project", return_value=None),
+        ):
+            cmd_projects(cfg, args)
 
     def test_unknown_action_raises_shad_error(self) -> None:
         project = _make_project("shad")
@@ -207,27 +220,34 @@ class ProjectsListTests(unittest.TestCase):
 # main() error handling
 # ---------------------------------------------------------------------------
 
+
 class MainErrorHandlingTests(unittest.TestCase):
     def test_shad_error_exits_1(self) -> None:
-        with patch("sys.argv", ["shad", "projects"]), \
-             patch("shad.cli.load", side_effect=ShadError("boom")), \
-             patch("shad.cli.err_console"):
+        with (
+            patch("sys.argv", ["shad", "projects"]),
+            patch("shad.cli.load", side_effect=ShadError("boom")),
+            patch("shad.cli.err_console"),
+        ):
             with self.assertRaises(SystemExit) as ctx:
                 main()
         self.assertEqual(ctx.exception.code, 1)
 
     def test_keyboard_interrupt_exits_130(self) -> None:
-        with patch("sys.argv", ["shad", "projects"]), \
-             patch("shad.cli.load", side_effect=KeyboardInterrupt()), \
-             patch("shad.cli.err_console"):
+        with (
+            patch("sys.argv", ["shad", "projects"]),
+            patch("shad.cli.load", side_effect=KeyboardInterrupt()),
+            patch("shad.cli.err_console"),
+        ):
             with self.assertRaises(SystemExit) as ctx:
                 main()
         self.assertEqual(ctx.exception.code, 130)
 
     def test_eof_error_exits_130(self) -> None:
-        with patch("sys.argv", ["shad", "projects"]), \
-             patch("shad.cli.load", side_effect=EOFError()), \
-             patch("shad.cli.err_console"):
+        with (
+            patch("sys.argv", ["shad", "projects"]),
+            patch("shad.cli.load", side_effect=EOFError()),
+            patch("shad.cli.err_console"),
+        ):
             with self.assertRaises(SystemExit) as ctx:
                 main()
         self.assertEqual(ctx.exception.code, 130)

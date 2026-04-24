@@ -13,7 +13,6 @@ Prints a human-readable summary as a series of titled tables:
 from __future__ import annotations
 
 import json
-import re
 import shutil
 import subprocess
 import urllib.error
@@ -36,12 +35,14 @@ console = Console()
 
 # ── subprocess / fetch helpers ────────────────────────────────────────────
 
+
 def _capture(args: list[str], *, cwd: Path | None = None) -> str:
     try:
         r = subprocess.run(args, capture_output=True, text=True, cwd=cwd)
         return r.stdout.strip() if r.returncode == 0 else ""
     except FileNotFoundError:
         return ""
+
 
 def _fetch_json(url: str, timeout: int = 4) -> object:
     try:
@@ -53,6 +54,7 @@ def _fetch_json(url: str, timeout: int = 4) -> object:
 
 
 # ── latest version fetchers ───────────────────────────────────────────────
+
 
 def _latest_python() -> str | None:
     data = _fetch_json("https://endoflife.date/api/python.json")
@@ -93,14 +95,15 @@ def _latest_deno() -> str | None:
 
 _LATEST_FETCHERS: dict[str, Callable[[], str | None]] = {
     "python": _latest_python,
-    "node":   _latest_node,
-    "go":     _latest_go,
-    "rust":   _latest_rust,
-    "deno":   _latest_deno,
+    "node": _latest_node,
+    "go": _latest_go,
+    "rust": _latest_rust,
+    "deno": _latest_deno,
 }
 
 
 # ── table helpers ─────────────────────────────────────────────────────────
+
 
 def _make_table(title: str) -> Table:
     t = Table(
@@ -119,14 +122,23 @@ def _make_table(title: str) -> Table:
 
 # ── section builders ──────────────────────────────────────────────────────
 
+
 def _print_tmux(project: Project) -> None:
     t = _make_table("tmux")
     running = list_project_sessions(project.session)
     if not running:
         if not tmux_server_running():
-            t.add_row(Text("session", style="dim"), Text(project.session), Text("tmux not running", style="dim"))
+            t.add_row(
+                Text("session", style="dim"),
+                Text(project.session),
+                Text("tmux not running", style="dim"),
+            )
         else:
-            t.add_row(Text("session", style="dim"), Text(project.session), Text("not running", style="dim"))
+            t.add_row(
+                Text("session", style="dim"),
+                Text(project.session),
+                Text("not running", style="dim"),
+            )
         console.print(t)
         return
 
@@ -151,10 +163,13 @@ def _print_git(path: Path) -> None:
     t.add_row(Text("branch", style="dim"), Text(branch or "unknown", style="dim"))
 
     tag = _capture(["git", "describe", "--tags", "--abbrev=0"], cwd=path)
-    t.add_row(Text("latest tag", style="dim"), Text(tag if tag else "—", style="" if tag else "dim"))
+    t.add_row(
+        Text("latest tag", style="dim"),
+        Text(tag if tag else "—", style="" if tag else "dim"),
+    )
 
     dirty = _capture(["git", "status", "--short"], cwd=path)
-    dirty_count = len([l for l in dirty.splitlines() if l.strip()])
+    dirty_count = len([line for line in dirty.splitlines() if line.strip()])
     if dirty_count:
         dirty_val = Text(f"{dirty_count} file(s)", style="yellow")
     else:
@@ -182,11 +197,21 @@ def _print_git(path: Path) -> None:
 
 def _print_runtimes(path: Path) -> None:
     checks: list[tuple[str, list[str], list[str]]] = [
-        ("python", ["pyproject.toml", "setup.py", "requirements.txt", ".python-version", "Pipfile"], ["python3", "--version"]),
-        ("node",   ["package.json", ".nvmrc", ".node-version"], ["node", "--version"]),
-        ("go",     ["go.mod"],        ["go", "version"]),
-        ("rust",   ["Cargo.toml"],    ["rustc", "--version"]),
-        ("deno",   ["deno.json", "deno.jsonc"], ["deno", "--version"]),
+        (
+            "python",
+            [
+                "pyproject.toml",
+                "setup.py",
+                "requirements.txt",
+                ".python-version",
+                "Pipfile",
+            ],
+            ["python3", "--version"],
+        ),
+        ("node", ["package.json", ".nvmrc", ".node-version"], ["node", "--version"]),
+        ("go", ["go.mod"], ["go", "version"]),
+        ("rust", ["Cargo.toml"], ["rustc", "--version"]),
+        ("deno", ["deno.json", "deno.jsonc"], ["deno", "--version"]),
     ]
 
     detected: list[tuple[str, str, str]] = []
@@ -198,7 +223,7 @@ def _print_runtimes(path: Path) -> None:
         detected.append((label, installed, cmd[0]))
 
     # filter out runtimes not in PATH
-    detected = [(l, v, b) for l, v, b in detected if v]
+    detected = [(lang, v, b) for lang, v, b in detected if v]
     if not detected:
         return
 
@@ -215,7 +240,9 @@ def _print_runtimes(path: Path) -> None:
             try:
                 latest[lbl] = future.result()
             except Exception as exc:
-                warnings.warn(f"shad: latest version fetch failed for {lbl}: {exc}", stacklevel=2)
+                warnings.warn(
+                    f"shad: latest version fetch failed for {lbl}: {exc}", stacklevel=2
+                )
                 latest[lbl] = None
 
     def _semver(v: str) -> str:
@@ -245,10 +272,10 @@ def _print_runtimes(path: Path) -> None:
         return "green"
 
     t = _make_table("runtimes")
-    t.add_column(style="dim")       # name
-    t.add_column()                  # installed
-    t.add_column()                  # latest
-    t.add_column(style="dim")       # path
+    t.add_column(style="dim")  # name
+    t.add_column()  # installed
+    t.add_column()  # latest
+    t.add_column(style="dim")  # path
 
     for label, installed, binary in detected:
         bin_path = shutil.which(binary) or "—"
@@ -277,11 +304,12 @@ def _print_opencode() -> None:
 
 # ── public entry point ────────────────────────────────────────────────────
 
+
 def print_status(project: Project) -> None:
     console.print()
     console.print(
-        Text(project.display_name, style="bold bright_white") +
-        Text(f"  {project.path}", style="dim")
+        Text(project.display_name, style="bold bright_white")
+        + Text(f"  {project.path}", style="dim")
     )
     console.print()
     _print_tmux(project)

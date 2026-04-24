@@ -1,4 +1,7 @@
-.PHONY: test lint typecheck check
+.PHONY: install test lint typecheck check
+
+install:
+	pip install -e ".[dev]"
 
 test:
 	pytest

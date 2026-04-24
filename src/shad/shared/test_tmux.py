@@ -2,10 +2,8 @@ from __future__ import annotations
 
 import subprocess
 import unittest
-from pathlib import Path
 from unittest.mock import patch
 
-from shad.shared.config import Defaults, Project
 from shad.projects.open.sessions import OpencodeTarget
 from shad.shared.tmux import (
     _attach,

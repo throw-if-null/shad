@@ -76,7 +76,6 @@ class OcSessionPropertiesTests(unittest.TestCase):
     def test_updated_str_formats_epoch_correctly(self) -> None:
         session = OcSession(id="x", title="t", time_updated=1705314600000)
         result = session.updated_str
-        import re
         self.assertRegex(result, r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}")
 
     def test_display_title_returns_untitled_for_matching_pattern(self) -> None:

@@ -4,7 +4,7 @@ import textwrap
 import unittest
 from pathlib import Path
 
-from shad.shared.config import Config, Defaults, Project, load, resolve_prefix
+from shad.shared.config import Project, load, resolve_prefix
 from shad.shared.errors import ShadError
 
 

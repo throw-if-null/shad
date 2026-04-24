@@ -262,5 +262,5 @@ def cmd_init(*, install_deps: bool = False) -> None:
     console.print()
     console.print(Text(f"  ✓ Added to {CONFIG_PATH}", style="bold green"))
     open_cmd = f"shad projects {group} {key}" if group else f"shad projects {key}"
-    console.print(Text(f"  Open with: ", style="dim") + Text(open_cmd, style="cyan"))
+    console.print(Text("  Open with: ", style="dim") + Text(open_cmd, style="cyan"))
     console.print()
