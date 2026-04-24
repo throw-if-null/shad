@@ -15,6 +15,8 @@ To install:
 
 from __future__ import annotations
 
+from shad.errors import ShadError
+
 
 BASH_COMPLETION = r"""
 _shad_complete() {
@@ -157,4 +159,4 @@ def print_completion(shell: str) -> None:
     elif shell == "zsh":
         print(ZSH_COMPLETION)
     else:
-        raise ValueError(f"unsupported shell: {shell!r}")
+        raise ShadError(f"unsupported shell: {shell!r}")
