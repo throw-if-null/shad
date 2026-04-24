@@ -9,6 +9,9 @@ description = "Attach or create project-specific tmux sessions from the current 
 requires-python = ">=3.11"
 dependencies = ["rich>=13"]
 
+[project.optional-dependencies]
+dev = ["pytest", "ruff", "mypy"]
+
 [project.scripts]
 shad = "shad.cli:main"
 
