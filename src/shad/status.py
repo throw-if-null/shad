@@ -35,13 +35,12 @@ console = Console()
 
 # ── subprocess / fetch helpers ────────────────────────────────────────────
 
-def _run(args: list[str], *, cwd: Path | None = None) -> str:
+def _capture(args: list[str], *, cwd: Path | None = None) -> str:
     try:
         r = subprocess.run(args, capture_output=True, text=True, cwd=cwd)
         return r.stdout.strip() if r.returncode == 0 else ""
     except FileNotFoundError:
         return ""
-
 def _fetch_json(url: str, timeout: int = 4) -> object:
     try:
         with urllib.request.urlopen(url, timeout=timeout) as resp:
@@ -146,13 +145,13 @@ def _print_git(path: Path) -> None:
 
     t = _make_table("git")
 
-    branch = _run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=path)
+    branch = _capture(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=path)
     t.add_row(Text("branch", style="dim"), Text(branch or "unknown", style="dim"))
 
-    tag = _run(["git", "describe", "--tags", "--abbrev=0"], cwd=path)
+    tag = _capture(["git", "describe", "--tags", "--abbrev=0"], cwd=path)
     t.add_row(Text("latest tag", style="dim"), Text(tag if tag else "—", style="" if tag else "dim"))
 
-    dirty = _run(["git", "status", "--short"], cwd=path)
+    dirty = _capture(["git", "status", "--short"], cwd=path)
     dirty_count = len([l for l in dirty.splitlines() if l.strip()])
     if dirty_count:
         dirty_val = Text(f"{dirty_count} file(s)", style="yellow")
@@ -160,7 +159,7 @@ def _print_git(path: Path) -> None:
         dirty_val = Text("clean", style="dim")
     t.add_row(Text("uncommitted", style="dim"), dirty_val)
 
-    log = _run(["git", "log", "--format=%h\x1f%s\x1f%cr", "-3"], cwd=path)
+    log = _capture(["git", "log", "--format=%h\x1f%s\x1f%cr", "-3"], cwd=path)
     if log:
         for i, entry in enumerate(log.splitlines()):
             parts = entry.split("\x1f", 2)
@@ -192,7 +191,7 @@ def _print_runtimes(path: Path) -> None:
     for label, manifests, cmd in checks:
         if not any((path / m).exists() for m in manifests):
             continue
-        version = _run(cmd)
+        version = _capture(cmd)
         installed = version.splitlines()[0] if version else ""
         detected.append((label, installed, cmd[0]))
 
@@ -266,7 +265,7 @@ def _print_runtimes(path: Path) -> None:
 
 
 def _print_opencode() -> None:
-    version = _run(["opencode", "--version"])
+    version = _capture(["opencode", "--version"])
     if not version:
         return
     t = _make_table("opencode")
