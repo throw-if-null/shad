@@ -71,7 +71,7 @@ def _list_group(cfg: Config, group_name: str) -> None:
 
 def _run_action(cfg: Config, project: Project, action: str | None) -> None:
     """Dispatch open / status / stop for a resolved project."""
-    if action is None or action == "open":
+    if action is None:
         print_banner()
         code = open_project(project, cfg.defaults)
         if code is None:
