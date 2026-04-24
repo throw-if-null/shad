@@ -143,7 +143,7 @@ def resolve_prefix(candidates: list[str], token: str) -> str | None:
     """
     Resolve *token* against *candidates* using exact-then-prefix matching.
 
-    Returns the matched candidate name, or raises SystemExit with a message.
+    Returns the matched candidate name, or raises ShadError with a message.
     """
     if token in candidates:
         return token
