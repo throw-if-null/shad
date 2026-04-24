@@ -33,7 +33,7 @@ from shad.errors import ShadError
 console = Console()
 err_console = Console(stderr=True)
 
-OPEN_CODE_INSTALL_URL = (
+OPENCODE_INSTALL_URL = (
     "https://github.com/anomalyco/opencode/releases/latest/download/"
     f"opencode-linux-{platform.machine().replace('x86_64', 'x64')}.tar.gz"
 )
@@ -144,13 +144,13 @@ def _install_via_dnf(package: str) -> Callable[[], None]:
 
 def _install_opencode_systemwide() -> None:
     tmp_dir = Path("/tmp") / f"shad-opencode-{os.getpid()}"
-    archive = tmp_dir / OPEN_CODE_INSTALL_URL.rsplit("/", 1)[-1]
+    archive = tmp_dir / OPENCODE_INSTALL_URL.rsplit("/", 1)[-1]
     binary = tmp_dir / "opencode"
 
     tmp_dir.mkdir(parents=True, exist_ok=True)
     try:
         console.print(Text("  → installing opencode to /usr/local/bin/opencode", style="cyan"))
-        with urllib.request.urlopen(OPEN_CODE_INSTALL_URL) as response, archive.open("wb") as fh:
+        with urllib.request.urlopen(OPENCODE_INSTALL_URL) as response, archive.open("wb") as fh:
             shutil.copyfileobj(response, fh)
 
         _run_install_command(["tar", "-xzf", str(archive), "-C", str(tmp_dir)], "extracting opencode release")
