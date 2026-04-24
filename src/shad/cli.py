@@ -277,3 +277,6 @@ def main() -> None:
     except ShadError as exc:
         err_console.print(Text(f"✗ {exc}", style="bold red"))
         sys.exit(1)
+    except (KeyboardInterrupt, EOFError):
+        err_console.print(Text("\nAborted.", style="dim"))
+        sys.exit(130)
