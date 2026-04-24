@@ -234,12 +234,12 @@ def _print_runtimes(path: Path) -> None:
 
     def _version_style(installed_v: str, latest_v: str) -> str:
         i = _version_tuple(installed_v)
-        l = _version_tuple(latest_v)
-        if not i or not l or i == l:
+        latest = _version_tuple(latest_v)
+        if not i or not latest or i == latest:
             return "dim"
-        if l[0] != i[0]:
+        if latest[0] != i[0]:
             return "red"
-        if len(l) > 1 and len(i) > 1 and l[1] != i[1]:
+        if len(latest) > 1 and len(i) > 1 and latest[1] != i[1]:
             return "yellow"
         return "green"
 
