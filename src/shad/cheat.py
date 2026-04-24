@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import os
 import subprocess
-import sys
 
 from rich.console import Console
 from rich.table import Table
@@ -106,12 +105,12 @@ def _build_table() -> Table:
     return t
 
 
-def cmd_cheat() -> None:
+def cmd_cheat() -> int:
     inside_tmux = os.environ.get("TMUX") is not None
 
     if not inside_tmux:
         Console().print(_build_table())
-        return
+        return 0
 
     # Render to a string and pipe through less inside a tmux popup
     from io import StringIO
@@ -125,4 +124,4 @@ def cmd_cheat() -> None:
     result = subprocess.run(
         ["tmux", "display-popup", "-E", "-w", "88", "-h", "40", shell_cmd],
     )
-    sys.exit(result.returncode)
+    return result.returncode

@@ -267,8 +267,7 @@ def main() -> None:
             return
 
         if args.command == "cheat":
-            cmd_cheat()
-            return
+            sys.exit(cmd_cheat())
 
         cfg: Config = load()
 
