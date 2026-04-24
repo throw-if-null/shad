@@ -1,14 +1,11 @@
 from __future__ import annotations
 
-import sys
 import textwrap
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-
-from shad.config import Config, Defaults, Project, load, resolve_prefix
-from shad.errors import ShadError
+from shad.shared.config import Config, Defaults, Project, load, resolve_prefix
+from shad.shared.errors import ShadError
 
 
 # ---------------------------------------------------------------------------
@@ -178,7 +175,6 @@ class LoadConfigTests(unittest.TestCase):
         self.assertEqual(cfg.groups, {})
 
     def test_scalar_project_value_raises_shad_error(self) -> None:
-        # TOML: projects.myapp = "string" not valid as table
         cfg_path = self.tmp_path / "shad.toml"
         cfg_path.write_text('projects = {myapp = "string"}\n')
         with self.assertRaises(ShadError) as ctx:
@@ -186,7 +182,6 @@ class LoadConfigTests(unittest.TestCase):
         self.assertIn("must be a TOML table", str(ctx.exception))
 
     def test_project_missing_path_raises_value_error(self) -> None:
-        # A sub-table (grouped project) with no path triggers ValueError from _parse_project
         cfg_path = _write_toml(self.tmp_path, """
             [projects.grp.nopathapp]
             session = "something"

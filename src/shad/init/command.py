@@ -27,8 +27,8 @@ from rich.text import Text
 from rich.panel import Panel
 from rich.prompt import Prompt, Confirm
 
-from shad.config import CONFIG_PATH
-from shad.errors import ShadError
+from shad.shared.config import CONFIG_PATH
+from shad.shared.errors import ShadError
 
 console = Console()
 err_console = Console(stderr=True)

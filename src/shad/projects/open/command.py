@@ -1,0 +1,30 @@
+"""
+Open project command for shad.
+
+Orchestrates: opencode session picker → tmux session create/attach.
+"""
+
+from __future__ import annotations
+
+from shad.shared.config import Defaults, Project
+from shad.shared.tmux import _attach, project_session_name, session_exists
+from shad.projects.open.sessions import pick_opencode_target
+from shad.projects.open.layout import _create_session
+
+
+def open_project(project: Project, defaults: Defaults) -> int | None:
+    """Attach to project session, creating it with the configured layout if needed.
+
+    Returns the tmux exit code on success, or None if the user cancelled.
+    """
+    target = pick_opencode_target(project.path, "opencode")
+
+    if target is None:
+        return None
+
+    session = project_session_name(project.session, target)
+
+    if not session_exists(session):
+        _create_session(project, defaults, target.command, session)
+
+    return _attach(session)

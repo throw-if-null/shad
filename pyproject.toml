@@ -14,3 +14,6 @@ shad = "shad.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["src/shad"]

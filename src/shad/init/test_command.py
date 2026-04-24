@@ -1,18 +1,15 @@
 from __future__ import annotations
 
 import os
-import sys
 import tempfile
 import unittest
 import unittest.mock
 from pathlib import Path
 from unittest.mock import patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-
 from shad.cli import build_parser
-from shad.errors import ShadError
-from shad.init import (
+from shad.shared.errors import ShadError
+from shad.init.command import (
     Dependency,
     _append_toml,
     _detect_fedora,
@@ -25,7 +22,7 @@ from shad.init import (
 
 
 # ---------------------------------------------------------------------------
-# Existing tests (preserved)
+# CLI parser
 # ---------------------------------------------------------------------------
 
 class InitCliTests(unittest.TestCase):
@@ -36,20 +33,24 @@ class InitCliTests(unittest.TestCase):
         self.assertTrue(args.install_deps)
 
 
+# ---------------------------------------------------------------------------
+# ensure_dependencies_installed
+# ---------------------------------------------------------------------------
+
 class InstallDepsTests(unittest.TestCase):
     def test_install_deps_raises_when_not_fedora(self) -> None:
-        with patch("shad.init._missing_dependencies",
+        with patch("shad.init.command._missing_dependencies",
                    return_value=[Dependency(binary="tmux", package="tmux")]), \
-             patch("shad.init._detect_fedora", return_value=False):
+             patch("shad.init.command._detect_fedora", return_value=False):
             with self.assertRaises(ShadError) as ctx:
                 ensure_dependencies_installed()
         self.assertIn("Fedora", str(ctx.exception))
 
     def test_install_deps_raises_when_not_root(self) -> None:
-        with patch("shad.init._missing_dependencies",
+        with patch("shad.init.command._missing_dependencies",
                    return_value=[Dependency(binary="tmux", package="tmux")]), \
-             patch("shad.init._detect_fedora", return_value=True), \
-             patch("shad.init._is_root", return_value=False):
+             patch("shad.init.command._detect_fedora", return_value=True), \
+             patch("shad.init.command._is_root", return_value=False):
             with self.assertRaises(ShadError) as ctx:
                 ensure_dependencies_installed()
         self.assertIn("sudo", str(ctx.exception))
@@ -65,10 +66,10 @@ class InstallDepsTests(unittest.TestCase):
             Dependency(binary="opencode", installer=opencode_installer),
         ]
 
-        with patch("shad.init._missing_dependencies", return_value=missing), \
-             patch("shad.init._detect_fedora", return_value=True), \
-             patch("shad.init._is_root", return_value=True), \
-             patch("shad.init.console.print"):
+        with patch("shad.init.command._missing_dependencies", return_value=missing), \
+             patch("shad.init.command._detect_fedora", return_value=True), \
+             patch("shad.init.command._is_root", return_value=True), \
+             patch("shad.init.command.console.print"):
             ensure_dependencies_installed()
 
         tmux_installer.assert_called_once_with()
@@ -76,8 +77,8 @@ class InstallDepsTests(unittest.TestCase):
         opencode_installer.assert_called_once_with()
 
     def test_install_deps_skips_work_when_everything_is_present(self) -> None:
-        with patch("shad.init._missing_dependencies", return_value=[]), \
-             patch("shad.init.console.print") as print_mock:
+        with patch("shad.init.command._missing_dependencies", return_value=[]), \
+             patch("shad.init.command.console.print") as print_mock:
             ensure_dependencies_installed()
         print_mock.assert_called_once()
 
@@ -87,31 +88,12 @@ class InstallDepsTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class DetectFedoraTests(unittest.TestCase):
-    def _run(self, content: str) -> bool:
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
-            f.write(content)
-            tmp = Path(f.name)
-        try:
-            with patch("shad.init.Path") as mock_path_cls:
-                # Only intercept the /etc/os-release path
-                real_path = Path
-                def side_effect(arg):
-                    if str(arg) == "/etc/os-release":
-                        return tmp
-                    return real_path(arg)
-                mock_path_cls.side_effect = side_effect
-                # Patch directly on the module since _detect_fedora uses Path at call time
-            with patch("shad.init.Path", side_effect=side_effect):
-                return _detect_fedora()
-        finally:
-            tmp.unlink(missing_ok=True)
-
     def test_returns_true_for_id_equals_fedora(self) -> None:
         with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
             f.write("ID=fedora\n")
             tmp = Path(f.name)
         try:
-            with patch("shad.init.Path") as mock_cls:
+            with patch("shad.init.command.Path") as mock_cls:
                 real = Path
                 mock_cls.side_effect = lambda x: tmp if str(x) == "/etc/os-release" else real(x)
                 result = _detect_fedora()
@@ -124,7 +106,7 @@ class DetectFedoraTests(unittest.TestCase):
             f.write('ID=rhel\nID_LIKE="fedora"\n')
             tmp = Path(f.name)
         try:
-            with patch("shad.init.Path") as mock_cls:
+            with patch("shad.init.command.Path") as mock_cls:
                 real = Path
                 mock_cls.side_effect = lambda x: tmp if str(x) == "/etc/os-release" else real(x)
                 result = _detect_fedora()
@@ -137,7 +119,7 @@ class DetectFedoraTests(unittest.TestCase):
             f.write("ID=ubuntu\nID_LIKE=debian\n")
             tmp = Path(f.name)
         try:
-            with patch("shad.init.Path") as mock_cls:
+            with patch("shad.init.command.Path") as mock_cls:
                 real = Path
                 mock_cls.side_effect = lambda x: tmp if str(x) == "/etc/os-release" else real(x)
                 result = _detect_fedora()
@@ -146,7 +128,7 @@ class DetectFedoraTests(unittest.TestCase):
             tmp.unlink(missing_ok=True)
 
     def test_returns_false_when_file_does_not_exist(self) -> None:
-        with patch("shad.init.Path") as mock_cls:
+        with patch("shad.init.command.Path") as mock_cls:
             fake = unittest.mock.MagicMock()
             fake.exists.return_value = False
             real = Path
@@ -169,7 +151,6 @@ class IsRootTests(unittest.TestCase):
             self.assertFalse(_is_root())
 
     def test_returns_false_when_geteuid_absent(self) -> None:
-        import shad.init as init_module
         original = getattr(os, "geteuid", None)
         try:
             if hasattr(os, "geteuid"):

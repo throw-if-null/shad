@@ -15,7 +15,7 @@ To install:
 
 from __future__ import annotations
 
-from shad.errors import ShadError
+from shad.shared.errors import ShadError
 
 
 BASH_COMPLETION = r"""

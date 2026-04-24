@@ -1,15 +1,12 @@
 from __future__ import annotations
 
-import sys
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-
-from shad.cli import build_parser, cmd_projects, main
-from shad.config import Config, Defaults, Project
-from shad.errors import ShadError
+from shad.cli import build_parser, cmd_projects, main, _run_action
+from shad.shared.config import Config, Defaults, Project
+from shad.shared.errors import ShadError
 
 
 def _make_project(key: str, group: str | None = None, session: str | None = None) -> Project:
@@ -26,7 +23,7 @@ def _make_args(name: list[str]) -> object:
 
 
 # ---------------------------------------------------------------------------
-# Existing tests (preserved)
+# cmd_projects dispatch
 # ---------------------------------------------------------------------------
 
 class ProjectsCommandTests(unittest.TestCase):
@@ -55,10 +52,6 @@ class ProjectsCommandTests(unittest.TestCase):
         open_project.assert_called_once_with(project, cfg.defaults)
 
 
-# ---------------------------------------------------------------------------
-# New cmd_projects dispatch tests
-# ---------------------------------------------------------------------------
-
 class ProjectsListTests(unittest.TestCase):
     def test_no_args_lists_all_with_no_projects(self) -> None:
         cfg = Config(defaults=Defaults())
@@ -79,7 +72,6 @@ class ProjectsListTests(unittest.TestCase):
         args = _make_args([])
 
         with patch("shad.cli.console"):
-            # Should complete without raising
             cmd_projects(cfg, args)
 
     def test_single_token_resolves_to_group_and_lists_subprojects(self) -> None:
@@ -90,7 +82,7 @@ class ProjectsListTests(unittest.TestCase):
         args = _make_args(["tin"])
 
         with patch("shad.cli.console"):
-            cmd_projects(cfg, args)  # should not raise
+            cmd_projects(cfg, args)
 
     def test_single_token_unknown_raises_shad_error(self) -> None:
         cfg = Config(defaults=Defaults())
@@ -202,7 +194,6 @@ class ProjectsListTests(unittest.TestCase):
         self.assertIsNone(result)
 
     def test_unknown_action_raises_shad_error(self) -> None:
-        from shad.cli import _run_action
         project = _make_project("shad")
         cfg = Config(defaults=Defaults(), projects={"shad": project})
 

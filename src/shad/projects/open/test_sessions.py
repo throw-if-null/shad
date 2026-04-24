@@ -1,16 +1,13 @@
 from __future__ import annotations
 
 import sqlite3
-import sys
 import tempfile
 import unittest
 import warnings
 from pathlib import Path
 from unittest.mock import patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-
-from shad.sessions import (
+from shad.projects.open.sessions import (
     OcSession,
     OpencodeTarget,
     _truncate,
@@ -20,12 +17,12 @@ from shad.sessions import (
 
 
 # ---------------------------------------------------------------------------
-# Existing tests (preserved)
+# pick_opencode_target
 # ---------------------------------------------------------------------------
 
 class PickOpencodeTargetTests(unittest.TestCase):
     def test_returns_base_command_when_no_sessions_exist(self) -> None:
-        with patch("shad.sessions._query_sessions", return_value=[]):
+        with patch("shad.projects.open.sessions._query_sessions", return_value=[]):
             target = pick_opencode_target(Path("/tmp/project"), "opencode")
 
         self.assertEqual(target, OpencodeTarget(command="opencode"))
@@ -33,8 +30,8 @@ class PickOpencodeTargetTests(unittest.TestCase):
     def test_returns_session_scoped_target_for_existing_session(self) -> None:
         sessions = [OcSession(id="sess-123", title="Fix bug", time_updated=0)]
 
-        with patch("shad.sessions._query_sessions", return_value=sessions), \
-             patch("shad.sessions._run_picker", return_value=1):
+        with patch("shad.projects.open.sessions._query_sessions", return_value=sessions), \
+             patch("shad.projects.open.sessions._run_picker", return_value=1):
             target = pick_opencode_target(Path("/tmp/project"), "opencode")
 
         self.assertEqual(
@@ -42,13 +39,11 @@ class PickOpencodeTargetTests(unittest.TestCase):
             OpencodeTarget(command="opencode -s sess-123", session_key="sess-123"),
         )
 
-    # --- new cases ---
-
     def test_returns_base_command_when_new_session_selected(self) -> None:
         sessions = [OcSession(id="sess-123", title="Fix bug", time_updated=0)]
 
-        with patch("shad.sessions._query_sessions", return_value=sessions), \
-             patch("shad.sessions._run_picker", return_value=0):
+        with patch("shad.projects.open.sessions._query_sessions", return_value=sessions), \
+             patch("shad.projects.open.sessions._run_picker", return_value=0):
             target = pick_opencode_target(Path("/tmp/project"), "opencode")
 
         self.assertEqual(target, OpencodeTarget(command="opencode"))
@@ -56,8 +51,8 @@ class PickOpencodeTargetTests(unittest.TestCase):
     def test_returns_none_when_picker_cancelled(self) -> None:
         sessions = [OcSession(id="sess-123", title="Fix bug", time_updated=0)]
 
-        with patch("shad.sessions._query_sessions", return_value=sessions), \
-             patch("shad.sessions._run_picker", return_value=None):
+        with patch("shad.projects.open.sessions._query_sessions", return_value=sessions), \
+             patch("shad.projects.open.sessions._run_picker", return_value=None):
             target = pick_opencode_target(Path("/tmp/project"), "opencode")
 
         self.assertIsNone(target)
@@ -66,8 +61,8 @@ class PickOpencodeTargetTests(unittest.TestCase):
         s1 = OcSession(id="aaa", title="First", time_updated=1000)
         s2 = OcSession(id="bbb", title="Second", time_updated=2000)
 
-        with patch("shad.sessions._query_sessions", return_value=[s1, s2]), \
-             patch("shad.sessions._run_picker", return_value=2):
+        with patch("shad.projects.open.sessions._query_sessions", return_value=[s1, s2]), \
+             patch("shad.projects.open.sessions._run_picker", return_value=2):
             target = pick_opencode_target(Path("/tmp/project"), "opencode")
 
         self.assertEqual(target, OpencodeTarget(command="opencode -s bbb", session_key="bbb"))
@@ -79,10 +74,8 @@ class PickOpencodeTargetTests(unittest.TestCase):
 
 class OcSessionPropertiesTests(unittest.TestCase):
     def test_updated_str_formats_epoch_correctly(self) -> None:
-        # Use a fixed timestamp: 2024-01-15 10:30:00 UTC = 1705314600000 ms
         session = OcSession(id="x", title="t", time_updated=1705314600000)
         result = session.updated_str
-        # Format should be "%Y-%m-%d %H:%M" — just check the structure
         import re
         self.assertRegex(result, r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}")
 
@@ -128,19 +121,17 @@ class TruncateTests(unittest.TestCase):
 
 class QuerySessionsTests(unittest.TestCase):
     def test_returns_empty_list_when_db_does_not_exist(self) -> None:
-        with patch("shad.sessions.DB_PATH", Path("/nonexistent/path/opencode.db")):
+        with patch("shad.projects.open.sessions.DB_PATH", Path("/nonexistent/path/opencode.db")):
             result = _query_sessions(Path("/tmp/project"))
         self.assertEqual(result, [])
 
     def test_returns_empty_list_and_warns_on_db_error(self) -> None:
-        with patch("shad.sessions.DB_PATH", Path("/nonexistent/path/opencode.db")):
-            # Force DB_PATH to "exist" but be an invalid database
-            with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
-                f.write(b"not a valid sqlite database")
-                bad_db = Path(f.name)
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            f.write(b"not a valid sqlite database")
+            bad_db = Path(f.name)
 
         try:
-            with patch("shad.sessions.DB_PATH", bad_db), \
+            with patch("shad.projects.open.sessions.DB_PATH", bad_db), \
                  warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always")
                 result = _query_sessions(Path("/tmp/project"))
@@ -157,17 +148,13 @@ class QuerySessionsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "opencode.db"
             con = sqlite3.connect(str(db_path))
-            con.execute(
-                "CREATE TABLE project (id TEXT PRIMARY KEY, worktree TEXT)"
-            )
+            con.execute("CREATE TABLE project (id TEXT PRIMARY KEY, worktree TEXT)")
             con.execute(
                 "CREATE TABLE session "
                 "(id TEXT PRIMARY KEY, project_id TEXT, title TEXT, "
                 "time_updated INTEGER, time_archived INTEGER)"
             )
-            con.execute(
-                "INSERT INTO project VALUES ('proj-1', '/tmp/myproject')"
-            )
+            con.execute("INSERT INTO project VALUES ('proj-1', '/tmp/myproject')")
             con.execute(
                 "INSERT INTO session VALUES "
                 "('sess-1', 'proj-1', 'My session', 1000000, NULL)"
@@ -175,7 +162,7 @@ class QuerySessionsTests(unittest.TestCase):
             con.commit()
             con.close()
 
-            with patch("shad.sessions.DB_PATH", db_path):
+            with patch("shad.projects.open.sessions.DB_PATH", db_path):
                 result = _query_sessions(Path("/tmp/myproject"))
 
         self.assertEqual(len(result), 1)
@@ -187,9 +174,7 @@ class QuerySessionsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "opencode.db"
             con = sqlite3.connect(str(db_path))
-            con.execute(
-                "CREATE TABLE project (id TEXT PRIMARY KEY, worktree TEXT)"
-            )
+            con.execute("CREATE TABLE project (id TEXT PRIMARY KEY, worktree TEXT)")
             con.execute(
                 "CREATE TABLE session "
                 "(id TEXT PRIMARY KEY, project_id TEXT, title TEXT, "
@@ -207,7 +192,7 @@ class QuerySessionsTests(unittest.TestCase):
             con.commit()
             con.close()
 
-            with patch("shad.sessions.DB_PATH", db_path):
+            with patch("shad.projects.open.sessions.DB_PATH", db_path):
                 result = _query_sessions(Path("/tmp/myproject"))
 
         ids = [s.id for s in result]

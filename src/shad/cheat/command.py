@@ -15,6 +15,7 @@ import subprocess
 
 from rich.console import Console
 from rich.table import Table
+from rich.text import Text
 from rich import box
 
 _SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [

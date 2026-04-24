@@ -28,8 +28,8 @@ from rich.table import Table
 from rich.text import Text
 from rich import box
 
-from shad.config import Project
-from shad.tmux import list_project_sessions, tmux_server_running
+from shad.shared.config import Project
+from shad.shared.tmux import list_project_sessions, tmux_server_running
 
 console = Console()
 
@@ -42,6 +42,7 @@ def _capture(args: list[str], *, cwd: Path | None = None) -> str:
         return r.stdout.strip() if r.returncode == 0 else ""
     except FileNotFoundError:
         return ""
+
 def _fetch_json(url: str, timeout: int = 4) -> object:
     try:
         with urllib.request.urlopen(url, timeout=timeout) as resp:

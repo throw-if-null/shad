@@ -29,7 +29,7 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from shad.errors import ShadError
+from shad.shared.errors import ShadError
 
 CONFIG_PATH = Path.home() / ".config" / "shad" / "shad.toml"
 
