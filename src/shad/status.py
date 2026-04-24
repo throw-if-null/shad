@@ -19,6 +19,7 @@ import subprocess
 import urllib.error
 import urllib.request
 import warnings
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -89,7 +90,7 @@ def _latest_deno() -> str | None:
     return None
 
 
-_LATEST_FETCHERS: dict[str, object] = {
+_LATEST_FETCHERS: dict[str, Callable[[], str | None]] = {
     "python": _latest_python,
     "node":   _latest_node,
     "go":     _latest_go,
@@ -204,7 +205,7 @@ def _print_runtimes(path: Path) -> None:
     latest: dict[str, str | None] = {}
     with ThreadPoolExecutor(max_workers=max(1, len(detected))) as pool:
         futures = {
-            pool.submit(_LATEST_FETCHERS[label]): label  # type: ignore[operator]
+            pool.submit(_LATEST_FETCHERS[label]): label
             for label, _, _ in detected
             if label in _LATEST_FETCHERS
         }
