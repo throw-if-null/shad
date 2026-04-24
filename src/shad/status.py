@@ -28,7 +28,7 @@ from rich.text import Text
 from rich import box
 
 from shad.config import Project
-from shad.tmux import list_project_sessions, _tmux_server_running
+from shad.tmux import list_project_sessions, tmux_server_running
 
 console = Console()
 
@@ -122,7 +122,7 @@ def _print_tmux(project: Project) -> None:
     t = _make_table("tmux")
     running = list_project_sessions(project.session)
     if not running:
-        if not _tmux_server_running():
+        if not tmux_server_running():
             t.add_row(Text("session", style="dim"), Text(project.session), Text("tmux not running", style="dim"))
         else:
             t.add_row(Text("session", style="dim"), Text(project.session), Text("not running", style="dim"))

@@ -68,7 +68,7 @@ def project_session_name(base_session: str, target: OpencodeTarget) -> str:
     return f"{base_session}--oc-{session_key}"
 
 
-def _tmux_server_running() -> bool:
+def tmux_server_running() -> bool:
     """Return True if a tmux server is currently running."""
     result = _run(["tmux", "list-sessions"], check=False)
     if result.returncode == 0:
