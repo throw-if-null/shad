@@ -44,6 +44,7 @@ ACTIONS = ("status", "stop")
 # projects command helpers
 # ---------------------------------------------------------------------------
 
+
 def _list_all(cfg: Config) -> None:
     """Print every project and group to stdout."""
     if not cfg.projects and not cfg.groups:
@@ -56,7 +57,9 @@ def _list_all(cfg: Config) -> None:
     for group in sorted(cfg.groups):
         console.print(Text(f"  ◆ {group}", style="bold cyan"))
         for sub in sorted(cfg.groups[group]):
-            console.print(Text("    ● ", style="cyan") + Text(f"{group} {sub}", style="white"))
+            console.print(
+                Text("    ● ", style="cyan") + Text(f"{group} {sub}", style="white")
+            )
 
 
 def _list_group(cfg: Config, group_name: str) -> None:
@@ -67,7 +70,10 @@ def _list_group(cfg: Config, group_name: str) -> None:
     else:
         console.print(Text(f"  ◆ {group_name}", style="bold cyan"))
         for key in sorted(group):
-            console.print(Text("    ● ", style="cyan") + Text(f"{group_name} {key}", style="white"))
+            console.print(
+                Text("    ● ", style="cyan")
+                + Text(f"{group_name} {key}", style="white")
+            )
 
 
 def _run_action(cfg: Config, project: Project, action: str | None) -> None:
@@ -114,7 +120,9 @@ def cmd_projects(cfg: Config, args: argparse.Namespace) -> None:
             _run_action(cfg, cfg.projects[match], action)
         else:
             if action:
-                raise ShadError(f"'{match}' is a group, not a project; specify a project within the group")
+                raise ShadError(
+                    f"'{match}' is a group, not a project; specify a project within the group"
+                )
             _list_group(cfg, match)
         return
 
@@ -124,7 +132,9 @@ def cmd_projects(cfg: Config, args: argparse.Namespace) -> None:
 
         group_match = resolve_prefix(list(cfg.groups), group_token)
         if group_match is None:
-            if group_token in cfg.projects or any(k.startswith(group_token) for k in cfg.projects):
+            if group_token in cfg.projects or any(
+                k.startswith(group_token) for k in cfg.projects
+            ):
                 raise ShadError(
                     f"'{group_token}' resolves to a top-level project, not a group; "
                     f"did you mean: shad projects {group_token}?"
@@ -154,14 +164,13 @@ def cmd_projects(cfg: Config, args: argparse.Namespace) -> None:
 # main
 # ---------------------------------------------------------------------------
 
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="shad",
         description="Attach or create project-specific tmux sessions.",
     )
-    parser.add_argument(
-        "--version", action="version", version=f"shad {__version__}"
-    )
+    parser.add_argument("--version", action="version", version=f"shad {__version__}")
 
     sub = parser.add_subparsers(dest="command", metavar="<command>")
 
@@ -242,7 +251,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Inside tmux  : opens a floating popup; dismiss with q\n"
             "Outside tmux : prints the cheat sheet to stdout\n\n"
             "Recommended ~/.tmux.conf binding:\n"
-            "  bind-key F12 run-shell \"shad cheat\""
+            '  bind-key F12 run-shell "shad cheat"'
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -255,6 +264,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command is None:
+        print_banner()
         parser.print_help()
         sys.exit(0)
 

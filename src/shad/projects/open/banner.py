@@ -3,13 +3,12 @@ from rich.console import Console
 LETTER_COLOR = "bright_white"
 
 SHAD_ART = [
-    f"[{LETTER_COLOR}]█[black on {LETTER_COLOR}]●[/black on {LETTER_COLOR}]█[black on {LETTER_COLOR}]●[/black on {LETTER_COLOR}]█[black on {LETTER_COLOR}]●[/black on {LETTER_COLOR}]█╗██╗  ██╗ █████╗ ██████╗[/{LETTER_COLOR}]",
-    f"[{LETTER_COLOR}]██╔════╝██║  ██║██╔══██╗██╔══██╗[/{LETTER_COLOR}]",
-    f"[{LETTER_COLOR}]███████╗███████║███████║██║  ██║[/{LETTER_COLOR}]",
-    f"[{LETTER_COLOR}]╚════██║██╔══██║██╔══██║██║  ██║[/{LETTER_COLOR}]",
-    f"[{LETTER_COLOR}]███████║██║  ██║██║  ██║██████╔╝[/{LETTER_COLOR}]",
-    f"[{LETTER_COLOR}]╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝[/{LETTER_COLOR}]",
-    f"[{LETTER_COLOR}]                  ><(((>[/{LETTER_COLOR}]",
+    f"[{LETTER_COLOR}]    █[black on {LETTER_COLOR}]●[/black on {LETTER_COLOR}]█[black on {LETTER_COLOR}]●[/black on {LETTER_COLOR}]█[black on {LETTER_COLOR}]●[/black on {LETTER_COLOR}]█╗██╗  ██╗ █████╗ ██████╗[/{LETTER_COLOR}]",
+    f"[{LETTER_COLOR}]    ██╔════╝██║  ██║██╔══██╗██╔══██╗[/{LETTER_COLOR}]",
+    f"[{LETTER_COLOR}]    ███████╗███████║███████║██║  ██║[/{LETTER_COLOR}]",
+    f"[{LETTER_COLOR}]    ╚════██║██╔══██║██╔══██║██║  ██║[/{LETTER_COLOR}]",
+    f"[{LETTER_COLOR}]    ███████║██║  ██║██║  ██║██████╔╝[/{LETTER_COLOR}]",
+    f"[{LETTER_COLOR}]    ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝     ><(((>[/{LETTER_COLOR}]",
 ]
 
 
