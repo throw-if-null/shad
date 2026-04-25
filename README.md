@@ -293,18 +293,32 @@ Other available flavors: `catppuccin-latte`, `catppuccin-macchiato`, `catppuccin
 ```
 shad/
 ├── README.md
+├── AGENTS.md
+├── Makefile
 ├── pyproject.toml
 ├── shad.example.toml
 └── src/
     └── shad/
         ├── __init__.py
-        ├── banner.py
-        ├── cheat.py
         ├── cli.py
-        ├── completion.py
-        ├── config.py
-        ├── init.py
-        ├── sessions.py
-        ├── status.py
-        └── tmux.py
+        ├── cheat/
+        │   └── command.py
+        ├── completion/
+        │   └── command.py
+        ├── init/
+        │   └── command.py
+        ├── projects/
+        │   ├── open/
+        │   │   ├── banner.py
+        │   │   ├── command.py
+        │   │   ├── layout.py
+        │   │   └── sessions.py
+        │   ├── status/
+        │   │   └── command.py
+        │   └── stop/
+        │       └── command.py
+        └── shared/
+            ├── config.py
+            ├── errors.py
+            └── tmux.py
 ```
