@@ -22,11 +22,15 @@ from shad.projects.open.sessions import (
 
 
 class PickOpencodeTargetTests(unittest.TestCase):
-    def test_returns_base_command_when_no_sessions_exist(self) -> None:
+    def test_returns_fresh_target_when_no_sessions_exist(self) -> None:
         with patch("shad.projects.open.sessions._query_sessions", return_value=[]):
             target = pick_opencode_target(Path("/tmp/project"), "opencode")
 
-        self.assertEqual(target, OpencodeTarget(command="opencode"))
+        assert target is not None
+        self.assertEqual(target.command, "opencode")
+        self.assertTrue(target.fresh)
+        assert target.session_key is not None
+        self.assertTrue(target.session_key.startswith("fresh-"))
 
     def test_returns_session_scoped_target_for_existing_session(self) -> None:
         sessions = [OcSession(id="sess-123", title="Fix bug", time_updated=0)]
@@ -42,7 +46,7 @@ class PickOpencodeTargetTests(unittest.TestCase):
             OpencodeTarget(command="opencode -s sess-123", session_key="sess-123"),
         )
 
-    def test_returns_base_command_when_new_session_selected(self) -> None:
+    def test_returns_fresh_target_when_new_session_selected(self) -> None:
         sessions = [OcSession(id="sess-123", title="Fix bug", time_updated=0)]
 
         with (
@@ -51,7 +55,11 @@ class PickOpencodeTargetTests(unittest.TestCase):
         ):
             target = pick_opencode_target(Path("/tmp/project"), "opencode")
 
-        self.assertEqual(target, OpencodeTarget(command="opencode", fresh=True))
+        assert target is not None
+        self.assertEqual(target.command, "opencode")
+        self.assertTrue(target.fresh)
+        assert target.session_key is not None
+        self.assertTrue(target.session_key.startswith("fresh-"))
 
     def test_returns_none_when_picker_cancelled(self) -> None:
         sessions = [OcSession(id="sess-123", title="Fix bug", time_updated=0)]

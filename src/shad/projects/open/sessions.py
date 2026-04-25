@@ -19,6 +19,7 @@ import re
 import shutil
 import sqlite3
 import os
+import time
 import tty
 import termios
 import warnings
@@ -234,7 +235,8 @@ def pick_opencode_target(project_path: Path, base_cmd: str) -> OpencodeTarget | 
     """
     sessions = _query_sessions(project_path)
     if not sessions:
-        return OpencodeTarget(command=base_cmd)
+        fresh_key = f"fresh-{int(time.time())}"
+        return OpencodeTarget(command=base_cmd, session_key=fresh_key, fresh=True)
 
     project_name = project_path.name
     chosen = _run_picker(sessions, project_name)
@@ -242,7 +244,8 @@ def pick_opencode_target(project_path: Path, base_cmd: str) -> OpencodeTarget | 
     if chosen is None:
         return None  # user cancelled — caller should abort
     if chosen == 0:
-        return OpencodeTarget(command=base_cmd, fresh=True)
+        fresh_key = f"fresh-{int(time.time())}"
+        return OpencodeTarget(command=base_cmd, session_key=fresh_key, fresh=True)
 
     session = sessions[chosen - 1]
     return OpencodeTarget(command=f"{base_cmd} -s {session.id}", session_key=session.id)

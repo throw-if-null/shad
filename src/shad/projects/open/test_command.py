@@ -105,7 +105,7 @@ class OpenProjectTests(unittest.TestCase):
         )
 
     def test_open_project_fresh_kills_existing_session_and_recreates(self) -> None:
-        target = OpencodeTarget(command="opencode", fresh=True)
+        target = OpencodeTarget(command="opencode", session_key="fresh-123", fresh=True)
 
         with (
             patch(
@@ -119,10 +119,10 @@ class OpenProjectTests(unittest.TestCase):
             open_project(self.project, self.defaults)
 
         run.assert_called_once_with(
-            ["tmux", "kill-session", "-t", "tin-shad"], check=False
+            ["tmux", "kill-session", "-t", "tin-shad--oc-fresh-123"], check=False
         )
         create_session.assert_called_once_with(
-            self.project, self.defaults, "opencode", "tin-shad"
+            self.project, self.defaults, "opencode", "tin-shad--oc-fresh-123"
         )
 
 
