@@ -46,6 +46,8 @@ def _create_session(
     window_title = f"{project.group}|{project.key}" if project.group else project.key
     _run(["tmux", "new-session", "-d", "-s", session, "-n", window_title, "-c", cwd])
     _run(["tmux", "set-option", "-t", session, "allow-rename", "off"])
+    _run(["tmux", "set-option", "-t", session, "set-titles", "on"])
+    _run(["tmux", "set-option", "-t", session, "set-titles-string", window_title])
 
     if pos == "top":
         # OC top, bundle below — horizontal split within bundle
