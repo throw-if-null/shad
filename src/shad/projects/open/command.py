@@ -7,7 +7,7 @@ Orchestrates: opencode session picker → tmux session create/attach.
 from __future__ import annotations
 
 from shad.shared.config import Defaults, Project
-from shad.shared.tmux import _attach, project_session_name, session_exists
+from shad.shared.tmux import _attach, _run, project_session_name, session_exists
 from shad.projects.open.sessions import pick_opencode_target
 from shad.projects.open.layout import _create_session
 
@@ -24,7 +24,11 @@ def open_project(project: Project, defaults: Defaults) -> int | None:
 
     session = project_session_name(project.session, target)
 
-    if not session_exists(session):
-        _create_session(project, defaults, target.command, session)
+    if session_exists(session):
+        if target.fresh:
+            _run(["tmux", "kill-session", "-t", session], check=False)
+        else:
+            return _attach(session)
 
+    _create_session(project, defaults, target.command, session)
     return _attach(session)

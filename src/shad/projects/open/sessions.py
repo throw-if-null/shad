@@ -48,7 +48,9 @@ class OcSession:
 
     @property
     def updated_str(self) -> str:
-        dt = datetime.fromtimestamp(self.time_updated / 1000, tz=timezone.utc).astimezone()
+        dt = datetime.fromtimestamp(
+            self.time_updated / 1000, tz=timezone.utc
+        ).astimezone()
         return dt.strftime("%Y-%m-%d %H:%M")
 
     @property
@@ -62,6 +64,7 @@ class OcSession:
 class OpencodeTarget:
     command: str
     session_key: str | None = None
+    fresh: bool = False
 
 
 def _query_sessions(project_path: Path, limit: int = SESSION_LIMIT) -> list[OcSession]:
@@ -94,7 +97,9 @@ def _truncate(text: str, max_len: int) -> str:
     return text if len(text) <= max_len else text[: max_len - 1] + "…"
 
 
-def _render_picker(sessions: list[OcSession], selected: int, project_name: str) -> Panel:
+def _render_picker(
+    sessions: list[OcSession], selected: int, project_name: str
+) -> Panel:
     """Build the Rich renderable for the current picker state."""
     items = [None] + sessions  # index 0 = new session sentinel
 
@@ -143,7 +148,9 @@ def _read_key(fd: int) -> str:
     return ch.decode("utf-8", errors="replace")
 
 
-def _render_panel(sessions: list[OcSession], selected: int, project_name: str, width: int) -> bytes:
+def _render_panel(
+    sessions: list[OcSession], selected: int, project_name: str, width: int
+) -> bytes:
     """Render picker panel to ANSI bytes."""
     buf = StringIO()
     Console(file=buf, force_terminal=True, width=width, highlight=False).print(
@@ -170,9 +177,9 @@ def _run_picker(sessions: list[OcSession], project_name: str) -> int | None:
     term_width = shutil.get_terminal_size().columns
     old_settings = termios.tcgetattr(tty_fd)
 
-    SAVE    = b"\033[s"       # save cursor position
-    RESTORE = b"\033[u"       # restore cursor position
-    CLEAR   = b"\033[J"       # clear from cursor to end of screen
+    SAVE = b"\033[s"  # save cursor position
+    RESTORE = b"\033[u"  # restore cursor position
+    CLEAR = b"\033[J"  # clear from cursor to end of screen
 
     def draw(first: bool = False) -> None:
         content = _render_panel(sessions, selected, project_name, term_width)
@@ -217,6 +224,7 @@ def _run_picker(sessions: list[OcSession], project_name: str) -> int | None:
 
 # ── Public API ─────────────────────────────────────────────────────────────
 
+
 def pick_opencode_target(project_path: Path, base_cmd: str) -> OpencodeTarget | None:
     """
     Show an interactive session picker and return the opencode target to run.
@@ -234,7 +242,7 @@ def pick_opencode_target(project_path: Path, base_cmd: str) -> OpencodeTarget | 
     if chosen is None:
         return None  # user cancelled — caller should abort
     if chosen == 0:
-        return OpencodeTarget(command=base_cmd)
+        return OpencodeTarget(command=base_cmd, fresh=True)
 
     session = sessions[chosen - 1]
     return OpencodeTarget(command=f"{base_cmd} -s {session.id}", session_key=session.id)
