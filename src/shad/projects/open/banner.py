@@ -1,4 +1,6 @@
 from rich.console import Console
+from rich.panel import Panel
+from rich.text import Text
 
 LETTER_COLOR = "bright_white"
 
@@ -14,8 +16,8 @@ SHAD_ART = [
 
 def print_banner() -> None:
     console = Console()
-    for line in SHAD_ART:
-        console.print(line)
+    content = Text.from_markup("\n" + "\n".join(SHAD_ART) + "\n")
+    console.print(Panel(content, border_style="white", expand=False))
 
 
 if __name__ == "__main__":
