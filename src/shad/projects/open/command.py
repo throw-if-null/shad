@@ -1,14 +1,14 @@
 """
 Open project command for shad.
 
-Orchestrates: opencode session picker → tmux session create/attach.
+Orchestrates: AI session picker → tmux session create/attach.
 """
 
 from __future__ import annotations
 
 from shad.shared.config import Defaults, Project
 from shad.shared.tmux import _attach, _run, project_session_name, session_exists
-from shad.projects.open.sessions import pick_opencode_target
+from shad.projects.open.sessions import pick_claude_target, pick_opencode_target
 from shad.projects.open.layout import _create_session
 
 
@@ -17,7 +17,10 @@ def open_project(project: Project, defaults: Defaults) -> int | None:
 
     Returns the tmux exit code on success, or None if the user cancelled.
     """
-    target = pick_opencode_target(project.path, "opencode")
+    if project.harness == "claude":
+        target = pick_claude_target(project.path.name)
+    else:
+        target = pick_opencode_target(project.path, "opencode")
 
     if target is None:
         return None

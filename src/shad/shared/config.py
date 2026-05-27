@@ -34,6 +34,7 @@ from shad.shared.errors import ShadError
 CONFIG_PATH = Path.home() / ".config" / "shad" / "shad.toml"
 
 OC_POSITIONS = ("top", "bottom", "left")
+HARNESSES = ("opencode", "claude")
 
 
 @dataclass
@@ -41,6 +42,7 @@ class Defaults:
     oc_position: str = "top"
     panel_percent: int = 35
     split_percent: int = 35
+    harness: str = "opencode"
 
 
 @dataclass
@@ -49,6 +51,7 @@ class Project:
     group: str | None  # e.g. None or "alvr"
     path: Path
     session: str       # resolved session name
+    harness: str = "opencode"
 
     @property
     def display_name(self) -> str:
@@ -67,11 +70,19 @@ class Config:
     groups: dict[str, dict[str, Project]] = field(default_factory=dict)
 
 
-def _parse_project(key: str, data: dict, group: str | None = None) -> Project:
+def _parse_project(
+    key: str, data: dict, group: str | None = None, default_harness: str = "opencode"
+) -> Project:
     if "path" not in data:
         raise ValueError(
             f"Project [{('projects.' + group + '.' if group else 'projects.') + key}] "
             f"is missing required field 'path'"
+        )
+    harness = data.get("harness", default_harness)
+    if harness not in HARNESSES:
+        raise ShadError(
+            f"invalid harness '{harness}' in project '{key}'; "
+            f"must be one of: {', '.join(HARNESSES)}"
         )
     default_session = f"{group}-{key}" if group else key
     return Project(
@@ -79,6 +90,7 @@ def _parse_project(key: str, data: dict, group: str | None = None) -> Project:
         group=group,
         path=Path(data["path"]),
         session=data.get("session", default_session),
+        harness=harness,
     )
 
 
@@ -99,6 +111,12 @@ def load(path: Path = CONFIG_PATH) -> Config:
         raise ShadError(
             f"invalid oc_position '{oc_position}'; must be one of: {', '.join(OC_POSITIONS)}"
         )
+    harness = d.get("harness", "opencode")
+    if harness not in HARNESSES:
+        raise ShadError(
+            f"invalid harness '{harness}' in [defaults]; must be one of: {', '.join(HARNESSES)}"
+        )
+
     def _int_setting(name: str, default: int) -> int:
         raw_val = d.get(name, default)
         try:
@@ -112,6 +130,7 @@ def load(path: Path = CONFIG_PATH) -> Config:
         oc_position=oc_position,
         panel_percent=_int_setting("panel_percent", 35),
         split_percent=_int_setting("split_percent", 35),
+        harness=harness,
     )
 
     # --- projects ---
@@ -124,7 +143,7 @@ def load(path: Path = CONFIG_PATH) -> Config:
 
         if "path" in value:
             # top-level project
-            projects[key] = _parse_project(key, value, group=None)
+            projects[key] = _parse_project(key, value, group=None, default_harness=harness)
         else:
             # group: value is a dict of sub-projects
             group_projects: dict[str, Project] = {}
@@ -133,7 +152,9 @@ def load(path: Path = CONFIG_PATH) -> Config:
                     raise ShadError(
                         f"[projects.{key}.{sub_key}] must be a TOML table"
                     )
-                group_projects[sub_key] = _parse_project(sub_key, sub_value, group=key)
+                group_projects[sub_key] = _parse_project(
+                    sub_key, sub_value, group=key, default_harness=harness
+                )
             groups[key] = group_projects
 
     return Config(defaults=defaults, projects=projects, groups=groups)

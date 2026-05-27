@@ -1,16 +1,14 @@
 """
-OpenCode session picker for shad.
+AI session pickers for shad.
 
-Queries the opencode SQLite database for recent sessions associated with a
-project path, then presents an interactive arrow-key picker rendered with Rich.
+Provides interactive arrow-key pickers for each supported AI harness:
+- pick_opencode_target: queries the OpenCode SQLite DB for recent sessions
+- pick_claude_target: two-option picker (new / resume) for Claude Code
 
 Public API
 ----------
-pick_opencode_target(project_path, base_opencode_cmd) -> OpencodeTarget
-    Shows an interactive picker and returns the opencode command plus an
-    optional session key used to scope the tmux session.
-    Falls back to base_opencode_cmd if the DB is unavailable or there are
-    no sessions.
+pick_opencode_target(project_path, base_opencode_cmd) -> OpencodeTarget | None
+pick_claude_target(project_name) -> OpencodeTarget | None
 """
 
 from __future__ import annotations
@@ -23,6 +21,7 @@ import time
 import tty
 import termios
 import warnings
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -66,6 +65,7 @@ class OpencodeTarget:
     command: str
     session_key: str | None = None
     fresh: bool = False
+    session_prefix: str = "oc"
 
 
 def _query_sessions(project_path: Path, limit: int = SESSION_LIMIT) -> list[OcSession]:
@@ -160,14 +160,11 @@ def _render_panel(
     return buf.getvalue().encode()
 
 
-def _run_picker(sessions: list[OcSession], project_name: str) -> int | None:
+def _generic_picker(render_fn: Callable[[int], bytes], total: int) -> int | None:
     """
-    Picker using cursor-save/restore redraw via os.write directly to tty fd.
-    Returns index into [NEW_SESSION] + sessions, or None if cancelled.
-    Index 0 = New session, 1..n = sessions[0..n-1].
+    Core arrow-key picker backed by raw tty I/O and cursor save/restore.
+    Returns the selected index (0-based) or None if cancelled.
     """
-    items = [None] + sessions
-    total = len(items)
     selected = 0
 
     try:
@@ -175,15 +172,13 @@ def _run_picker(sessions: list[OcSession], project_name: str) -> int | None:
     except OSError:
         return None
 
-    term_width = shutil.get_terminal_size().columns
     old_settings = termios.tcgetattr(tty_fd)
-
-    SAVE = b"\033[s"  # save cursor position
-    RESTORE = b"\033[u"  # restore cursor position
-    CLEAR = b"\033[J"  # clear from cursor to end of screen
+    SAVE = b"\033[s"
+    RESTORE = b"\033[u"
+    CLEAR = b"\033[J"
 
     def draw(first: bool = False) -> None:
-        content = _render_panel(sessions, selected, project_name, term_width)
+        content = render_fn(selected)
         if first:
             os.write(tty_fd, SAVE + content)
         else:
@@ -197,10 +192,8 @@ def _run_picker(sessions: list[OcSession], project_name: str) -> int | None:
     try:
         tty.setraw(tty_fd)
         draw(first=True)
-
         while True:
             key = _read_key(tty_fd)
-
             if key in ("\x1b[A", "k"):
                 selected = (selected - 1) % total
                 draw()
@@ -221,6 +214,21 @@ def _run_picker(sessions: list[OcSession], project_name: str) -> int | None:
         except OSError:
             pass
         return None
+
+
+def _run_picker(sessions: list[OcSession], project_name: str) -> int | None:
+    """
+    OpenCode session picker.
+    Returns index into [NEW_SESSION] + sessions, or None if cancelled.
+    Index 0 = New session, 1..n = sessions[0..n-1].
+    """
+    items = [None] + sessions
+    term_width = shutil.get_terminal_size().columns
+
+    def render(selected: int) -> bytes:
+        return _render_panel(sessions, selected, project_name, term_width)
+
+    return _generic_picker(render, len(items))
 
 
 # ── Public API ─────────────────────────────────────────────────────────────
@@ -249,3 +257,50 @@ def pick_opencode_target(project_path: Path, base_cmd: str) -> OpencodeTarget | 
 
     session = sessions[chosen - 1]
     return OpencodeTarget(command=f"{base_cmd} -s {session.id}", session_key=session.id)
+
+
+def pick_claude_target(project_name: str) -> OpencodeTarget | None:
+    """
+    Show a 2-option picker for Claude Code: New session or Resume.
+    Returns None if the user cancelled.
+    """
+    labels = ["+ New session", "↩  Resume session"]
+    term_width = shutil.get_terminal_size().columns
+
+    def render(selected: int) -> bytes:
+        lines = Text()
+        for i, label in enumerate(labels):
+            is_sel = i == selected
+            pointer = "❯ " if is_sel else "  "
+            row = Text()
+            row.append(pointer, style="bold bright_green" if is_sel else "dim")
+            row.append(label, style="bold bright_white" if is_sel else "white")
+            lines.append_text(row)
+            lines.append("\n")
+        footer = Text("\n ↑↓ / j k  navigate   Enter  select   q  cancel", style="dim")
+        lines.append_text(footer)
+        panel = Panel(
+            lines,
+            title=f"[bold cyan]claude session[/bold cyan]  [dim]─[/dim]  [bright_white]{project_name}[/bright_white]",
+            border_style="cyan",
+            padding=(0, 1),
+        )
+        buf = StringIO()
+        Console(file=buf, force_terminal=True, width=term_width, highlight=False).print(panel)
+        return buf.getvalue().encode()
+
+    chosen = _generic_picker(render, len(labels))
+    if chosen is None:
+        return None
+    if chosen == 0:
+        return OpencodeTarget(
+            command="claude",
+            session_key=f"fresh-{int(time.time())}",
+            fresh=True,
+            session_prefix="cc",
+        )
+    return OpencodeTarget(
+        command="claude --resume",
+        session_key="resume",
+        session_prefix="cc",
+    )
