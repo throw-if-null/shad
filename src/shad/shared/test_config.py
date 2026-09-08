@@ -7,7 +7,6 @@ from pathlib import Path
 from shad.shared.config import Project, load, resolve_prefix
 from shad.shared.errors import ShadError
 
-
 # ---------------------------------------------------------------------------
 # resolve_prefix
 # ---------------------------------------------------------------------------
@@ -181,12 +180,12 @@ class LoadConfigTests(unittest.TestCase):
             load(cfg_path)
         self.assertIn("must be a TOML table", str(ctx.exception))
 
-    def test_project_missing_path_raises_value_error(self) -> None:
+    def test_project_missing_path_raises_shad_error(self) -> None:
         cfg_path = _write_toml(self.tmp_path, """
             [projects.grp.nopathapp]
             session = "something"
         """)
-        with self.assertRaises(ValueError) as ctx:
+        with self.assertRaises(ShadError) as ctx:
             load(cfg_path)
         self.assertIn("missing required field 'path'", str(ctx.exception))
 

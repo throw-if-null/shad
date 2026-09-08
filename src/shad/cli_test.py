@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from shad.cli import cmd_projects, main, _run_action
+from shad.cli import _run_action, cmd_projects, main
 from shad.shared.config import Config, Defaults, Project
 from shad.shared.errors import ShadError
 
@@ -39,9 +39,9 @@ class ProjectsCommandTests(unittest.TestCase):
         with (
             patch("shad.cli.print_banner"),
             patch("shad.cli.open_project", return_value=0) as open_project,
+            self.assertRaises(SystemExit) as ctx,
         ):
-            with self.assertRaises(SystemExit) as ctx:
-                cmd_projects(cfg, args)
+            cmd_projects(cfg, args)
 
         self.assertEqual(ctx.exception.code, 0)
         open_project.assert_called_once_with(project, cfg.defaults)
@@ -54,9 +54,9 @@ class ProjectsCommandTests(unittest.TestCase):
         with (
             patch("shad.cli.print_banner"),
             patch("shad.cli.open_project", return_value=0) as open_project,
+            self.assertRaises(SystemExit) as ctx,
         ):
-            with self.assertRaises(SystemExit) as ctx:
-                cmd_projects(cfg, args)
+            cmd_projects(cfg, args)
 
         self.assertEqual(ctx.exception.code, 0)
         open_project.assert_called_once_with(project, cfg.defaults)
@@ -226,30 +226,27 @@ class MainErrorHandlingTests(unittest.TestCase):
         with (
             patch("sys.argv", ["shad", "projects"]),
             patch("shad.cli.load", side_effect=ShadError("boom")),
-            patch("shad.cli.err_console"),
+            patch("shad.cli.err_console"),self.assertRaises(SystemExit) as ctx
         ):
-            with self.assertRaises(SystemExit) as ctx:
-                main()
+            main()
         self.assertEqual(ctx.exception.code, 1)
 
     def test_keyboard_interrupt_exits_130(self) -> None:
         with (
             patch("sys.argv", ["shad", "projects"]),
             patch("shad.cli.load", side_effect=KeyboardInterrupt()),
-            patch("shad.cli.err_console"),
+            patch("shad.cli.err_console"),self.assertRaises(SystemExit) as ctx
         ):
-            with self.assertRaises(SystemExit) as ctx:
-                main()
+            main()
         self.assertEqual(ctx.exception.code, 130)
 
     def test_eof_error_exits_130(self) -> None:
         with (
             patch("sys.argv", ["shad", "projects"]),
             patch("shad.cli.load", side_effect=EOFError()),
-            patch("shad.cli.err_console"),
+            patch("shad.cli.err_console"),self.assertRaises(SystemExit) as ctx
         ):
-            with self.assertRaises(SystemExit) as ctx:
-                main()
+            main()
         self.assertEqual(ctx.exception.code, 130)
 
 

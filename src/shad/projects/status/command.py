@@ -22,10 +22,10 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+from rich import box
 from rich.console import Console
 from rich.table import Table
 from rich.text import Text
-from rich import box
 
 from shad.shared.config import Project
 from shad.shared.tmux import list_project_sessions, tmux_server_running
@@ -38,7 +38,7 @@ console = Console()
 
 def _capture(args: list[str], *, cwd: Path | None = None) -> str:
     try:
-        r = subprocess.run(args, capture_output=True, text=True, cwd=cwd)
+        r = subprocess.run(args, capture_output=True, text=True, cwd=cwd, check=False)
         return r.stdout.strip() if r.returncode == 0 else ""
     except FileNotFoundError:
         return ""
@@ -239,7 +239,7 @@ def _print_runtimes(path: Path) -> None:
             lbl = futures[future]
             try:
                 latest[lbl] = future.result()
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 — one failed fetch must not abort the rest
                 warnings.warn(
                     f"shad: latest version fetch failed for {lbl}: {exc}", stacklevel=2
                 )

@@ -13,10 +13,10 @@ from __future__ import annotations
 import os
 import subprocess
 
+from rich import box
 from rich.console import Console
 from rich.table import Table
 from rich.text import Text
-from rich import box
 
 _SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
     ("PANES", [
@@ -123,5 +123,6 @@ def cmd_cheat() -> int:
 
     result = subprocess.run(
         ["tmux", "display-popup", "-E", "-w", "88", "-h", "40", shell_cmd],
+        check=False,
     )
     return result.returncode

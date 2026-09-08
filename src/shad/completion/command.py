@@ -17,7 +17,6 @@ from __future__ import annotations
 
 from shad.shared.errors import ShadError
 
-
 BASH_COMPLETION = r"""
 _shad_complete() {
     local cur prev words
@@ -27,12 +26,31 @@ _shad_complete() {
 
     # shad <TAB>  →  top-level subcommands
     if [[ ${COMP_CWORD} -eq 1 ]]; then
-        COMPREPLY=($(compgen -W "projects completion init cheat" -- "$cur"))
+        COMPREPLY=($(compgen -W "projects config completion init cheat" -- "$cur"))
         return
     fi
 
     if [[ "${words[1]}" == "completion" && ${COMP_CWORD} -eq 2 ]]; then
         COMPREPLY=($(compgen -W "bash zsh" -- "$cur"))
+        return
+    fi
+
+    if [[ "${words[1]}" == "config" ]]; then
+        local config_actions="show path keys get set unset edit validate"
+        if [[ ${COMP_CWORD} -eq 2 ]]; then
+            COMPREPLY=($(compgen -W "$config_actions" -- "$cur"))
+            return
+        fi
+        case "${words[2]}" in
+            get|set|unset)
+                if [[ ${COMP_CWORD} -eq 3 ]]; then
+                    COMPREPLY=($(compgen -W "$(shad config keys 2>/dev/null)" -- "$cur"))
+                fi
+                ;;
+            show)
+                COMPREPLY=($(compgen -W "--raw" -- "$cur"))
+                ;;
+        esac
         return
     fi
 
@@ -105,12 +123,28 @@ _shad() {
 
     case $state in
         cmd)
-            _values 'command' projects completion init cheat
+            _values 'command' projects config completion init cheat
             ;;
         args)
             case $words[2] in
                 completion)
                     _values 'shell' bash zsh
+                    ;;
+                config)
+                    local config_actions=(show path keys get set unset edit validate)
+                    if [[ ${#words} -eq 3 ]]; then
+                        _values 'action' "${config_actions[@]}"
+                    elif [[ ${#words} -eq 4 ]]; then
+                        case $words[3] in
+                            get|set|unset)
+                                local cfg_keys=(${(f)"$(shad config keys 2>/dev/null)"})
+                                _values 'key' "${cfg_keys[@]}"
+                                ;;
+                            show)
+                                _values 'flag' --raw
+                                ;;
+                        esac
+                    fi
                     ;;
                 projects)
                     local raw

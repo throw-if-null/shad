@@ -18,14 +18,14 @@ import shutil
 import subprocess
 import tomllib
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
 
 from rich.console import Console
-from rich.text import Text
 from rich.panel import Panel
-from rich.prompt import Prompt, Confirm
+from rich.prompt import Confirm, Prompt
+from rich.text import Text
 
 from shad.shared.config import CONFIG_PATH
 from shad.shared.errors import ShadError
@@ -130,7 +130,7 @@ def _is_root() -> bool:
 
 def _run_install_command(command: list[str], description: str) -> None:
     console.print(Text(f"  → {description}", style="cyan"))
-    result = subprocess.run(command)
+    result = subprocess.run(command, check=False)
     if result.returncode != 0:
         raise ShadError(f"command failed: {' '.join(command)}")
 

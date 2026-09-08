@@ -11,7 +11,6 @@ import os
 import re
 import subprocess
 
-
 _SESSION_KEY_RE = re.compile(r"[^A-Za-z0-9_-]+")
 
 
@@ -76,5 +75,5 @@ def _attach(session: str) -> int:
     else:
         cmd = ["tmux", "attach-session", "-t", session]
 
-    result = subprocess.run(cmd)
+    result = subprocess.run(cmd, check=False)
     return result.returncode

@@ -6,10 +6,10 @@ Orchestrates: AI session picker → tmux session create/attach.
 
 from __future__ import annotations
 
+from shad.projects.open.layout import _create_session
+from shad.projects.open.sessions import pick_claude_target, pick_opencode_target
 from shad.shared.config import Defaults, Project
 from shad.shared.tmux import _attach, _run, project_session_name, session_exists
-from shad.projects.open.sessions import pick_claude_target, pick_opencode_target
-from shad.projects.open.layout import _create_session
 
 
 def open_project(project: Project, defaults: Defaults) -> int | None:

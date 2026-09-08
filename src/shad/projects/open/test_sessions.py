@@ -10,11 +10,10 @@ from unittest.mock import patch
 from shad.projects.open.sessions import (
     OcSession,
     OpencodeTarget,
-    _truncate,
     _query_sessions,
+    _truncate,
     pick_opencode_target,
 )
-
 
 # ---------------------------------------------------------------------------
 # pick_opencode_target
