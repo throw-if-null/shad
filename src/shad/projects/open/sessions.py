@@ -13,24 +13,23 @@ pick_claude_target(project_name) -> OpencodeTarget | None
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import sqlite3
-import os
+import termios
 import time
 import tty
-import termios
 import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from io import StringIO
 from pathlib import Path
 
-from io import StringIO
-
 from rich.console import Console
-from rich.text import Text
 from rich.panel import Panel
+from rich.text import Text
 
 DB_PATH = Path.home() / ".local" / "share" / "opencode" / "opencode.db"
 SESSION_LIMIT = 5
@@ -49,7 +48,7 @@ class OcSession:
     @property
     def updated_str(self) -> str:
         dt = datetime.fromtimestamp(
-            self.time_updated / 1000, tz=timezone.utc
+            self.time_updated / 1000, tz=UTC
         ).astimezone()
         return dt.strftime("%Y-%m-%d %H:%M")
 

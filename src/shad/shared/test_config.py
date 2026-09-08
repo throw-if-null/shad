@@ -7,7 +7,6 @@ from pathlib import Path
 from shad.shared.config import Project, load, resolve_prefix
 from shad.shared.errors import ShadError
 
-
 # ---------------------------------------------------------------------------
 # resolve_prefix
 # ---------------------------------------------------------------------------

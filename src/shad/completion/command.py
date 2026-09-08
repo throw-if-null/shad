@@ -17,7 +17,6 @@ from __future__ import annotations
 
 from shad.shared.errors import ShadError
 
-
 BASH_COMPLETION = r"""
 _shad_complete() {
     local cur prev words

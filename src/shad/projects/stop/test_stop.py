@@ -5,8 +5,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from shad.shared.config import Project
 from shad.projects.stop.command import stop_project
+from shad.shared.config import Project
 
 
 def _completed(returncode: int = 0, stdout: str = "", stderr: str = "") -> subprocess.CompletedProcess:

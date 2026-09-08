@@ -4,8 +4,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import call, patch
 
-from shad.shared.config import Defaults, Project
 from shad.projects.open.layout import _create_session
+from shad.shared.config import Defaults, Project
 
 
 class WindowTitleTests(unittest.TestCase):

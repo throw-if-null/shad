@@ -5,9 +5,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from shad.shared.config import Defaults, Project
-from shad.projects.open.sessions import OpencodeTarget
 from shad.projects.open.command import open_project
+from shad.projects.open.sessions import OpencodeTarget
+from shad.shared.config import Defaults, Project
 
 
 def _completed(

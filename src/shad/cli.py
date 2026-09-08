@@ -25,16 +25,16 @@ from rich.console import Console
 from rich.text import Text
 
 from shad import __version__
-from shad.shared.config import Config, Project, load, resolve_prefix
-from shad.shared.errors import ShadError
-from shad.projects.open.command import open_project
+from shad.cheat.command import cmd_cheat
+from shad.completion.command import print_completion
+from shad.config.command import cmd_config
+from shad.init.command import cmd_init
 from shad.projects.open.banner import print_banner
+from shad.projects.open.command import open_project
 from shad.projects.status.command import print_status
 from shad.projects.stop.command import stop_project
-from shad.completion.command import print_completion
-from shad.init.command import cmd_init
-from shad.config.command import cmd_config
-from shad.cheat.command import cmd_cheat
+from shad.shared.config import Config, Project, load, resolve_prefix
+from shad.shared.errors import ShadError
 
 console = Console()
 err_console = Console(stderr=True)
