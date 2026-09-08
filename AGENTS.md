@@ -25,6 +25,10 @@ src/shad/
 │   │   └── banner.py           # ASCII art banner
 │   ├── status/command.py       # "shad projects <name> status"
 │   └── stop/command.py         # "shad projects <name> stop"
+├── config/                     # "shad config" — inspect and edit shad.toml
+│   ├── command.py              # action dispatch (show/path/keys/get/set/unset/edit/validate)
+│   ├── schema.py               # settable key namespace and value validation
+│   └── toml_edit.py            # comment-preserving TOML text editor
 ├── init/command.py             # "shad init" interactive wizard
 ├── cheat/command.py            # "shad cheat" tmux cheat sheet
 └── completion/command.py       # "shad completion bash|zsh"
@@ -62,3 +66,4 @@ Tests use `unittest.TestCase` with `unittest.mock.patch` for isolating subproces
 - **tmux session naming**: bare project session name (e.g. `tin-shad`) is for new/default sessions. Scoped names use the pattern `<base>--oc-<session-id>` for existing opencode sessions. The `project_session_name()` function in `shared/tmux.py` handles this.
 - **Picker returns**: `pick_opencode_target()` returns `None` for cancel, `OpencodeTarget(fresh=True)` for "New session", or `OpencodeTarget(session_key=...)` for an existing session. The `fresh` flag signals that any existing tmux session with the same name should be killed and recreated.
 - **Inside vs outside tmux**: `_attach()` uses `switch-client` when already inside tmux, `attach-session` otherwise.
+- **Config writes**: the stdlib has no TOML writer and shad adds no dependencies, so `config/toml_edit.py` edits the file as text to keep comments. It handles scalar values only and rejects multi-line values. Every write is parsed with `tomllib` and loaded with `shared.config.load()` in a temporary file first, then `os.replace`d into position.

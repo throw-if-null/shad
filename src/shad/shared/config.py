@@ -74,7 +74,7 @@ def _parse_project(
     key: str, data: dict, group: str | None = None, default_harness: str = "opencode"
 ) -> Project:
     if "path" not in data:
-        raise ValueError(
+        raise ShadError(
             f"Project [{('projects.' + group + '.' if group else 'projects.') + key}] "
             f"is missing required field 'path'"
         )

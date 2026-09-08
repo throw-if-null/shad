@@ -9,6 +9,7 @@ shad projects <name>                     # open top-level project or list group
 shad projects <group> <name>             # open project inside a group
 shad projects <name> <action>            # run action on top-level project
 shad projects <group> <name> <action>    # run action on grouped project
+shad config <action> [args]              # inspect or edit shad.toml
 
 Actions: status, stop
 
@@ -32,6 +33,7 @@ from shad.projects.status.command import print_status
 from shad.projects.stop.command import stop_project
 from shad.completion.command import print_completion
 from shad.init.command import cmd_init
+from shad.config.command import cmd_config
 from shad.cheat.command import cmd_cheat
 
 console = Console()
@@ -243,6 +245,70 @@ def build_parser() -> argparse.ArgumentParser:
         help="Install missing tmux, opencode, and gitui dependencies on Fedora before prompting",
     )
 
+    p_config = sub.add_parser(
+        "config",
+        help="Inspect or edit ~/.config/shad/shad.toml",
+        description=(
+            "Inspect and edit the shad config file.\n\n"
+            "Actions:\n"
+            "  show       print a rendered summary (default; --raw prints the file)\n"
+            "  path       print the config file path\n"
+            "  keys       print every settable key, one per line\n"
+            "  get        print a single value\n"
+            "  set        set a value; comments and formatting are preserved\n"
+            "  unset      remove a key, or a whole project table\n"
+            "  edit       open the file in $EDITOR, then validate it\n"
+            "  validate   check that the file parses and loads\n\n"
+            "Keys are dotted TOML paths:\n"
+            "  defaults.oc_position\n"
+            "  projects.kb.path\n"
+            "  projects.alvr.db.session\n\n"
+            "Examples:\n"
+            "  shad config                          rendered summary\n"
+            "  shad config show --raw               print shad.toml as-is\n"
+            "  shad config path                     print the file path\n"
+            "  shad config keys                     list settable keys\n"
+            "  shad config get defaults.harness     read one value\n"
+            "  shad config set defaults.harness claude\n"
+            "  shad config set projects.kb.path ~/gh/kb\n"
+            "  shad config unset projects.kb        remove the project\n\n"
+            "Writes are validated before they replace the file."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    config_sub = p_config.add_subparsers(dest="config_action", metavar="<action>")
+
+    p_config_show = config_sub.add_parser("show", help="Print a rendered config summary")
+    p_config_show.add_argument(
+        "--raw", action="store_true", help="Print the raw file contents instead"
+    )
+
+    config_sub.add_parser("path", help="Print the config file path")
+    config_sub.add_parser("keys", help="Print every settable key, one per line")
+
+    p_config_get = config_sub.add_parser("get", help="Print a single value")
+    p_config_get.add_argument("key", metavar="KEY", help="Dotted key, e.g. defaults.harness")
+
+    p_config_set = config_sub.add_parser("set", help="Set a single value")
+    p_config_set.add_argument("key", metavar="KEY", help="Dotted key, e.g. defaults.harness")
+    p_config_set.add_argument("value", metavar="VALUE", help="New value")
+    p_config_set.add_argument(
+        "--force",
+        action="store_true",
+        help="Skip key and path checks (still requires the result to be a loadable config)",
+    )
+
+    p_config_unset = config_sub.add_parser("unset", help="Remove a key or a project table")
+    p_config_unset.add_argument("key", metavar="KEY", help="Dotted key, e.g. projects.kb")
+    p_config_unset.add_argument(
+        "--force",
+        action="store_true",
+        help="Allow removing a required key such as a project's path",
+    )
+
+    config_sub.add_parser("edit", help="Open the config file in $EDITOR")
+    config_sub.add_parser("validate", help="Check that the config parses and loads")
+
     sub.add_parser(
         "cheat",
         help="Show a tmux cheat sheet in a popup (or stdout if outside tmux)",
@@ -279,6 +345,10 @@ def main() -> None:
 
         if args.command == "cheat":
             sys.exit(cmd_cheat())
+
+        if args.command == "config":
+            cmd_config(args)
+            return
 
         cfg: Config = load()
 

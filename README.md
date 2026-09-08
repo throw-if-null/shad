@@ -78,6 +78,54 @@ mkdir -p ~/.config/shad
 touch ~/.config/shad/shad.toml
 ```
 
+### Managing config from the CLI
+
+`shad config` reads and edits `~/.config/shad/shad.toml` without opening an editor.
+
+| Command | Description |
+|---|---|
+| `shad config` / `shad config show` | Print a rendered summary of defaults and projects |
+| `shad config show --raw` | Print the file contents as-is |
+| `shad config path` | Print the config file path |
+| `shad config keys` | Print every settable key, one per line |
+| `shad config get <key>` | Print one value; a table is expanded into dotted lines |
+| `shad config set <key> <value>` | Set one value |
+| `shad config unset <key>` | Remove a key, or a whole project table |
+| `shad config edit` | Open the file in `$EDITOR`, then validate it |
+| `shad config validate` | Check that the file parses and loads |
+
+`get` prints the effective value: a key that is absent from the file falls back to what `shad` actually uses (for example `defaults.oc_position` or a project's derived `session`). `show` marks which defaults are set in the file and which are built in.
+
+Keys are dotted TOML paths:
+
+```
+defaults.oc_position          top | bottom | left
+defaults.panel_percent        integer 1-99
+defaults.split_percent        integer 1-99
+defaults.harness              opencode | claude
+projects.<key>.path           directory path
+projects.<key>.session        string
+projects.<key>.harness        opencode | claude
+projects.<group>.<key>.path   directory path
+```
+
+Behaviour of `set` and `unset`:
+
+- Values are validated against the field before they are written.
+- Comments, ordering, and alignment in the file are preserved.
+- `~` in path values is expanded.
+- A new project table is created when the key does not exist yet. Set its `path` first.
+- The result is parsed and loaded in a temporary file before it replaces the config, so a rejected edit never damages a working config.
+- Unknown keys are rejected. `--force` writes them anyway.
+- A path that does not exist is rejected. `--force` writes it anyway.
+- `unset projects.<key>.path` is rejected because it would drop the project silently. Use `shad config unset projects.<key>` to remove the project, or `--force`.
+
+```sh
+shad config set defaults.oc_position left
+shad config set projects.alvr.db.session alvr-db
+shad config unset projects.alvr.db
+```
+
 ### Full annotated example
 
 ```toml
@@ -170,6 +218,16 @@ shad projects alvr db stop
 
 # Show a tmux cheat sheet popup
 shad cheat
+
+# Inspect and edit the config file
+shad config
+shad config path
+shad config keys
+shad config get defaults.harness
+shad config set defaults.panel_percent 40
+shad config set projects.kb.path ~/gh/kb
+shad config unset projects.kb
+shad config edit
 ```
 
 ## Shell completion
@@ -305,6 +363,10 @@ shad/
         │   └── command.py
         ├── completion/
         │   └── command.py
+        ├── config/
+        │   ├── command.py
+        │   ├── schema.py
+        │   └── toml_edit.py
         ├── init/
         │   └── command.py
         ├── projects/
