@@ -31,10 +31,14 @@ src/shad/
 │   ├── schema.py               # settable key namespace and value validation
 │   └── toml_edit.py            # comment-preserving TOML text editor
 ├── git/                        # "shad git sync" — fetch, prune branches and worktrees
-│   ├── command.py              # target resolution, parallel inspect, gate, apply
-│   ├── model.py                # ProjectPlan / ProjectOutcome / SyncRun
+│   ├── run.py                  # the git subprocess contract; no domain knowledge
+│   ├── model.py                # dataclasses: one repository, and one sync run
+│   ├── refs.py                 # queries: refs, worktrees, remotes, default branch
+│   ├── discover.py             # configured path -> repository; per-worktree state
+│   ├── plan.py                 # what is safe to delete (the safety boundary)
+│   ├── apply.py                # the commands that change a repository
 │   ├── report.py               # rich rendering
-│   └── repo.py                 # git subprocess wrappers and classification
+│   └── command.py              # target resolution, parallel inspect, gate, apply
 ├── init/command.py             # "shad init" interactive wizard
 ├── cheat/command.py            # "shad cheat" tmux cheat sheet
 └── completion/command.py       # "shad completion bash"
@@ -72,6 +76,7 @@ Tests use `unittest.TestCase` with `unittest.mock.patch` for isolating subproces
 - **tmux session naming**: bare project session name (e.g. `tin-shad`) is for new/default sessions. Scoped names use the pattern `<base>--oc-<session-id>` for existing opencode sessions. The `project_session_name()` function in `shared/tmux.py` handles this.
 - **Picker returns**: `pick_opencode_target()` returns `None` for cancel, `OpencodeTarget(fresh=True)` for "New session", or `OpencodeTarget(session_key=...)` for an existing session. The `fresh` flag signals that any existing tmux session with the same name should be killed and recreated.
 - **Inside vs outside tmux**: `_attach()` uses `switch-client` when already inside tmux, `attach-session` otherwise.
+- **`shad git sync` layering**: the slice is a DAG — `run` and `model` are leaves, `refs` reads, `discover` resolves, `plan` decides, `apply` mutates, `command` orchestrates. `plan.py` is the safety boundary: it runs no git mutations, it only classifies. Keep it that way — a deletion rule that can also delete is much harder to test.
 - **`shad git sync` ordering**: two orderings in `git/command.py` are load-bearing. Fast-forward must run *before* branches are classified, or branches merged upstream are silently under-reported — and no test that fakes git output can catch it. Worktrees must be removed *before* branches are deleted, because `git branch -d` refuses a branch a worktree has checked out.
 - **`shad git sync` gating**: fetch, prune, and fast-forward are applied immediately and are **not** undone when the user declines the prompt. Only deletions are gated. The report renders them in the past tense above the prompt for that reason.
 - **Deleting a gone-upstream branch**: safe only when that upstream ref was pruned *in this run*, because pruning a ref deletes its reflog and its last-known OID with it. That OID is the proof the branch was fully pushed. This is why `--dry-run` fetches but never prunes, and why `_pruned_oids` has a separate dry-run path that asks the remote via `ls-remote` instead.

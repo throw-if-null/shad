@@ -21,7 +21,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from shad.git import repo as R
+from shad.git import apply, discover, refs
+from shad.git import plan as planning
+from shad.git.model import BranchInfo
 
 _ISOLATE = {
     "GIT_CONFIG_GLOBAL": os.devnull,
@@ -119,7 +121,7 @@ class RealRepoTests(unittest.TestCase):
     # ── detection ─────────────────────────────────────────────────────────
 
     def test_discover_returns_the_clone_root(self) -> None:
-        found = R.discover(self.clone)
+        found = discover.discover(self.clone)
         self.assertEqual(found.root, self.clone.resolve())
         self.assertFalse(found.shallow)
         self.assertIsNone(found.relinked_from)
@@ -127,24 +129,24 @@ class RealRepoTests(unittest.TestCase):
     def test_discover_refuses_a_subdirectory_of_a_repository(self) -> None:
         sub = self.clone / "sub"
         sub.mkdir(exist_ok=True)
-        with self.assertRaises(R.NotUsable) as ctx:
-            R.discover(sub)
+        with self.assertRaises(discover.NotUsable) as ctx:
+            discover.discover(sub)
         self.assertIn("is not its root", str(ctx.exception))
 
     def test_discover_refuses_a_non_repository(self) -> None:
         outside = Path(self.tmp.name) / "plain"
         outside.mkdir(exist_ok=True)
-        with self.assertRaises(R.NotUsable) as ctx:
-            R.discover(outside)
+        with self.assertRaises(discover.NotUsable) as ctx:
+            discover.discover(outside)
         self.assertIn("not a git repository", str(ctx.exception))
 
     def test_in_progress_is_none_on_a_quiet_repository(self) -> None:
-        self.assertIsNone(R.in_progress(self.clone))
+        self.assertIsNone(discover.in_progress(self.clone))
 
     # ── refs ──────────────────────────────────────────────────────────────
 
     def test_list_branches_reports_upstream_and_tracking(self) -> None:
-        branches = {b.name: b for b in R.list_branches(self.clone)}
+        branches = {b.name: b for b in refs.list_branches(self.clone)}
 
         self.assertIn("main", branches)
         self.assertEqual(branches["feat/merged"].upstream, "refs/remotes/origin/feat/merged")
@@ -158,26 +160,26 @@ class RealRepoTests(unittest.TestCase):
         self.assertEqual(branches["scratch"].remotename, "")
 
     def test_snapshot_remotes_reads_refs_and_flags_the_symref(self) -> None:
-        refs, symrefs = R.snapshot_remotes(self.clone)
-        self.assertIn("refs/remotes/origin/main", refs)
-        self.assertEqual(len(refs["refs/remotes/origin/main"]), 40)
+        remote_refs, symrefs = refs.snapshot_remotes(self.clone)
+        self.assertIn("refs/remotes/origin/main", remote_refs)
+        self.assertEqual(len(remote_refs["refs/remotes/origin/main"]), 40)
         self.assertIn("refs/remotes/origin/HEAD", symrefs)
 
     def test_default_branch_resolves_without_network(self) -> None:
         self.assertEqual(
-            R.default_branch(self.clone, "origin", allow_network=False), "main"
+            refs.default_branch(self.clone, "origin", allow_network=False), "main"
         )
 
     def test_has_full_refspec_is_true_for_a_normal_clone(self) -> None:
-        self.assertTrue(R.has_full_refspec(self.clone, "origin"))
+        self.assertTrue(refs.has_full_refspec(self.clone, "origin"))
 
     def test_is_ancestor_answers_true_false_and_unknown(self) -> None:
-        main = R.ref_oid(self.clone, "refs/heads/main")
-        merged = R.ref_oid(self.clone, "refs/heads/feat/merged")
+        main = refs.ref_oid(self.clone, "refs/heads/main")
+        merged = refs.ref_oid(self.clone, "refs/heads/feat/merged")
         assert main and merged
-        self.assertIs(R.is_ancestor(self.clone, merged, main), True)
-        self.assertIs(R.is_ancestor(self.clone, main, merged), False)
-        self.assertIsNone(R.is_ancestor(self.clone, "0" * 40, main))
+        self.assertIs(refs.is_ancestor(self.clone, merged, main), True)
+        self.assertIs(refs.is_ancestor(self.clone, main, merged), False)
+        self.assertIsNone(refs.is_ancestor(self.clone, "0" * 40, main))
 
     # ── worktrees ─────────────────────────────────────────────────────────
 
@@ -185,7 +187,7 @@ class RealRepoTests(unittest.TestCase):
         added = Path(self.tmp.name) / "wt-merged"
         _git(self.clone, "worktree", "add", "--quiet", str(added), "feat/merged")
         try:
-            worktrees = R.list_worktrees(self.clone)
+            worktrees = refs.list_worktrees(self.clone)
             self.assertEqual(worktrees[0].path, self.clone.resolve())
             self.assertFalse(worktrees[0].locked)
 
@@ -203,7 +205,7 @@ class RealRepoTests(unittest.TestCase):
         _git(self.clone, "worktree", "add", "--quiet", "--detach", str(added))
         shutil.rmtree(added)
         try:
-            entry = {w.path: w for w in R.list_worktrees(self.clone)}[added.resolve()]
+            entry = {w.path: w for w in refs.list_worktrees(self.clone)}[added.resolve()]
             self.assertTrue(entry.prunable)
             self.assertTrue(entry.prunable_reason)
         finally:
@@ -214,7 +216,7 @@ class RealRepoTests(unittest.TestCase):
         _git(self.clone, "worktree", "add", "--quiet", "--detach", str(added))
         _git(self.clone, "worktree", "lock", "--reason", "on a usb stick", str(added))
         try:
-            entry = {w.path: w for w in R.list_worktrees(self.clone)}[added.resolve()]
+            entry = {w.path: w for w in refs.list_worktrees(self.clone)}[added.resolve()]
             self.assertTrue(entry.locked)
             self.assertEqual(entry.locked_reason, "on a usb stick")
         finally:
@@ -224,12 +226,12 @@ class RealRepoTests(unittest.TestCase):
     # ── fetch and the squash-merge rule ───────────────────────────────────
 
     def test_fetch_prune_and_the_squash_merged_branch_rule(self) -> None:
-        before, symrefs = R.snapshot_remotes(self.clone)
+        before, symrefs = refs.snapshot_remotes(self.clone)
 
-        result = R.fetch(self.clone, "origin", prune=True)
+        result = apply.fetch(self.clone, "origin", prune=True)
         self.assertTrue(result.ok, result.error)
 
-        after, _ = R.snapshot_remotes(self.clone)
+        after, _ = refs.snapshot_remotes(self.clone)
         pruned = {
             ref: before[ref]
             for ref in before.keys() - after.keys()
@@ -237,16 +239,16 @@ class RealRepoTests(unittest.TestCase):
         }
         self.assertIn("refs/remotes/origin/feat/squashed", pruned)
 
-        branches = {b.name: b for b in R.list_branches(self.clone)}
-        main_tip = R.ref_oid(self.clone, "refs/remotes/origin/main")
+        branches = {b.name: b for b in refs.list_branches(self.clone)}
+        main_tip = refs.ref_oid(self.clone, "refs/remotes/origin/main")
         assert main_tip
 
         # The squash-merged branch is NOT an ancestor of main — this is exactly
         # why `git branch -d` refuses it and why clause (b) exists.
         squashed = branches["feat/squashed"]
-        self.assertIs(R.is_ancestor(self.clone, squashed.oid, main_tip), False)
+        self.assertIs(refs.is_ancestor(self.clone, squashed.oid, main_tip), False)
 
-        verdict = R.classify_branch(
+        verdict = planning.classify_branch(
             self.clone,
             squashed,
             default_tips=[main_tip],
@@ -255,17 +257,17 @@ class RealRepoTests(unittest.TestCase):
             gone_allowed=True,
             shallow=False,
         )
-        self.assertIsInstance(verdict, R.BranchInfo)
-        assert isinstance(verdict, R.BranchInfo)
+        self.assertIsInstance(verdict, BranchInfo)
+        assert isinstance(verdict, BranchInfo)
         self.assertEqual(verdict.reason, "pushed-then-gone")
         self.assertTrue(verdict.force)
 
     def test_classify_branches_keeps_unpushed_and_upstreamless_branches(self) -> None:
-        main_tip = R.ref_oid(self.clone, "refs/remotes/origin/main")
+        main_tip = refs.ref_oid(self.clone, "refs/remotes/origin/main")
         assert main_tip
-        plan = R.classify_branches(
+        result = planning.classify_branches(
             self.clone,
-            R.list_branches(self.clone),
+            refs.list_branches(self.clone),
             default="main",
             default_tips=[main_tip],
             checked_out={"refs/heads/main": self.clone},
@@ -273,8 +275,8 @@ class RealRepoTests(unittest.TestCase):
             gone_allowed=True,
             shallow=False,
         )
-        kept = {k.name: k.reason for k in plan.keep}
-        deleted = {d.name: d.reason for d in plan.delete}
+        kept = {k.name: k.reason for k in result.keep}
+        deleted = {d.name: d.reason for d in result.delete}
 
         self.assertNotIn("main", kept)
         self.assertNotIn("main", deleted)
@@ -283,11 +285,11 @@ class RealRepoTests(unittest.TestCase):
         self.assertEqual(deleted["feat/merged"], "merged")
 
     def test_classify_branches_deletes_nothing_in_a_shallow_clone(self) -> None:
-        main_tip = R.ref_oid(self.clone, "refs/remotes/origin/main")
+        main_tip = refs.ref_oid(self.clone, "refs/remotes/origin/main")
         assert main_tip
-        plan = R.classify_branches(
+        result = planning.classify_branches(
             self.clone,
-            R.list_branches(self.clone),
+            refs.list_branches(self.clone),
             default="main",
             default_tips=[main_tip],
             checked_out={},
@@ -295,8 +297,8 @@ class RealRepoTests(unittest.TestCase):
             gone_allowed=True,
             shallow=True,
         )
-        self.assertEqual(plan.delete, [])
-        self.assertTrue(all(k.reason == "shallow clone" for k in plan.keep))
+        self.assertEqual(result.delete, [])
+        self.assertTrue(all(k.reason == "shallow clone" for k in result.keep))
 
 
 if __name__ == "__main__":

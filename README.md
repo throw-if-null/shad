@@ -438,10 +438,14 @@ shad/
         │   ├── schema.py
         │   └── toml_edit.py
         ├── git/
+        │   ├── apply.py
         │   ├── command.py
+        │   ├── discover.py
         │   ├── model.py
+        │   ├── plan.py
+        │   ├── refs.py
         │   ├── report.py
-        │   └── repo.py
+        │   └── run.py
         ├── init/
         │   └── command.py
         ├── projects/

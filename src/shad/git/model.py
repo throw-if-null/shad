@@ -1,12 +1,12 @@
 """
-Run-level dataclasses for `shad git sync`.
+Types for the git slice.
 
-These live apart from both shad.git.command and shad.git.report because the
-renderer must read them without importing the orchestrator, which imports the
-renderer.
+Two layers. The first describes one repository as git reports it; the
+second describes what one sync run decided and did with that.
 
-shad.git.repo owns the per-repository facts (BranchInfo, Worktree, ...);
-this module owns what one sync *run* did with them.
+They live apart from both the orchestrator and the renderer because the
+renderer must read them without importing the orchestrator, which imports
+the renderer.
 """
 
 from __future__ import annotations
@@ -14,14 +14,132 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from shad.git.repo import (
-    BranchInfo,
-    BranchKept,
-    FastForward,
-    WorktreeInfo,
-    WorktreeKept,
-)
 from shad.shared.config import Project
+
+# ── one repository ────────────────────────────────────────────────
+
+
+# What we split git output on, and what we ask git to emit as a separator.
+# `%00` is git's own escape; a real NUL cannot be passed in argv.
+NUL = "\x00"
+
+
+FMT_SEP = "%00"
+
+
+@dataclass(frozen=True)
+class Repo:
+    """A resolved git repository, rooted at its main worktree."""
+
+    root: Path  # main worktree (or the configured path when it is the main one)
+    common_dir: Path  # resolved --git-common-dir; the repo identity for dedupe
+    shallow: bool = False
+    relinked_from: Path | None = None  # set when the configured path was a linked worktree
+
+
+@dataclass(frozen=True)
+class BranchRef:
+    """One entry of `for-each-ref refs/heads`."""
+
+    refname: str  # refs/heads/<name>
+    oid: str
+    upstream: str  # refs/remotes/<remote>/<name>, or "" when unset
+    remotename: str  # "origin", "." for a local-tracking branch, or ""
+    trackshort: str  # ">" ahead, "<" behind, "<>" diverged, "=" in sync, "" unknown
+
+    @property
+    def name(self) -> str:
+        return self.refname[len("refs/heads/") :]
+
+    @property
+    def short_oid(self) -> str:
+        return self.oid[:7]
+
+
+@dataclass(frozen=True)
+class Worktree:
+    """One record of `worktree list --porcelain -z`."""
+
+    path: Path
+    head: str | None = None
+    branch: str | None = None  # full refname, None when detached or bare
+    bare: bool = False
+    detached: bool = False
+    locked: bool = False
+    locked_reason: str = ""
+    prunable: bool = False
+    prunable_reason: str = ""
+
+
+@dataclass(frozen=True)
+class FetchResult:
+    ok: bool
+    pruned: list[str] = field(default_factory=list)  # short names, e.g. "origin/feat/x"
+    error: str | None = None
+
+
+@dataclass(frozen=True)
+class FastForward:
+    branch: str
+    status: str  # "advanced" | "current" | "skipped"
+    before: str | None = None
+    after: str | None = None
+    ahead: int = 0
+    detail: str | None = None
+
+
+@dataclass(frozen=True)
+class BranchInfo:
+    """A branch the plan intends to delete."""
+
+    name: str
+    sha: str
+    reason: str  # "merged" | "pushed-then-gone"
+    force: bool = False  # -D rather than -d
+
+
+@dataclass(frozen=True)
+class BranchKept:
+    """A branch deliberately not deleted, and why."""
+
+    name: str
+    sha: str
+    reason: str
+
+
+def short_branch(refname: str | None) -> str:
+    """Strip the refs/heads/ prefix for display."""
+    if not refname:
+        return ""
+    return refname.removeprefix("refs/heads/")
+
+
+@dataclass(frozen=True)
+class WorktreeInfo:
+    """A worktree the plan intends to remove or prune."""
+
+    path: Path
+    branch: str | None
+    reason: str  # "prunable" | "branch gone" | "branch merged"
+    prune_only: bool = False  # directory is gone; `worktree prune` handles it
+
+    @property
+    def branch_name(self) -> str:
+        return short_branch(self.branch)
+
+
+@dataclass(frozen=True)
+class WorktreeKept:
+    path: Path
+    branch: str | None
+    reason: str
+
+    @property
+    def branch_name(self) -> str:
+        return short_branch(self.branch)
+
+
+# ── one sync run ─────────────────────────────────────────────────
 
 
 @dataclass

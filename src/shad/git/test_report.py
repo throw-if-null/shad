@@ -10,11 +10,13 @@ from unittest.mock import patch
 from rich.console import Console
 
 from shad.git import report
-from shad.git.model import ProjectOutcome, ProjectPlan, SyncRun
-from shad.git.repo import (
+from shad.git.model import (
     BranchInfo,
     BranchKept,
     FastForward,
+    ProjectOutcome,
+    ProjectPlan,
+    SyncRun,
     WorktreeInfo,
     WorktreeKept,
 )

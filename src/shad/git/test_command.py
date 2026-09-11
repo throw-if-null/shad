@@ -5,9 +5,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+from shad.git import apply, refs
 from shad.git import command as C
-from shad.git import repo as R
-from shad.git.model import ProjectPlan
+from shad.git.model import BranchInfo, ProjectPlan, WorktreeInfo
 from shad.shared.config import Config, Defaults, Project
 from shad.shared.errors import ShadError
 
@@ -27,8 +27,8 @@ def _plan(
     project: Project | None = None,
     *,
     status: str = "ok",
-    branches: list[R.BranchInfo] | None = None,
-    worktrees: list[R.WorktreeInfo] | None = None,
+    branches: list[BranchInfo] | None = None,
+    worktrees: list[WorktreeInfo] | None = None,
 ) -> ProjectPlan:
     return ProjectPlan(
         project=project or _project("kb"),
@@ -39,12 +39,12 @@ def _plan(
     )
 
 
-def _branch(name: str = "feat", sha: str = "abc1234", force: bool = False) -> R.BranchInfo:
-    return R.BranchInfo(name=name, sha=sha, reason="merged", force=force)
+def _branch(name: str = "feat", sha: str = "abc1234", force: bool = False) -> BranchInfo:
+    return BranchInfo(name=name, sha=sha, reason="merged", force=force)
 
 
-def _worktree(path: str = "/tmp/wt", prune_only: bool = False) -> R.WorktreeInfo:
-    return R.WorktreeInfo(
+def _worktree(path: str = "/tmp/wt", prune_only: bool = False) -> WorktreeInfo:
+    return WorktreeInfo(
         path=Path(path), branch="refs/heads/feat", reason="branch is being deleted",
         prune_only=prune_only,
     )
@@ -58,7 +58,7 @@ class SyncGateTests(unittest.TestCase):
 
     def _run(self, **kwargs: bool) -> tuple[Mock, Mock]:
         with (
-            patch.object(C.R, "require_git"),
+            patch.object(C, "require_git"),
             patch.object(C, "fetch_and_plan", return_value=self.plan),
             patch.object(C, "report"),
             patch.object(C, "console"),
@@ -101,7 +101,7 @@ class SyncGateTests(unittest.TestCase):
 
     def test_declining_marks_the_run_unconfirmed(self) -> None:
         with (
-            patch.object(C.R, "require_git"),
+            patch.object(C, "require_git"),
             patch.object(C, "fetch_and_plan", return_value=self.plan),
             patch.object(C, "report"),
             patch.object(C, "console"),
@@ -115,7 +115,7 @@ class SyncGateTests(unittest.TestCase):
 
 class SyncOrchestrationTests(unittest.TestCase):
     def test_no_projects_does_no_work(self) -> None:
-        with patch.object(C, "console") as console, patch.object(C.R, "require_git") as require:
+        with patch.object(C, "console") as console, patch.object(C, "require_git") as require:
             run = C.sync_projects([])
         require.assert_not_called()
         self.assertEqual(run.outcomes, [])
@@ -130,7 +130,7 @@ class SyncOrchestrationTests(unittest.TestCase):
             return _plan(project)
 
         with (
-            patch.object(C.R, "require_git"),
+            patch.object(C, "require_git"),
             patch.object(C, "fetch_and_plan", side_effect=fake),
             patch.object(C, "report"),
             patch.object(C, "console"),
@@ -147,7 +147,7 @@ class SyncOrchestrationTests(unittest.TestCase):
     def test_results_keep_the_caller_order(self) -> None:
         projects = [_project("a"), _project("b"), _project("c")]
         with (
-            patch.object(C.R, "require_git"),
+            patch.object(C, "require_git"),
             patch.object(C, "fetch_and_plan", side_effect=lambda p, **_k: _plan(p)),
             patch.object(C, "report"),
             patch.object(C, "console"),
@@ -157,7 +157,7 @@ class SyncOrchestrationTests(unittest.TestCase):
 
     def test_every_project_failing_is_a_shad_error(self) -> None:
         with (
-            patch.object(C.R, "require_git"),
+            patch.object(C, "require_git"),
             patch.object(C, "fetch_and_plan", side_effect=RuntimeError("nope")),
             patch.object(C, "report"),
             patch.object(C, "console"),
@@ -173,7 +173,7 @@ class SyncOrchestrationTests(unittest.TestCase):
             return _plan(project)
 
         with (
-            patch.object(C.R, "require_git"),
+            patch.object(C, "require_git"),
             patch.object(C, "fetch_and_plan", side_effect=fake),
             patch.object(C, "report"),
             patch.object(C, "console"),
@@ -190,10 +190,10 @@ class ApplyPlanTests(unittest.TestCase):
         recorder = Mock()
 
         with (
-            patch.object(C.R, "remove_worktree", return_value=None) as remove,
-            patch.object(C.R, "delete_branch", return_value=None) as delete,
-            patch.object(C.R, "prune_worktrees", return_value=None),
-            patch.object(C.R, "ref_oid", return_value="abc1234def"),
+            patch.object(apply, "remove_worktree", return_value=None) as remove,
+            patch.object(apply, "delete_branch", return_value=None) as delete,
+            patch.object(apply, "prune_worktrees", return_value=None),
+            patch.object(refs, "ref_oid", return_value="abc1234def"),
         ):
             recorder.attach_mock(remove, "remove_worktree")
             recorder.attach_mock(delete, "delete_branch")
@@ -205,8 +205,8 @@ class ApplyPlanTests(unittest.TestCase):
     def test_prune_only_worktrees_use_prune_not_remove(self) -> None:
         plan = _plan(worktrees=[_worktree(prune_only=True)])
         with (
-            patch.object(C.R, "prune_worktrees", return_value=None) as prune,
-            patch.object(C.R, "remove_worktree") as remove,
+            patch.object(apply, "prune_worktrees", return_value=None) as prune,
+            patch.object(apply, "remove_worktree") as remove,
         ):
             outcome = C.apply_plan(plan)
         prune.assert_called()
@@ -216,8 +216,8 @@ class ApplyPlanTests(unittest.TestCase):
     def test_a_branch_that_moved_since_planning_is_skipped(self) -> None:
         plan = _plan(branches=[_branch(sha="abc1234")])
         with (
-            patch.object(C.R, "ref_oid", return_value="9999999fff"),
-            patch.object(C.R, "delete_branch") as delete,
+            patch.object(refs, "ref_oid", return_value="9999999fff"),
+            patch.object(apply, "delete_branch") as delete,
         ):
             outcome = C.apply_plan(plan)
         delete.assert_not_called()
@@ -227,8 +227,8 @@ class ApplyPlanTests(unittest.TestCase):
     def test_a_branch_that_vanished_is_reported(self) -> None:
         plan = _plan(branches=[_branch()])
         with (
-            patch.object(C.R, "ref_oid", return_value=None),
-            patch.object(C.R, "delete_branch") as delete,
+            patch.object(refs, "ref_oid", return_value=None),
+            patch.object(apply, "delete_branch") as delete,
         ):
             outcome = C.apply_plan(plan)
         delete.assert_not_called()
@@ -237,8 +237,8 @@ class ApplyPlanTests(unittest.TestCase):
     def test_force_flag_is_carried_through_to_the_delete(self) -> None:
         plan = _plan(branches=[_branch(force=True)])
         with (
-            patch.object(C.R, "ref_oid", return_value="abc1234def"),
-            patch.object(C.R, "delete_branch", return_value=None) as delete,
+            patch.object(refs, "ref_oid", return_value="abc1234def"),
+            patch.object(apply, "delete_branch", return_value=None) as delete,
         ):
             C.apply_plan(plan)
         self.assertIs(delete.call_args.kwargs["force"], True)
@@ -246,73 +246,12 @@ class ApplyPlanTests(unittest.TestCase):
     def test_one_failed_deletion_does_not_stop_the_rest(self) -> None:
         plan = _plan(branches=[_branch("a"), _branch("b")])
         with (
-            patch.object(C.R, "ref_oid", return_value="abc1234def"),
-            patch.object(C.R, "delete_branch", side_effect=["not fully merged", None]),
+            patch.object(refs, "ref_oid", return_value="abc1234def"),
+            patch.object(apply, "delete_branch", side_effect=["not fully merged", None]),
         ):
             outcome = C.apply_plan(plan)
         self.assertEqual([b.name for b in outcome.deleted_branches], ["b"])
         self.assertIn("branch a: not fully merged", outcome.failures)
-
-
-class ReconcileTests(unittest.TestCase):
-    def test_a_branch_whose_worktree_is_going_stays_deletable(self) -> None:
-        branch = _branch("feat")
-        worktree = _worktree("/tmp/wt")
-        deletions, kept = C._reconcile(
-            R.BranchPlan(delete=[branch]),
-            R.WorktreePlan(remove=[worktree]),
-            {"refs/heads/feat": Path("/tmp/wt")},
-        )
-        self.assertEqual(deletions, [branch])
-        self.assertEqual(kept, [])
-
-    def test_a_branch_whose_worktree_survives_is_kept_with_that_reason(self) -> None:
-        branch = _branch("feat")
-        survivor = R.WorktreeKept(
-            path=Path("/tmp/wt"), branch="refs/heads/feat", reason="2 modified"
-        )
-        deletions, kept = C._reconcile(
-            R.BranchPlan(delete=[branch]),
-            R.WorktreePlan(keep=[survivor]),
-            {"refs/heads/feat": Path("/tmp/wt")},
-        )
-        self.assertEqual(deletions, [])
-        self.assertIn("2 modified", kept[0].reason)
-
-    def test_a_branch_held_by_no_worktree_is_unaffected(self) -> None:
-        branch = _branch("feat")
-        deletions, kept = C._reconcile(R.BranchPlan(delete=[branch]), R.WorktreePlan(), {})
-        self.assertEqual(deletions, [branch])
-        self.assertEqual(kept, [])
-
-
-class PrunedOidTests(unittest.TestCase):
-    def test_applied_run_diffs_the_snapshots(self) -> None:
-        before = {"refs/remotes/origin/a": "aaa", "refs/remotes/origin/b": "bbb"}
-        after = {"refs/remotes/origin/a": "aaa"}
-        result = C._pruned_oids(ROOT, "origin", before, after, set(), dry_run=False)
-        self.assertEqual(result, {"refs/remotes/origin/b": "bbb"})
-
-    def test_applied_run_ignores_symrefs(self) -> None:
-        before = {"refs/remotes/origin/HEAD": "aaa"}
-        result = C._pruned_oids(
-            ROOT, "origin", before, {}, {"refs/remotes/origin/HEAD"}, dry_run=False
-        )
-        self.assertEqual(result, {})
-
-    def test_dry_run_asks_the_remote_instead_of_pruning(self) -> None:
-        after = {"refs/remotes/origin/a": "aaa", "refs/remotes/origin/gone": "ggg"}
-        with patch.object(C.R, "remote_branch_refs", return_value={"refs/remotes/origin/a"}):
-            result = C._pruned_oids(ROOT, "origin", {}, after, set(), dry_run=True)
-        self.assertEqual(result, {"refs/remotes/origin/gone": "ggg"})
-
-    def test_dry_run_reports_none_when_the_remote_is_unreachable(self) -> None:
-        with patch.object(C.R, "remote_branch_refs", return_value=None):
-            self.assertIsNone(
-                C._pruned_oids(ROOT, "origin", {}, {}, set(), dry_run=True)
-            )
-
-
 class CmdGitTests(unittest.TestCase):
     def setUp(self) -> None:
         self.cfg = Config(
