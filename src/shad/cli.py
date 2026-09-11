@@ -204,18 +204,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_completion = sub.add_parser(
         "completion",
-        help="Print shell completion script",
+        help="Print the bash completion script",
         description=(
-            "Print a shell completion script to stdout.\n\n"
+            "Print the bash completion script to stdout.\n\n"
             "To install:\n"
-            "  shad completion bash >> ~/.bashrc && source ~/.bashrc\n"
-            "  shad completion zsh  >> ~/.zshrc  && source ~/.zshrc"
+            "  shad completion bash >> ~/.bashrc && source ~/.bashrc"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p_completion.add_argument(
         "shell",
-        choices=["bash", "zsh"],
+        choices=["bash"],
         help="Shell to generate completions for",
     )
 

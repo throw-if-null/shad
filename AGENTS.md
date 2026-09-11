@@ -31,7 +31,7 @@ src/shad/
 │   └── toml_edit.py            # comment-preserving TOML text editor
 ├── init/command.py             # "shad init" interactive wizard
 ├── cheat/command.py            # "shad cheat" tmux cheat sheet
-└── completion/command.py       # "shad completion bash|zsh"
+└── completion/command.py       # "shad completion bash"
 ```
 
 Key data flow for the main `open` command:

@@ -1,16 +1,11 @@
 """
-Shell completion scripts for shad.
+Shell completion script for shad.
 
 Usage:
   shad completion bash   # print bash completion script
-  shad completion zsh    # print zsh completion script
 
 To install:
-  # bash
   shad completion bash >> ~/.bashrc
-
-  # zsh
-  shad completion zsh >> ~/.zshrc
 """
 
 from __future__ import annotations
@@ -31,7 +26,7 @@ _shad_complete() {
     fi
 
     if [[ "${words[1]}" == "completion" && ${COMP_CWORD} -eq 2 ]]; then
-        COMPREPLY=($(compgen -W "bash zsh" -- "$cur"))
+        COMPREPLY=($(compgen -W "bash" -- "$cur"))
         return
     fi
 
@@ -113,84 +108,7 @@ complete -F _shad_complete shad
 """.strip()
 
 
-ZSH_COMPLETION = r"""
-_shad() {
-    local state
-
-    _arguments \
-        '1: :->cmd' \
-        '*: :->args'
-
-    case $state in
-        cmd)
-            _values 'command' projects config completion init cheat
-            ;;
-        args)
-            case $words[2] in
-                completion)
-                    _values 'shell' bash zsh
-                    ;;
-                config)
-                    local config_actions=(show path keys get set unset edit validate)
-                    if [[ ${#words} -eq 3 ]]; then
-                        _values 'action' "${config_actions[@]}"
-                    elif [[ ${#words} -eq 4 ]]; then
-                        case $words[3] in
-                            get|set|unset)
-                                local cfg_keys=(${(f)"$(shad config keys 2>/dev/null)"})
-                                _values 'key' "${cfg_keys[@]}"
-                                ;;
-                            show)
-                                _values 'flag' --raw
-                                ;;
-                        esac
-                    fi
-                    ;;
-                projects)
-                    local raw
-                    raw=$(shad projects 2>/dev/null)
-
-                    local top_keys=()
-                    local -A group_map
-
-                    while IFS= read -r line; do
-                        if [[ "$line" =~ ^"  "([^ ]+)" "([^ ]+)$ ]]; then
-                            local g="${match[1]}" k="${match[2]}"
-                            group_map[$g]+=" $k"
-                        elif [[ -n "$line" ]]; then
-                            top_keys+=("$line")
-                        fi
-                    done <<< "$raw"
-
-                    local actions=(status stop)
-
-                    if [[ ${#words} -eq 3 ]]; then
-                        _values 'project' "${top_keys[@]}"
-                    elif [[ ${#words} -eq 4 ]]; then
-                        local tok="${words[3]}"
-                        local subs=(${=group_map[$tok]})
-                        if [[ ${#subs} -gt 0 ]]; then
-                            _values 'project' "${subs[@]}"
-                        else
-                            _values 'action' "${actions[@]}"
-                        fi
-                    elif [[ ${#words} -eq 5 ]]; then
-                        _values 'action' "${actions[@]}"
-                    fi
-                    ;;
-            esac
-            ;;
-    esac
-}
-
-compdef _shad shad
-""".strip()
-
-
 def print_completion(shell: str) -> None:
-    if shell == "bash":
-        print(BASH_COMPLETION)
-    elif shell == "zsh":
-        print(ZSH_COMPLETION)
-    else:
+    if shell != "bash":
         raise ShadError(f"unsupported shell: {shell!r}")
+    print(BASH_COMPLETION)
