@@ -177,3 +177,77 @@ def resolve_prefix(candidates: list[str], token: str) -> str | None:
             f"'{token}' is ambiguous; matches: {', '.join(sorted(matches))}"
         )
     return None  # caller decides how to handle "not found"
+
+
+@dataclass
+class Target:
+    """The projects named by 0-2 CLI tokens, plus what those tokens named."""
+
+    projects: list[Project]
+    group: str | None = None  # set when the tokens named a whole group
+
+
+def all_projects(cfg: Config) -> list[Project]:
+    """Every configured project: top-level by key, then grouped by group then key."""
+    result = [cfg.projects[key] for key in sorted(cfg.projects)]
+    for group in sorted(cfg.groups):
+        result.extend(cfg.groups[group][key] for key in sorted(cfg.groups[group]))
+    return result
+
+
+def resolve_target(
+    cfg: Config, tokens: list[str], *, usage: str = "shad projects"
+) -> Target:
+    """
+    Resolve 0-2 CLI tokens to the projects they name.
+
+      []             -> every configured project
+      [name]         -> one top-level project, or every project in a group
+      [group, name]  -> one project inside a group
+
+    Prefix matching applies at each level. Raises ShadError when a token is
+    unknown, ambiguous, or when there are too many tokens.
+    """
+    if not tokens:
+        return Target(projects=all_projects(cfg))
+
+    if len(tokens) == 1:
+        token = tokens[0]
+        match = resolve_prefix(list(cfg.projects) + list(cfg.groups), token)
+        if match is None:
+            raise ShadError(f"no project or group matching '{token}'")
+        if match in cfg.projects:
+            return Target(projects=[cfg.projects[match]])
+        group = cfg.groups[match]
+        return Target(
+            projects=[group[key] for key in sorted(group)],
+            group=match,
+        )
+
+    if len(tokens) == 2:
+        group_token, proj_token = tokens
+
+        group_match = resolve_prefix(list(cfg.groups), group_token)
+        if group_match is None:
+            if group_token in cfg.projects or any(
+                k.startswith(group_token) for k in cfg.projects
+            ):
+                raise ShadError(
+                    f"'{group_token}' resolves to a top-level project, not a group; "
+                    f"did you mean: {usage} {group_token}?"
+                )
+            raise ShadError(f"no group matching '{group_token}'")
+
+        group_projects = cfg.groups[group_match]
+        proj_match = resolve_prefix(list(group_projects), proj_token)
+        if proj_match is None:
+            raise ShadError(
+                f"no project matching '{proj_token}' in group '{group_match}'; "
+                f"available: {', '.join(sorted(group_projects))}"
+            )
+
+        return Target(projects=[group_projects[proj_match]])
+
+    raise ShadError(
+        f"too many arguments ({len(tokens)}); usage: {usage} [<group>] [<name>]"
+    )

@@ -10,6 +10,7 @@ shad projects <group> <name>             # open project inside a group
 shad projects <name> <action>            # run action on top-level project
 shad projects <group> <name> <action>    # run action on grouped project
 shad config <action> [args]              # inspect or edit shad.toml
+shad git sync [<group>] [<name>]         # git maintenance across projects
 
 Actions: status, stop
 
@@ -28,6 +29,7 @@ from shad import __version__
 from shad.cheat.command import cmd_cheat
 from shad.completion.command import print_completion
 from shad.config.command import cmd_config
+from shad.git.command import cmd_git
 from shad.init.command import cmd_init
 from shad.projects.open.banner import print_banner
 from shad.projects.open.command import open_project
@@ -202,6 +204,67 @@ def build_parser() -> argparse.ArgumentParser:
         help="[group] [project] [action]  — action is one of: status, stop",
     )
 
+    p_git = sub.add_parser(
+        "git",
+        help="Run git maintenance across configured projects",
+        description=(
+            "Git maintenance across one, some, or all configured projects.\n\n"
+            "Actions:\n"
+            "  sync     fetch, fast-forward, and prune dead branches and worktrees\n\n"
+            "Examples:\n"
+            "  shad git sync                     every configured project\n"
+            "  shad git sync kb                  one top-level project\n"
+            "  shad git sync alvr                every project in the alvr group\n"
+            "  shad git sync alvr db             one grouped project\n\n"
+            "Prefix matching is supported at each level."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    git_sub = p_git.add_subparsers(dest="git_action", metavar="<action>")
+
+    p_git_sync = git_sub.add_parser(
+        "sync",
+        help="Fetch, fast-forward, and prune dead branches and worktrees",
+        description=(
+            "For each targeted project:\n"
+            "  1. git fetch --prune\n"
+            "  2. fast-forward the default branch (skipped if diverged or dirty)\n"
+            "  3. delete local branches that are merged, or whose upstream was\n"
+            "     pruned in this run after every commit had been pushed\n"
+            "  4. prune worktree records whose directory is gone, and remove\n"
+            "     clean worktrees whose branch is being deleted\n\n"
+            "Steps 1 and 2 are applied immediately and are NOT undone if you\n"
+            "decline the prompt. Only the deletions in steps 3 and 4 are gated.\n\n"
+            "Never deleted: the default branch, a branch checked out in any\n"
+            "worktree, a branch with unpushed commits, a branch that never had\n"
+            "an upstream, a locked worktree, or a worktree with local changes.\n\n"
+            "Options:\n"
+            "  --yes       skip the confirmation prompt (use this in scripts)\n"
+            "  --dry-run   report only; still fetches, but deletes nothing\n\n"
+            "Examples:\n"
+            "  shad git sync\n"
+            "  shad git sync tin shad --dry-run\n"
+            "  shad git sync --yes"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_git_sync.add_argument(
+        "name",
+        nargs="*",
+        metavar="NAME",
+        help="[group] [project]  — omit to target every configured project",
+    )
+    p_git_sync.add_argument(
+        "--yes",
+        action="store_true",
+        help="Skip the confirmation prompt and apply every listed deletion",
+    )
+    p_git_sync.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Report what would change; still fetches, but deletes nothing",
+    )
+
     p_completion = sub.add_parser(
         "completion",
         help="Print the bash completion script",
@@ -353,6 +416,8 @@ def main() -> None:
 
         if args.command == "projects":
             cmd_projects(cfg, args)
+        elif args.command == "git":
+            cmd_git(cfg, args)
 
     except ShadError as exc:
         err_console.print(Text(f"✗ {exc}", style="bold red"))

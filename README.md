@@ -216,6 +216,13 @@ shad projects alvr db status
 shad projects kb stop
 shad projects alvr db stop
 
+# Git maintenance across projects
+shad git sync                     # every configured project
+shad git sync tin                 # every project in the tin group
+shad git sync tin shad            # one project
+shad git sync --dry-run           # preview; deletes nothing
+shad git sync --yes               # skip the confirmation prompt
+
 # Show a tmux cheat sheet popup
 shad cheat
 
@@ -229,6 +236,77 @@ shad config set projects.kb.path ~/gh/kb
 shad config unset projects.kb
 shad config edit
 ```
+
+## Git maintenance
+
+`shad git sync` brings repositories up to date and clears out branches and
+worktrees that are finished with. It runs over every configured project by
+default, or over the projects you name.
+
+| Command | Description |
+|---|---|
+| `shad git sync` | Sync every configured project |
+| `shad git sync <name>` | Sync one top-level project, or a whole group |
+| `shad git sync <group> <name>` | Sync one grouped project |
+| `shad git sync --dry-run` | Report what would change; delete nothing |
+| `shad git sync --yes` | Apply the deletions without the prompt |
+
+Prefix matching works at each level, exactly as it does for `shad projects`.
+
+### What it does
+
+For each project, in order:
+
+1. `git fetch --prune`.
+2. Fast-forward the default branch. The branch is detected from
+   `origin/HEAD`, falling back to asking the remote, then to `main`/`master`.
+3. Delete local branches that are finished.
+4. Prune worktree records whose directory is gone, and remove clean worktrees
+   whose branch is being deleted.
+
+Steps 1 and 2 are applied immediately. Steps 3 and 4 are listed first and ask
+for one confirmation covering the whole run.
+
+**Declining the prompt does not undo the fetch or the fast-forward.** Only the
+deletions are gated.
+
+### What it never does
+
+A branch is deleted only when losing work is impossible — either its commits
+are already on the default branch, or its upstream was deleted on the server
+during this run after every commit had been pushed. That second rule is what
+makes squash-merged pull request branches removable; `git branch -d` refuses
+them, because by commit ancestry a squashed branch really is unmerged.
+
+These are never deleted:
+
+- The default branch.
+- A branch checked out in a worktree that is staying.
+- A branch with commits that are not on its upstream.
+- A branch that never had an upstream.
+- A branch whose upstream disappeared before this run, because whether its
+  commits reached the server can no longer be proven.
+- Anything at all in a shallow clone, where ancestry is truncated.
+
+These worktrees are never touched:
+
+- The main worktree.
+- A locked worktree — its directory being absent is expected.
+- A worktree with local changes, including untracked files.
+- A worktree containing submodules, or one with a rebase or merge in progress.
+
+Every deleted branch is reported with the commit it pointed at and the command
+to restore it. Deleting a branch also deletes its reflog, so that line is the
+recovery path until the next `git gc`.
+
+A repository is skipped, with the reason, when it is not a git repository, is
+bare, is a path inside a repository rather than its root, or has an operation
+in progress. One project failing never stops the others.
+
+`--dry-run` still fetches — that is how the report is accurate — but it does
+not prune, so a preview never consumes the evidence the real run needs.
+
+Requires git 2.36 or newer.
 
 ## Shell completion
 
@@ -359,6 +437,11 @@ shad/
         │   ├── command.py
         │   ├── schema.py
         │   └── toml_edit.py
+        ├── git/
+        │   ├── command.py
+        │   ├── model.py
+        │   ├── report.py
+        │   └── repo.py
         ├── init/
         │   └── command.py
         ├── projects/
@@ -374,5 +457,6 @@ shad/
         └── shared/
             ├── config.py
             ├── errors.py
+            ├── render.py
             └── tmux.py
 ```

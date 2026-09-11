@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from shad.cli import _run_action, cmd_projects, main
+from shad.cli import _run_action, build_parser, cmd_projects, main
 from shad.shared.config import Config, Defaults, Project
 from shad.shared.errors import ShadError
 
@@ -248,6 +248,55 @@ class MainErrorHandlingTests(unittest.TestCase):
         ):
             main()
         self.assertEqual(ctx.exception.code, 130)
+
+
+# ---------------------------------------------------------------------------
+# git command
+# ---------------------------------------------------------------------------
+
+
+class GitCliTests(unittest.TestCase):
+    def test_sync_parses_tokens_and_flags(self) -> None:
+        args = build_parser().parse_args(["git", "sync", "tin", "shad", "--yes"])
+        self.assertEqual(args.command, "git")
+        self.assertEqual(args.git_action, "sync")
+        self.assertEqual(args.name, ["tin", "shad"])
+        self.assertTrue(args.yes)
+        self.assertFalse(args.dry_run)
+
+    def test_sync_without_tokens_parses(self) -> None:
+        args = build_parser().parse_args(["git", "sync", "--dry-run"])
+        self.assertEqual(args.name, [])
+        self.assertTrue(args.dry_run)
+        self.assertFalse(args.yes)
+
+    def test_bare_git_parses_with_no_action(self) -> None:
+        args = build_parser().parse_args(["git"])
+        self.assertEqual(args.command, "git")
+        self.assertIsNone(args.git_action)
+
+    def test_main_dispatches_git_after_loading_the_config(self) -> None:
+        cfg = Config(defaults=Defaults())
+        with (
+            patch("sys.argv", ["shad", "git", "sync"]),
+            patch("shad.cli.load", return_value=cfg) as load,
+            patch("shad.cli.cmd_git") as cmd_git,
+        ):
+            main()
+        load.assert_called_once()
+        cmd_git.assert_called_once()
+        self.assertIs(cmd_git.call_args.args[0], cfg)
+
+    def test_git_errors_exit_one(self) -> None:
+        with (
+            patch("sys.argv", ["shad", "git", "sync"]),
+            patch("shad.cli.load", return_value=Config(defaults=Defaults())),
+            patch("shad.cli.cmd_git", side_effect=ShadError("boom")),
+            patch("shad.cli.err_console"),
+            self.assertRaises(SystemExit) as ctx,
+        ):
+            main()
+        self.assertEqual(ctx.exception.code, 1)
 
 
 if __name__ == "__main__":
