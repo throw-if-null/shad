@@ -232,18 +232,10 @@ shad config edit
 
 ## Shell completion
 
-`shad` supports tab completion for bash and zsh.
-
-### bash
+`shad` supports tab completion for bash.
 
 ```sh
 shad completion bash >> ~/.bashrc && source ~/.bashrc
-```
-
-### zsh
-
-```sh
-shad completion zsh >> ~/.zshrc && source ~/.zshrc
 ```
 
 ## tmux cheat sheet
