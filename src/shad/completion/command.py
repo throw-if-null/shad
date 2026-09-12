@@ -21,7 +21,7 @@ _shad_complete() {
 
     # shad <TAB>  →  top-level subcommands
     if [[ ${COMP_CWORD} -eq 1 ]]; then
-        COMPREPLY=($(compgen -W "projects git config completion init cheat" -- "$cur"))
+        COMPREPLY=($(compgen -W "projects git config completion init cheat --config" -- "$cur"))
         return
     fi
 
@@ -97,7 +97,7 @@ _shad_complete() {
     local extra=""
     if [[ "${words[1]}" == "git" ]]; then
         base=2
-        extra="--yes --dry-run"
+        extra="--switch --yes --dry-run"
         actions=""
     fi
 

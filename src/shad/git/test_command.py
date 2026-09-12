@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 
 from shad.git import apply, refs
 from shad.git import command as C
-from shad.git.model import BranchInfo, ProjectPlan, WorktreeInfo
+from shad.git.model import BranchInfo, ProjectPlan, Repo, WorktreeInfo
 from shad.shared.config import Config, Defaults, Project
 from shad.shared.errors import ShadError
 
@@ -43,6 +43,19 @@ def _branch(name: str = "feat", sha: str = "abc1234", force: bool = False) -> Br
     return BranchInfo(name=name, sha=sha, reason="merged", force=force)
 
 
+def _resolve_all(projects: list[Project], plans: list[ProjectPlan | None]):
+    """
+    Stand-in for C._resolve: every project resolves to its own repository.
+
+    The orchestration tests use paths that are not repositories, so the real
+    discovery pass would skip them all before any planning happened.
+    """
+    return [
+        (index, project, Repo(root=project.path, common_dir=project.path / ".git"))
+        for index, project in enumerate(projects)
+    ]
+
+
 def _worktree(path: str = "/tmp/wt", prune_only: bool = False) -> WorktreeInfo:
     return WorktreeInfo(
         path=Path(path), branch="refs/heads/feat", reason="branch is being deleted",
@@ -59,6 +72,7 @@ class SyncGateTests(unittest.TestCase):
     def _run(self, **kwargs: bool) -> tuple[Mock, Mock]:
         with (
             patch.object(C, "require_git"),
+            patch.object(C, "_resolve", side_effect=_resolve_all),
             patch.object(C, "fetch_and_plan", return_value=self.plan),
             patch.object(C, "report"),
             patch.object(C, "console"),
@@ -102,6 +116,7 @@ class SyncGateTests(unittest.TestCase):
     def test_declining_marks_the_run_unconfirmed(self) -> None:
         with (
             patch.object(C, "require_git"),
+            patch.object(C, "_resolve", side_effect=_resolve_all),
             patch.object(C, "fetch_and_plan", return_value=self.plan),
             patch.object(C, "report"),
             patch.object(C, "console"),
@@ -131,6 +146,7 @@ class SyncOrchestrationTests(unittest.TestCase):
 
         with (
             patch.object(C, "require_git"),
+            patch.object(C, "_resolve", side_effect=_resolve_all),
             patch.object(C, "fetch_and_plan", side_effect=fake),
             patch.object(C, "report"),
             patch.object(C, "console"),
@@ -148,6 +164,7 @@ class SyncOrchestrationTests(unittest.TestCase):
         projects = [_project("a"), _project("b"), _project("c")]
         with (
             patch.object(C, "require_git"),
+            patch.object(C, "_resolve", side_effect=_resolve_all),
             patch.object(C, "fetch_and_plan", side_effect=lambda p, **_k: _plan(p)),
             patch.object(C, "report"),
             patch.object(C, "console"),
@@ -158,6 +175,7 @@ class SyncOrchestrationTests(unittest.TestCase):
     def test_every_project_failing_is_a_shad_error(self) -> None:
         with (
             patch.object(C, "require_git"),
+            patch.object(C, "_resolve", side_effect=_resolve_all),
             patch.object(C, "fetch_and_plan", side_effect=RuntimeError("nope")),
             patch.object(C, "report"),
             patch.object(C, "console"),
@@ -174,6 +192,7 @@ class SyncOrchestrationTests(unittest.TestCase):
 
         with (
             patch.object(C, "require_git"),
+            patch.object(C, "_resolve", side_effect=_resolve_all),
             patch.object(C, "fetch_and_plan", side_effect=fake),
             patch.object(C, "report"),
             patch.object(C, "console"),
@@ -262,7 +281,8 @@ class CmdGitTests(unittest.TestCase):
 
     def _args(self, **kwargs: object) -> argparse.Namespace:
         base: dict[str, object] = {
-            "git_action": "sync", "name": [], "yes": False, "dry_run": False
+            "git_action": "sync", "name": [], "yes": False, "dry_run": False,
+            "switch": False,
         }
         base.update(kwargs)
         return argparse.Namespace(**base)
@@ -286,8 +306,17 @@ class CmdGitTests(unittest.TestCase):
 
     def test_flags_are_forwarded(self) -> None:
         with patch.object(C, "sync_projects") as sync:
-            C.cmd_git(self.cfg, self._args(yes=True, dry_run=True))
-        self.assertEqual(sync.call_args.kwargs, {"yes": True, "dry_run": True})
+            C.cmd_git(self.cfg, self._args(yes=True, dry_run=True, switch=True))
+        self.assertEqual(
+            sync.call_args.kwargs, {"yes": True, "dry_run": True, "switch": True}
+        )
+
+    def test_switch_defaults_to_off(self) -> None:
+        # The only working-tree mutation in the command; a bare `shad git sync`
+        # must never check anything out.
+        with patch.object(C, "sync_projects") as sync:
+            C.cmd_git(self.cfg, self._args())
+        self.assertIs(sync.call_args.kwargs["switch"], False)
 
     def test_missing_action_is_rejected(self) -> None:
         with self.assertRaises(ShadError) as ctx:

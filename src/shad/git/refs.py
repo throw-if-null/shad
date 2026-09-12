@@ -131,6 +131,23 @@ def count_commits(repo: Path, old: str, new: str) -> int:
     return int(value) if result.returncode == 0 and value.isdigit() else 0
 
 
+def merged_branches(repo: Path, tip: str) -> set[str]:
+    """
+    Refnames under refs/heads whose tip is reachable from *tip*.
+
+    Exactly what `merge-base --is-ancestor <branch> <tip>` answers, but once
+    for the whole ref store instead of once per branch — a repository with
+    fifty branches cost fifty subprocesses before.
+
+    An error yields the empty set, so an unreadable ref store reports nothing
+    as merged. That is the same direction the per-branch form failed in.
+    """
+    result = git(repo, ["for-each-ref", "--format=%(refname)", f"--merged={tip}", "refs/heads"])
+    if result.returncode != 0:
+        return set()
+    return {line.strip() for line in result.stdout.splitlines() if line.strip()}
+
+
 def any_ref_contains(repo: Path, oid: str) -> bool:
     """True when *oid* is reachable from at least one ref."""
     result = git(

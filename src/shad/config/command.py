@@ -32,7 +32,7 @@ from rich.text import Text
 
 from shad.config import toml_edit
 from shad.config.schema import PATH, coerce, field_for, infer, known_keys
-from shad.shared.config import CONFIG_PATH, Config, load
+from shad.shared.config import Config, config_path, load
 from shad.shared.errors import ShadError
 from shad.shared.render import make_table
 
@@ -369,7 +369,7 @@ def _validate(path: Path) -> None:
 
 
 def cmd_config(args: argparse.Namespace, path: Path | None = None) -> None:
-    target = path or CONFIG_PATH
+    target = path or config_path()
     action = getattr(args, "config_action", None) or "show"
 
     if action == "show":

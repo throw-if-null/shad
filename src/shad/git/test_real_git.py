@@ -20,10 +20,13 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from shad.git import apply, discover, refs
+from shad.git import command as C
 from shad.git import plan as planning
 from shad.git.model import BranchInfo
+from shad.shared.config import Project
 
 _ISOLATE = {
     "GIT_CONFIG_GLOBAL": os.devnull,
@@ -251,7 +254,7 @@ class RealRepoTests(unittest.TestCase):
         verdict = planning.classify_branch(
             self.clone,
             squashed,
-            default_tips=[main_tip],
+            merged=refs.merged_branches(self.clone, main_tip),
             checked_out={},
             pruned_oids=pruned,
             gone_allowed=True,
@@ -299,6 +302,286 @@ class RealRepoTests(unittest.TestCase):
         )
         self.assertEqual(result.delete, [])
         self.assertTrue(all(k.reason == "shallow clone" for k in result.keep))
+
+
+@unittest.skipUnless(shutil.which("git"), "git not installed")
+class SecondRemoteTests(unittest.TestCase):
+    """
+    A clone with `origin` and `upstream`, the ordinary fork layout.
+
+    The ref snapshot covers all of refs/remotes while `ls-remote` only ever
+    describes one remote, so the dry-run path has to filter by remote. Without
+    that, every `upstream/*` ref reads as stale and a branch tracking a live
+    `upstream/feat` is offered for deletion — a preview the real run would not
+    honour. Only a fixture with two real remotes catches it.
+    """
+
+    tmp: tempfile.TemporaryDirectory[str]
+    clone: Path
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.tmp = tempfile.TemporaryDirectory()
+        root = Path(cls.tmp.name)
+
+        seed = root / "seed"
+        seed.mkdir()
+        _git(root, "init", "--quiet", "--initial-branch=main", str(seed))
+        _commit(seed, "README.md", "one\n", "Add readme")
+        _git(seed, "switch", "--quiet", "-c", "feat")
+        _commit(seed, "feat.txt", "f\n", "Add feat")
+        _git(seed, "switch", "--quiet", "main")
+
+        origin = root / "origin.git"
+        upstream = root / "upstream.git"
+        _git(root, "clone", "--quiet", "--bare", str(seed), str(origin))
+        _git(root, "clone", "--quiet", "--bare", str(seed), str(upstream))
+
+        cls.clone = root / "clone"
+        _git(root, "clone", "--quiet", str(origin), str(cls.clone))
+        _git(cls.clone, "remote", "add", "upstream", str(upstream))
+        _git(cls.clone, "fetch", "--quiet", "upstream")
+        # Tracks upstream, which still very much has the branch.
+        _git(cls.clone, "branch", "--quiet", "--track", "feat", "upstream/feat")
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.tmp.cleanup()
+
+    def _plan(self, *, dry_run: bool) -> C.ProjectPlan:
+        project = Project(key="fork", group=None, path=self.clone, session="fork")
+        return C.fetch_and_plan(project, dry_run=dry_run)
+
+    def test_dry_run_does_not_call_a_live_second_remote_stale(self) -> None:
+        plan = self._plan(dry_run=True)
+        self.assertEqual(plan.status, "ok", plan.detail)
+        self.assertEqual(plan.pruned_refs, [])
+        self.assertEqual([b.name for b in plan.branch_deletions], [])
+
+    def test_the_applied_run_agrees_with_the_preview(self) -> None:
+        plan = self._plan(dry_run=False)
+        self.assertEqual(plan.status, "ok", plan.detail)
+        self.assertEqual(plan.pruned_refs, [])
+        self.assertEqual([b.name for b in plan.branch_deletions], [])
+        self.assertIn("feat", [k.name for k in plan.branches_kept])
+
+
+@unittest.skipUnless(shutil.which("git"), "git not installed")
+class NoRemoteTests(unittest.TestCase):
+    """A repository with no remote is skipped with a reason, not called synced."""
+
+    def test_a_repository_with_no_remote_is_skipped(self) -> None:
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            repo = root / "local"
+            repo.mkdir()
+            _git(root, "init", "--quiet", "--initial-branch=main", str(repo))
+            _commit(repo, "README.md", "one\n", "Add readme")
+
+            project = Project(key="local", group=None, path=repo, session="local")
+            plan = C.fetch_and_plan(project)
+
+        # Not "ok": the report prints `detail` only for skipped and failed
+        # projects, so an "ok" plan with nothing else to show renders as
+        # "up to date" and the reason is lost.
+        self.assertEqual(plan.status, "skipped")
+        self.assertEqual(plan.detail, "no remote configured")
+
+
+@unittest.skipUnless(shutil.which("git"), "git not installed")
+class SwitchDefaultTests(unittest.TestCase):
+    """
+    --switch against a real clone, sitting on a merged branch.
+
+    The interaction that matters: switching un-pins the branch it leaves
+    behind, so a branch that was only kept because the main worktree had it
+    checked out becomes deletable in the *same* run. A mocked test cannot show
+    that, because it depends on git actually moving HEAD between the two reads
+    of `worktree list`.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+
+        seed = root / "seed"
+        seed.mkdir()
+        _git(root, "init", "--quiet", "--initial-branch=main", str(seed))
+        _commit(seed, "README.md", "one\n", "Add readme")
+        _git(seed, "switch", "--quiet", "-c", "feat/merged")
+        _commit(seed, "merged.txt", "m\n", "Add merged")
+        _git(seed, "switch", "--quiet", "main")
+        _git(seed, "merge", "--no-ff", "--quiet", "-m", "Merge merged", "feat/merged")
+
+        remote = root / "remote.git"
+        _git(root, "clone", "--quiet", "--bare", str(seed), str(remote))
+
+        self.clone = root / "clone"
+        _git(root, "clone", "--quiet", str(remote), str(self.clone))
+        _git(self.clone, "branch", "--quiet", "--track", "feat/merged", "origin/feat/merged")
+        # The user is sitting on the merged branch.
+        _git(self.clone, "switch", "--quiet", "feat/merged")
+
+        self.project = Project(
+            key="proj", group=None, path=self.clone, session="proj"
+        )
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _head(self) -> str:
+        return _git(self.clone, "rev-parse", "--abbrev-ref", "HEAD")
+
+    def test_without_switch_the_checked_out_branch_is_pinned(self) -> None:
+        plan = C.fetch_and_plan(self.project)
+        self.assertIsNone(plan.switch)
+        self.assertEqual(self._head(), "feat/merged")
+        self.assertEqual([b.name for b in plan.branch_deletions], [])
+        kept = {k.name: k.reason for k in plan.branches_kept}
+        self.assertIn("feat/merged", kept)
+        self.assertIn("checked out at", kept["feat/merged"])
+
+    def test_switching_un_pins_the_branch_it_leaves_behind(self) -> None:
+        plan = C.fetch_and_plan(self.project, switch=True)
+        assert plan.switch is not None
+        self.assertEqual(plan.switch.status, "switched")
+        self.assertEqual(plan.switch.from_branch, "feat/merged")
+        self.assertEqual(self._head(), "main")
+        # The whole point: it is deletable now, not on the next run.
+        self.assertEqual([b.name for b in plan.branch_deletions], ["feat/merged"])
+
+    def test_dry_run_reports_the_switch_without_moving_head(self) -> None:
+        plan = C.fetch_and_plan(self.project, dry_run=True, switch=True)
+        assert plan.switch is not None
+        self.assertEqual(plan.switch.detail, "would switch")
+        self.assertEqual(self._head(), "feat/merged")
+
+    def test_dry_run_previews_the_deletion_the_switch_unlocks(self) -> None:
+        # The switch does not happen under --dry-run, so the un-pinning has to
+        # be modelled — otherwise the preview keeps a branch the real run
+        # would offer for deletion.
+        plan = C.fetch_and_plan(self.project, dry_run=True, switch=True)
+        self.assertEqual(self._head(), "feat/merged")
+        self.assertEqual([b.name for b in plan.branch_deletions], ["feat/merged"])
+        self.assertNotIn("feat/merged", [k.name for k in plan.branches_kept])
+
+    def test_dry_run_without_switch_still_keeps_the_pinned_branch(self) -> None:
+        plan = C.fetch_and_plan(self.project, dry_run=True)
+        self.assertEqual([b.name for b in plan.branch_deletions], [])
+        self.assertIn("feat/merged", [k.name for k in plan.branches_kept])
+
+    def test_a_dirty_tree_is_skipped_and_keeps_its_branch(self) -> None:
+        (self.clone / "README.md").write_text("dirty\n")
+        plan = C.fetch_and_plan(self.project, switch=True)
+        assert plan.switch is not None
+        self.assertEqual(plan.switch.status, "skipped")
+        self.assertEqual(plan.switch.detail, "1 uncommitted change(s)")
+        self.assertEqual(self._head(), "feat/merged")
+        self.assertEqual([b.name for b in plan.branch_deletions], [])
+
+
+@unittest.skipUnless(shutil.which("git"), "git not installed")
+class RepoDedupeTests(unittest.TestCase):
+    """
+    Two configured directories, one repository.
+
+    A linked worktree shares its ref store with the main worktree, so planning
+    both would list the same branch twice in the confirmation table and report
+    the second apply as failures. Two *clones* of one remote are genuinely
+    separate repositories and must both be synced — the identity has to be
+    --git-common-dir, which tells those cases apart.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.addCleanup(self.tmp.cleanup)
+
+        seed = self.root / "seed"
+        seed.mkdir()
+        _git(self.root, "init", "--quiet", "--initial-branch=main", str(seed))
+        _commit(seed, "README.md", "one\n", "Add readme")
+        _git(seed, "switch", "--quiet", "-c", "feat/login")
+        _commit(seed, "login.txt", "l\n", "Add login")
+        _git(seed, "switch", "--quiet", "main")
+        _git(seed, "merge", "--no-ff", "--quiet", "-m", "Merge login", "feat/login")
+
+        self.remote = self.root / "remote.git"
+        _git(self.root, "clone", "--quiet", "--bare", str(seed), str(self.remote))
+
+    def _clone(self, name: str) -> Path:
+        target = self.root / name
+        _git(self.root, "clone", "--quiet", str(self.remote), str(target))
+        return target
+
+    def _project(self, name: str, path: Path) -> Project:
+        return Project(key=name, group=None, path=path, session=name)
+
+    def _plans(self, projects: list[Project]) -> list:
+        plans: list = [None] * len(projects)
+        jobs = C._resolve(projects, plans)
+        return [plans, jobs]
+
+    def test_a_linked_worktree_is_skipped_as_the_same_repository(self) -> None:
+        main = self._clone("myproj")
+        _git(main, "branch", "--quiet", "--track", "feat/login", "origin/feat/login")
+        linked = self.root / "myproj-login"
+        _git(main, "worktree", "add", "--quiet", str(linked), "feat/login")
+
+        projects = [self._project("myproj", main), self._project("login", linked)]
+        plans, jobs = self._plans(projects)
+
+        # Only the first is planned; the second is reported, not silently dropped.
+        self.assertEqual([p.key for _i, p, _r in jobs], ["myproj"])
+        assert plans[1] is not None
+        self.assertEqual(plans[1].status, "skipped")
+        self.assertEqual(plans[1].detail, "same repository as myproj")
+
+    def test_the_repository_root_wins_over_a_linked_worktree(self) -> None:
+        # Even when the worktree is configured first: it is the directory the
+        # work happens in, and it needs no re-rooting.
+        main = self._clone("myproj")
+        linked = self.root / "myproj-login"
+        _git(main, "worktree", "add", "--quiet", str(linked), "-b", "wip")
+
+        projects = [self._project("login", linked), self._project("myproj", main)]
+        plans, jobs = self._plans(projects)
+
+        self.assertEqual([p.key for _i, p, _r in jobs], ["myproj"])
+        assert plans[0] is not None
+        self.assertEqual(plans[0].detail, "same repository as myproj")
+
+    def test_two_clones_of_one_remote_are_both_synced(self) -> None:
+        a = self._clone("cloneA")
+        b = self._clone("cloneB")
+        # Each clone carries its own local work, so each needs its own pass.
+        _git(a, "switch", "--quiet", "-c", "work-a")
+        _git(b, "switch", "--quiet", "-c", "work-b")
+
+        projects = [self._project("a", a), self._project("b", b)]
+        plans, jobs = self._plans(projects)
+
+        self.assertEqual([p.key for _i, p, _r in jobs], ["a", "b"])
+        self.assertEqual([p for p in plans if p is not None], [])
+
+    def test_a_full_run_over_the_duplicate_reports_no_failures(self) -> None:
+        main = self._clone("myproj")
+        _git(main, "branch", "--quiet", "--track", "feat/login", "origin/feat/login")
+        linked = self.root / "myproj-login"
+        _git(main, "worktree", "add", "--quiet", str(linked), "feat/login")
+
+        projects = [self._project("myproj", main), self._project("login", linked)]
+        with patch.object(C, "report"), patch.object(C, "console"):
+            run = C.sync_projects(projects, yes=True)
+
+        # The merged branch and its worktree go exactly once, with no
+        # "already gone" noise from a second pass over the same repository.
+        deleted = [b.name for o in run.outcomes for b in o.deleted_branches]
+        removed = [str(p) for o in run.outcomes for p in o.removed_worktrees]
+        failures = [f for o in run.outcomes for f in o.failures]
+        self.assertEqual(deleted, ["feat/login"])
+        self.assertEqual(removed, [str(linked)])
+        self.assertEqual(failures, [])
 
 
 if __name__ == "__main__":

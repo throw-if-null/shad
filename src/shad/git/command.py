@@ -12,6 +12,11 @@ Two orderings in this module are load-bearing:
      branch a worktree has checked out, so this ordering is what makes a
      dead-worktree-plus-merged-branch pair disappear in one run, not two.
 
+  3. With --switch: switch AFTER the fast-forward and BEFORE classifying.
+     After, so the checkout lands on the new tip in one working-tree update.
+     Before, so the branch the switch leaves behind is no longer pinned by a
+     worktree and can be cleaned up in the same run rather than the next one.
+
 Fetch, prune and fast-forward are applied immediately and are NOT undone when
 the user declines the prompt; only deletions are gated.
 """
@@ -20,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 
 from rich.console import Console
 from rich.prompt import Confirm
@@ -27,7 +33,7 @@ from rich.text import Text
 
 from shad.git import apply, discover, refs, report
 from shad.git import plan as planning
-from shad.git.model import ProjectOutcome, ProjectPlan, SyncRun
+from shad.git.model import ProjectOutcome, ProjectPlan, Repo, SyncRun
 from shad.git.run import GitMissing, require_git
 from shad.shared.config import Config, Project, resolve_target
 from shad.shared.errors import ShadError
@@ -44,25 +50,37 @@ MAX_WORKERS = 8
 # ── inspect (phase 0-2) ───────────────────────────────────────────────────
 
 
-def fetch_and_plan(project: Project, *, dry_run: bool = False) -> ProjectPlan:
+def fetch_and_plan(
+    project: Project,
+    *,
+    dry_run: bool = False,
+    switch: bool = False,
+    found: Repo | None = None,
+) -> ProjectPlan:
     """
     Apply the ungated steps for one project and compute what is still pending.
 
     Runs in a worker thread: it must not print, and it must not raise for an
     ordinary per-project problem — those become a status on the returned plan.
+
+    *found* is the already-resolved repository. _inspect resolves every project
+    up front so it can drop duplicates before any fetch runs; passing the
+    result through avoids discovering twice. Callers that plan a single project
+    can omit it.
     """
     plan = ProjectPlan(project=project)
 
-    try:
-        found = discover.discover(project.path)
-    except discover.NotUsable as exc:
-        plan.status = "skipped"
-        plan.detail = str(exc)
-        return plan
-    except GitMissing as exc:
-        plan.status = "failed"
-        plan.detail = str(exc)
-        return plan
+    if found is None:
+        try:
+            found = discover.discover(project.path)
+        except discover.NotUsable as exc:
+            plan.status = "skipped"
+            plan.detail = str(exc)
+            return plan
+        except GitMissing as exc:
+            plan.status = "failed"
+            plan.detail = str(exc)
+            return plan
 
     root = found.root
     plan.relinked_from = found.relinked_from
@@ -117,7 +135,16 @@ def fetch_and_plan(project: Project, *, dry_run: bool = False) -> ProjectPlan:
     plan.default_branch = default
 
     if default is None:
-        plan.detail = "cannot determine the default branch"
+        # Must be a status, not a bare detail: the report prints `detail` only
+        # for skipped and failed projects, so an "ok" plan with nothing else to
+        # show would render as "up to date". A repository with no remotes
+        # reaches this too.
+        plan.status = "skipped"
+        plan.detail = (
+            "no remote configured"
+            if remote is None
+            else "cannot determine the default branch"
+        )
         return plan
 
     remote_ref = f"refs/remotes/{remote}/{default}"
@@ -126,6 +153,23 @@ def fetch_and_plan(project: Project, *, dry_run: bool = False) -> ProjectPlan:
     plan.fast_forward = apply.fast_forward(
         root, default, local_ref, remote_ref, checked_out, dry_run=dry_run
     )
+
+    if switch:
+        plan.switch = apply.switch_default(
+            root, default, local_ref, checked_out, dry_run=dry_run
+        )
+        if plan.switch.status == "switched":
+            # HEAD moved, so the worktree list is stale. Re-read it: the branch
+            # just left behind must stop counting as checked out, or it cannot
+            # be deleted until the next run.
+            worktrees = refs.list_worktrees(root)
+            checked_out = {w.branch: w.path for w in worktrees if w.branch}
+        elif plan.switch.from_branch:
+            # Dry run: the switch did not happen, but it passed every gate, so
+            # the real run will make it. Model the un-pinning anyway, or the
+            # preview keeps the branch the real run would offer for deletion —
+            # a preview that disagrees with the run it is previewing.
+            checked_out.pop(f"refs/heads/{plan.switch.from_branch}", None)
 
     default_tips = [
         oid
@@ -192,14 +236,24 @@ def apply_plan(plan: ProjectPlan) -> ProjectOutcome:
     if root is None:
         return outcome
 
-    if any(w.prune_only for w in plan.worktree_removals):
+    prune_only = [w for w in plan.worktree_removals if w.prune_only]
+    if prune_only:
         error = apply.prune_worktrees(root)
         if error is not None:
             outcome.failures.append(f"worktree prune: {error}")
         else:
-            outcome.removed_worktrees.extend(
-                w.path for w in plan.worktree_removals if w.prune_only
-            )
+            # Report only what git actually dropped. `worktree prune` has its
+            # own opinion — it keeps a record whose gitdir file is recent, and
+            # honours gc.worktreePruneExpire — so a clean exit is not proof.
+            # Claiming a removal that did not happen hides the leftover record.
+            remaining = {w.path for w in refs.list_worktrees(root)}
+            for worktree in prune_only:
+                if worktree.path in remaining:
+                    outcome.failures.append(
+                        f"worktree {worktree.path}: still registered after prune"
+                    )
+                else:
+                    outcome.removed_worktrees.append(worktree.path)
 
     for worktree in plan.worktree_removals:
         if worktree.prune_only:
@@ -238,7 +292,11 @@ def apply_plan(plan: ProjectPlan) -> ProjectOutcome:
 
 
 def sync_projects(
-    projects: list[Project], *, yes: bool = False, dry_run: bool = False
+    projects: list[Project],
+    *,
+    yes: bool = False,
+    dry_run: bool = False,
+    switch: bool = False,
 ) -> SyncRun:
     """Run the full sync over *projects* and return what happened."""
     if not projects:
@@ -248,7 +306,7 @@ def sync_projects(
     require_git()
 
     report.render_header(len(projects))
-    plans = _inspect(projects, dry_run=dry_run)
+    plans = _inspect(projects, dry_run=dry_run, switch=switch)
 
     report.render_applied(plans, dry_run=dry_run)
 
@@ -276,9 +334,14 @@ def sync_projects(
         "  Delete these branches and worktrees?", default=False
     ):
         report.render_aborted()
-        return SyncRun(
+        # Still summarise: the fetch and fast-forward already happened, and a
+        # project that failed during them must not vanish because the user
+        # declined the deletions.
+        run = SyncRun(
             outcomes=[ProjectOutcome(plan=p) for p in plans], confirmed=False
         )
+        report.render_summary(run)
+        return run
 
     outcomes = [apply_plan(p) if p.pending else ProjectOutcome(plan=p) for p in plans]
     run = SyncRun(outcomes=outcomes)
@@ -288,30 +351,103 @@ def sync_projects(
     return run
 
 
-def _inspect(projects: list[Project], *, dry_run: bool) -> list[ProjectPlan]:
+def _inspect(
+    projects: list[Project], *, dry_run: bool, switch: bool = False
+) -> list[ProjectPlan]:
     """
-    Fetch and plan every project concurrently.
+    Resolve every project, drop repositories already covered, then fan out.
 
     Results are collected by index because as_completed scrambles order, and a
     worker failure lands on the plan rather than aborting the batch.
     """
     plans: list[ProjectPlan | None] = [None] * len(projects)
+    jobs = _resolve(projects, plans)
 
-    with ThreadPoolExecutor(max_workers=min(MAX_WORKERS, len(projects))) as pool:
-        futures = {
-            pool.submit(fetch_and_plan, project, dry_run=dry_run): index
-            for index, project in enumerate(projects)
-        }
-        for future in as_completed(futures):
-            index = futures[future]
-            try:
-                plans[index] = future.result()
-            except Exception as exc:  # noqa: BLE001 — one bad project must not abort the rest
-                plans[index] = ProjectPlan(
-                    project=projects[index], status="failed", detail=str(exc)
-                )
+    if jobs:
+        with ThreadPoolExecutor(max_workers=min(MAX_WORKERS, len(jobs))) as pool:
+            futures = {
+                pool.submit(
+                    fetch_and_plan, project, dry_run=dry_run, switch=switch, found=found
+                ): index
+                for index, project, found in jobs
+            }
+            for future in as_completed(futures):
+                index = futures[future]
+                try:
+                    plans[index] = future.result()
+                except Exception as exc:  # noqa: BLE001 — one bad project must not abort the rest
+                    plans[index] = ProjectPlan(
+                        project=projects[index], status="failed", detail=str(exc)
+                    )
 
     return [p for p in plans if p is not None]
+
+
+def _resolve(
+    projects: list[Project], plans: list[ProjectPlan | None]
+) -> list[tuple[int, Project, Repo]]:
+    """
+    Resolve each project to its repository and drop the ones already covered.
+
+    Two configured directories can be one repository — linked worktrees share a
+    ref store, an object store, and a branch list. `discover` re-roots a linked
+    worktree onto its main worktree, so both land on the same repository, and
+    without this pass both would be planned: the same branch listed twice in
+    the confirmation table, and the second apply reporting "already gone" for
+    work the first did. Concurrent fetches of one ref store also split the
+    prune evidence non-deterministically between them.
+
+    Identity is --git-common-dir, not the path: two *clones* of one remote have
+    different common dirs and different local branches, so both must be synced.
+
+    This runs serially on the main thread, before any fetch, because a worker
+    cannot see its peers and the duplicate has to be dropped before it opens a
+    second connection. It is local-only — a couple of rev-parse calls per
+    project, no network.
+    """
+    resolved: list[tuple[int, Project, Repo]] = []
+
+    for index, project in enumerate(projects):
+        try:
+            found = discover.discover(project.path)
+        except discover.NotUsable as exc:
+            plans[index] = ProjectPlan(
+                project=project, status="skipped", detail=str(exc)
+            )
+        except GitMissing as exc:
+            plans[index] = ProjectPlan(
+                project=project, status="failed", detail=str(exc)
+            )
+        else:
+            resolved.append((index, project, found))
+
+    # One project per repository. A project configured at the repository root
+    # beats one configured at a linked worktree, whatever order they appear in:
+    # it needs no re-rooting, and it makes "same repository as X" name the
+    # directory the work actually happens in.
+    chosen: dict[Path, tuple[int, Project, Repo]] = {}
+    for entry in resolved:
+        found = entry[2]
+        current = chosen.get(found.common_dir)
+        if current is None or (
+            current[2].relinked_from is not None and found.relinked_from is None
+        ):
+            chosen[found.common_dir] = entry
+
+    jobs: list[tuple[int, Project, Repo]] = []
+    for entry in resolved:
+        index, project, found = entry
+        winner = chosen[found.common_dir]
+        if winner[0] == index:
+            jobs.append(entry)
+        else:
+            plans[index] = ProjectPlan(
+                project=project,
+                status="skipped",
+                detail=f"same repository as {winner[1].display_name}",
+            )
+
+    return jobs
 
 
 def _raise_if_all_failed(run: SyncRun) -> None:
@@ -334,4 +470,5 @@ def cmd_git(cfg: Config, args: argparse.Namespace) -> None:
         target.projects,
         yes=getattr(args, "yes", False),
         dry_run=getattr(args, "dry_run", False),
+        switch=getattr(args, "switch", False),
     )

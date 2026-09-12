@@ -74,7 +74,6 @@ class Worktree:
 @dataclass(frozen=True)
 class FetchResult:
     ok: bool
-    pruned: list[str] = field(default_factory=list)  # short names, e.g. "origin/feat/x"
     error: str | None = None
 
 
@@ -85,6 +84,16 @@ class FastForward:
     before: str | None = None
     after: str | None = None
     ahead: int = 0
+    detail: str | None = None
+
+
+@dataclass(frozen=True)
+class Switch:
+    """The main worktree being moved onto the default branch, or why it was not."""
+
+    branch: str
+    status: str  # "switched" | "current" | "skipped"
+    from_branch: str | None = None  # only set when a switch happened or would have
     detail: str | None = None
 
 
@@ -159,6 +168,7 @@ class ProjectPlan:
     repo_root: Path | None = None  # main worktree; what apply_plan operates on
     default_branch: str | None = None
     fast_forward: FastForward | None = None
+    switch: Switch | None = None
     pruned_refs: list[str] = field(default_factory=list)
     pruned_tracked_by: dict[str, str] = field(default_factory=dict)
     branch_deletions: list[BranchInfo] = field(default_factory=list)
@@ -175,6 +185,8 @@ class ProjectPlan:
     def changed(self) -> bool:
         """True when this project has anything worth printing a block for."""
         if self.pending or self.pruned_refs or self.branches_kept or self.worktrees_kept:
+            return True
+        if self.switch is not None and self.switch.status != "current":
             return True
         ff = self.fast_forward
         return ff is not None and ff.status != "current"

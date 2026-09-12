@@ -41,7 +41,7 @@ def classify_branch(
     repo: Path,
     branch: BranchRef,
     *,
-    default_tips: list[str],
+    merged: set[str],
     checked_out: dict[str, Path],
     pruned_oids: dict[str, str],
     gone_allowed: bool,
@@ -53,6 +53,9 @@ def classify_branch(
     The rule: delete iff the branch is not protected AND either (a) its tip is
     reachable from a default tip, or (b) its upstream was pruned in *this* run
     and its tip was reachable from that ref's last-known OID.
+
+    *merged* is clause (a), precomputed by classify_branches: the refnames
+    git reports as merged into any default tip.
 
     Clause (b) is what makes squash-merged PR branches deletable. `git branch
     -d` falls back to "merged into HEAD" once the upstream ref is gone, so it
@@ -94,7 +97,7 @@ def classify_branch(
         # Tracks another local branch; says nothing about the server.
         return kept("tracks a local branch")
 
-    if any(refs.is_ancestor(repo, branch.oid, tip) is True for tip in default_tips):
+    if branch.refname in merged:
         return BranchInfo(name=name, sha=sha, reason="merged", force=False)
 
     if branch.upstream in pruned_oids:
@@ -130,13 +133,18 @@ def classify_branches(
     plan = BranchPlan()
     default_ref = f"refs/heads/{default}"
 
+    # Ask git once per tip rather than once per branch per tip.
+    merged: set[str] = set()
+    for tip in default_tips:
+        merged |= refs.merged_branches(repo, tip)
+
     for branch in branches:
         if branch.refname == default_ref:
             continue  # never a candidate, never listed
         verdict = classify_branch(
             repo,
             branch,
-            default_tips=default_tips,
+            merged=merged,
             checked_out=checked_out,
             pruned_oids=pruned_oids,
             gone_allowed=gone_allowed,
@@ -294,10 +302,19 @@ def stale_upstreams(
     Dry run: nothing was pruned, so ask the remote which branches it still has
     and treat everything else as stale. Both yield refs the server no longer
     carries, but the dry-run path leaves them in place for the real run.
+
+    Both paths are scoped to *remote*. The snapshots cover all of refs/remotes,
+    while `live` only ever describes one remote — without the prefix filter a
+    second remote's refs would every one of them read as stale, and a branch
+    tracking a live `upstream/x` would be offered for deletion.
     """
+    prefix = f"refs/remotes/{remote}/"
+
     if not dry_run:
         return {
-            ref: before[ref] for ref in before.keys() - after.keys() if ref not in symrefs
+            ref: before[ref]
+            for ref in before.keys() - after.keys()
+            if ref.startswith(prefix) and ref not in symrefs
         }
 
     live = refs.remote_branch_refs(root, remote)
@@ -306,5 +323,5 @@ def stale_upstreams(
     return {
         ref: oid
         for ref, oid in after.items()
-        if ref not in live and ref not in symrefs
+        if ref.startswith(prefix) and ref not in live and ref not in symrefs
     }

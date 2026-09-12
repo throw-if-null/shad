@@ -45,6 +45,21 @@ def _render_fetch(plan: ProjectPlan) -> None:
     if plan.default_branch:
         rows.append(("default branch", Text(plan.default_branch, style="bright_white")))
 
+    sw = plan.switch
+    if sw is not None and sw.status != "current":
+        if sw.from_branch:
+            # from_branch is set only when a switch happened or would have;
+            # every earlier gate returns a bare reason instead.
+            value = Text()
+            if sw.status != "switched":
+                value.append("would switch  ", style="dim")
+            value.append(sw.from_branch, style="cyan")
+            value.append(" → ")
+            value.append(sw.branch, style="bright_white")
+        else:
+            value = Text(sw.detail or "skipped", style="dim")
+        rows.append(("switch", value))
+
     ff = plan.fast_forward
     if ff is not None:
         if ff.status == "current":

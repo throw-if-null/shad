@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from shad.shared.config import (
+    CONFIG_ENV,
     Config,
     Defaults,
     Project,
     all_projects,
+    config_path,
+    default_config_dir,
     load,
     resolve_prefix,
     resolve_target,
@@ -256,12 +261,10 @@ class ResolveTargetTests(unittest.TestCase):
     def test_no_tokens_returns_every_project(self) -> None:
         target = resolve_target(self.cfg, [])
         self.assertEqual(len(target.projects), 5)
-        self.assertIsNone(target.group)
 
     def test_one_token_resolves_a_top_level_project(self) -> None:
         target = resolve_target(self.cfg, ["kb"])
         self.assertEqual([p.key for p in target.projects], ["kb"])
-        self.assertIsNone(target.group)
 
     def test_one_token_prefix_resolves_a_top_level_project(self) -> None:
         target = resolve_target(self.cfg, ["or"])
@@ -270,12 +273,10 @@ class ResolveTargetTests(unittest.TestCase):
     def test_one_token_group_expands_to_every_member_sorted(self) -> None:
         target = resolve_target(self.cfg, ["tin"])
         self.assertEqual([p.key for p in target.projects], ["coral", "shad"])
-        self.assertEqual(target.group, "tin")
 
     def test_two_tokens_resolve_one_grouped_project(self) -> None:
         target = resolve_target(self.cfg, ["tin", "shad"])
         self.assertEqual([p.display_name for p in target.projects], ["tin shad"])
-        self.assertIsNone(target.group)
 
     def test_two_tokens_use_prefix_matching_at_each_level(self) -> None:
         target = resolve_target(self.cfg, ["ti", "sh"])
@@ -322,3 +323,222 @@ class ResolveTargetTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------------------
+# config path resolution
+# ---------------------------------------------------------------------------
+
+
+class DefaultConfigDirTests(unittest.TestCase):
+    """The per-OS default. Each branch is asserted on, not just the host's."""
+
+    def _dir(self, *, platform: str, env: dict[str, str]) -> Path:
+        with (
+            patch("shad.shared.config.sys.platform", platform),
+            patch.dict("shad.shared.config.os.environ", env, clear=True),
+            patch.object(Path, "home", return_value=Path("/home/u")),
+        ):
+            return default_config_dir()
+
+    def test_linux_uses_xdg_config_home(self) -> None:
+        found = self._dir(
+            platform="linux", env={"XDG_CONFIG_HOME": "/xdg"}
+        )
+        self.assertEqual(found, Path("/xdg/shad"))
+
+    def test_linux_falls_back_to_dot_config(self) -> None:
+        found = self._dir(platform="linux", env={})
+        self.assertEqual(found, Path("/home/u/.config/shad"))
+
+    def test_a_relative_xdg_config_home_is_ignored(self) -> None:
+        # The XDG spec says a relative value is invalid. Honouring it would
+        # resolve against the working directory and give a different config
+        # per invocation.
+        found = self._dir(
+            platform="linux", env={"XDG_CONFIG_HOME": "relative/path"}
+        )
+        self.assertEqual(found, Path("/home/u/.config/shad"))
+
+    def test_macos_uses_application_support(self) -> None:
+        found = self._dir(platform="darwin", env={"XDG_CONFIG_HOME": "/xdg"})
+        self.assertEqual(found, Path("/home/u/Library/Application Support/shad"))
+
+    def test_windows_uses_appdata(self) -> None:
+        found = self._dir(
+            platform="win32", env={"APPDATA": "/Users/u/AppData/Roaming"}
+        )
+        self.assertEqual(found, Path("/Users/u/AppData/Roaming/shad"))
+
+    def test_windows_without_appdata_falls_back(self) -> None:
+        found = self._dir(platform="win32", env={})
+        self.assertEqual(found, Path("/home/u/AppData/Roaming/shad"))
+
+
+class ConfigPathTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.addCleanup(self.tmp.cleanup)
+
+    def _touch(self, path: Path) -> Path:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("")
+        return path
+
+    def test_the_env_var_wins_outright(self) -> None:
+        explicit = self.root / "scratch" / "custom.toml"
+        with patch.dict("shad.shared.config.os.environ", {CONFIG_ENV: str(explicit)}):
+            self.assertEqual(config_path(), explicit)
+
+    def test_the_env_var_expands_a_tilde(self) -> None:
+        env = {CONFIG_ENV: "~/scratch.toml", "HOME": "/home/u"}
+        with patch.dict("shad.shared.config.os.environ", env):
+            self.assertEqual(config_path(), Path("/home/u/scratch.toml"))
+
+    def test_the_env_var_need_not_exist(self) -> None:
+        # `shad init` must be able to create it, and `load` reports a missing
+        # file with a better message than this function could.
+        missing = self.root / "nope.toml"
+        with patch.dict("shad.shared.config.os.environ", {CONFIG_ENV: str(missing)}):
+            self.assertEqual(config_path(), missing)
+
+    def test_the_per_os_default_is_used_when_it_exists(self) -> None:
+        preferred = self._touch(self.root / "os" / "shad.toml")
+        with (
+            patch.dict("shad.shared.config.os.environ", {}, clear=True),
+            patch("shad.shared.config.default_config_dir", return_value=self.root / "os"),
+            patch("shad.shared.config.legacy_config_dir", return_value=self.root / "legacy"),
+        ):
+            self.assertEqual(config_path(), preferred)
+
+    def test_an_existing_legacy_config_is_not_orphaned(self) -> None:
+        # The case that matters on macOS and Windows: the per-OS default moved,
+        # but the user's real config is still in ~/.config/shad.
+        legacy = self._touch(self.root / "legacy" / "shad.toml")
+        with (
+            patch.dict("shad.shared.config.os.environ", {}, clear=True),
+            patch("shad.shared.config.default_config_dir", return_value=self.root / "os"),
+            patch("shad.shared.config.legacy_config_dir", return_value=self.root / "legacy"),
+        ):
+            self.assertEqual(config_path(), legacy)
+
+    def test_the_per_os_default_wins_over_legacy_when_both_exist(self) -> None:
+        preferred = self._touch(self.root / "os" / "shad.toml")
+        self._touch(self.root / "legacy" / "shad.toml")
+        with (
+            patch.dict("shad.shared.config.os.environ", {}, clear=True),
+            patch("shad.shared.config.default_config_dir", return_value=self.root / "os"),
+            patch("shad.shared.config.legacy_config_dir", return_value=self.root / "legacy"),
+        ):
+            self.assertEqual(config_path(), preferred)
+
+    def test_with_nothing_on_disk_it_names_the_per_os_default(self) -> None:
+        # Never returns the legacy path as a *destination* — `shad init` would
+        # then write to the old location on a fresh install.
+        with (
+            patch.dict("shad.shared.config.os.environ", {}, clear=True),
+            patch("shad.shared.config.default_config_dir", return_value=self.root / "os"),
+            patch("shad.shared.config.legacy_config_dir", return_value=self.root / "legacy"),
+        ):
+            self.assertEqual(config_path(), self.root / "os" / "shad.toml")
+
+
+class LoadUsesTheResolverTests(unittest.TestCase):
+    def test_load_with_no_argument_resolves_the_path(self) -> None:
+        with tempfile.TemporaryDirectory() as name:
+            target = Path(name) / "shad.toml"
+            target.write_text('[projects.kb]\npath = "/tmp/kb"\n')
+            with patch("shad.shared.config.config_path", return_value=target):
+                cfg = load()
+        self.assertEqual(list(cfg.projects), ["kb"])
+
+
+# ---------------------------------------------------------------------------
+# duplicate project paths
+# ---------------------------------------------------------------------------
+
+
+class DuplicatePathTests(unittest.TestCase):
+    """Two projects must not name the same directory."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.addCleanup(self.tmp.cleanup)
+
+    def _load(self, body: str) -> Config:
+        target = self.root / "shad.toml"
+        target.write_text(textwrap.dedent(body))
+        return load(target)
+
+    def test_two_top_level_projects_on_one_directory_are_rejected(self) -> None:
+        with self.assertRaises(ShadError) as ctx:
+            self._load(f'''
+                [projects.kb]
+                path = "{self.root}/kb"
+
+                [projects.notes]
+                path = "{self.root}/kb"
+            ''')
+        message = str(ctx.exception)
+        self.assertIn("both point at", message)
+        self.assertIn("kb", message)
+        self.assertIn("notes", message)
+
+    def test_a_collision_across_a_group_boundary_is_rejected(self) -> None:
+        with self.assertRaises(ShadError) as ctx:
+            self._load(f'''
+                [projects.kb]
+                path = "{self.root}/kb"
+
+                [projects.tin.kb]
+                path = "{self.root}/kb"
+            ''')
+        self.assertIn("tin kb", str(ctx.exception))
+
+    def test_a_trailing_slash_does_not_hide_a_collision(self) -> None:
+        with self.assertRaises(ShadError):
+            self._load(f'''
+                [projects.kb]
+                path = "{self.root}/kb"
+
+                [projects.notes]
+                path = "{self.root}/kb/"
+            ''')
+
+    def test_a_relative_segment_does_not_hide_a_collision(self) -> None:
+        with self.assertRaises(ShadError):
+            self._load(f'''
+                [projects.kb]
+                path = "{self.root}/kb"
+
+                [projects.notes]
+                path = "{self.root}/other/../kb"
+            ''')
+
+    def test_a_tilde_does_not_hide_a_collision(self) -> None:
+        with (
+            patch.dict("os.environ", {"HOME": str(self.root)}),
+            self.assertRaises(ShadError),
+        ):
+            self._load(f'''
+                [projects.kb]
+                path = "{self.root}/kb"
+
+                [projects.notes]
+                path = "~/kb"
+            ''')
+
+    def test_distinct_directories_are_fine(self) -> None:
+        # Two clones, or two worktrees, of one repository live in different
+        # directories and stay legal. shad git sync deduplicates the
+        # shared-ref-store case on --git-common-dir instead.
+        cfg = self._load(f'''
+            [projects.kb]
+            path = "{self.root}/kb"
+
+            [projects.notes]
+            path = "{self.root}/notes"
+        ''')
+        self.assertEqual(sorted(cfg.projects), ["kb", "notes"])

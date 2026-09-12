@@ -12,6 +12,9 @@ shad projects <group> <name> <action>    # run action on grouped project
 shad config <action> [args]              # inspect or edit shad.toml
 shad git sync [<group>] [<name>]         # git maintenance across projects
 
+Config file: --config PATH, else $SHAD_CONFIG, else the per-OS default
+(~/.config/shad/shad.toml on Linux). `shad config path` prints the resolved one.
+
 Actions: status, stop
 
 Resolution uses exact-match first, then unique prefix match per level.
@@ -21,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 from rich.console import Console
 from rich.text import Text
@@ -175,6 +179,14 @@ def build_parser() -> argparse.ArgumentParser:
         description="Attach or create project-specific tmux sessions.",
     )
     parser.add_argument("--version", action="version", version=f"shad {__version__}")
+    parser.add_argument(
+        "--config",
+        metavar="PATH",
+        help=(
+            "Config file to use, overriding $SHAD_CONFIG and the per-OS default. "
+            "Must precede the subcommand."
+        ),
+    )
 
     sub = parser.add_subparsers(dest="command", metavar="<command>")
 
@@ -235,15 +247,24 @@ def build_parser() -> argparse.ArgumentParser:
             "     clean worktrees whose branch is being deleted\n\n"
             "Steps 1 and 2 are applied immediately and are NOT undone if you\n"
             "decline the prompt. Only the deletions in steps 3 and 4 are gated.\n\n"
-            "Never deleted: the default branch, a branch checked out in any\n"
-            "worktree, a branch with unpushed commits, a branch that never had\n"
-            "an upstream, a locked worktree, or a worktree with local changes.\n\n"
+            "Never deleted: the default branch, a branch checked out in a\n"
+            "worktree that is staying, a branch with unpushed commits, a branch\n"
+            "that never had an upstream, a locked worktree, or a worktree with\n"
+            "local changes.\n\n"
             "Options:\n"
+            "  --switch    check out the default branch in each main worktree\n"
             "  --yes       skip the confirmation prompt (use this in scripts)\n"
             "  --dry-run   report only; still fetches, but deletes nothing\n\n"
+            "--switch is the only step that touches a working tree. A project\n"
+            "is skipped, with the reason, when its tree is dirty, its HEAD is\n"
+            "detached, the default branch is held by another worktree, or it\n"
+            "has no local copy of that branch. Switching also un-pins the\n"
+            "branch it leaves behind, so that branch can be deleted in the\n"
+            "same run if it qualifies.\n\n"
             "Examples:\n"
             "  shad git sync\n"
             "  shad git sync tin shad --dry-run\n"
+            "  shad git sync --switch\n"
             "  shad git sync --yes"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -253,6 +274,11 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="*",
         metavar="NAME",
         help="[group] [project]  — omit to target every configured project",
+    )
+    p_git_sync.add_argument(
+        "--switch",
+        action="store_true",
+        help="Check out the default branch in each project's main worktree",
     )
     p_git_sync.add_argument(
         "--yes",
@@ -391,6 +417,11 @@ def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
 
+    # None means "resolve normally"; shared.config.config_path() then applies
+    # $SHAD_CONFIG and the per-OS default. Readers and writers get the same
+    # answer because they all go through it.
+    override = Path(args.config).expanduser() if args.config else None
+
     if args.command is None:
         print_banner()
         parser.print_help()
@@ -402,17 +433,17 @@ def main() -> None:
             return
 
         if args.command == "init":
-            cmd_init(install_deps=args.install_deps)
+            cmd_init(install_deps=args.install_deps, path=override)
             return
 
         if args.command == "cheat":
             sys.exit(cmd_cheat())
 
         if args.command == "config":
-            cmd_config(args)
+            cmd_config(args, path=override)
             return
 
-        cfg: Config = load()
+        cfg: Config = load(override)
 
         if args.command == "projects":
             cmd_projects(cfg, args)

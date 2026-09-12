@@ -13,9 +13,27 @@ from __future__ import annotations
 from pathlib import Path
 
 from shad.git import discover, refs
-from shad.git.model import FastForward, FetchResult
+from shad.git.model import FastForward, FetchResult, Switch, short_branch
 from shad.git.run import T_FETCH, T_MUTATE, first_line, git
 from shad.shared.errors import ShadError
+
+
+def _run(repo: Path, args: list[str], *, timeout: float, fallback: str) -> str | None:
+    """
+    Run one mutating git command. Returns an error string, or None on success.
+
+    A timeout raises ShadError out of run.git; it is converted here rather than
+    left to propagate, because apply_plan runs on the main thread with no
+    per-project guard and one slow `worktree remove` must not abort the
+    deletions still queued for every other project.
+    """
+    try:
+        result = git(repo, args, timeout=timeout)
+    except ShadError as exc:
+        return str(exc)
+    if result.returncode != 0:
+        return first_line(result.stderr) or fallback
+    return None
 
 
 def fetch(repo: Path, remote: str, *, prune: bool) -> FetchResult:
@@ -43,26 +61,20 @@ def fetch(repo: Path, remote: str, *, prune: bool) -> FetchResult:
         args.append("--prune")
     args += ["--", remote]
 
-    try:
-        result = git(repo, args, timeout=T_FETCH)
-    except ShadError as exc:
-        return FetchResult(ok=False, error=str(exc))
-
-    if result.returncode != 0:
-        return FetchResult(ok=False, error=first_line(result.stderr) or "git fetch failed")
+    error = _run(repo, args, timeout=T_FETCH, fallback="git fetch failed")
+    if error is not None:
+        return FetchResult(ok=False, error=error)
     return FetchResult(ok=True)
 
 
 def fast_forward_checked_out(worktree: Path, upstream_ref: str) -> str | None:
     """Fast-forward the branch checked out in *worktree*. Returns an error, or None."""
-    result = git(
+    return _run(
         worktree,
         ["merge", "--ff-only", "--no-stat", "--quiet", upstream_ref],
         timeout=T_MUTATE,
+        fallback="git merge --ff-only failed",
     )
-    if result.returncode != 0:
-        return first_line(result.stderr) or "git merge --ff-only failed"
-    return None
 
 
 def fast_forward_unchecked(repo: Path, branch: str, upstream_ref: str) -> str | None:
@@ -75,7 +87,7 @@ def fast_forward_unchecked(repo: Path, branch: str, upstream_ref: str) -> str | 
     guard and would desynchronise that worktree's HEAD and index. Source '.'
     means no network — the remote-tracking ref is already current.
     """
-    result = git(
+    return _run(
         repo,
         [
             "fetch",
@@ -86,10 +98,8 @@ def fast_forward_unchecked(repo: Path, branch: str, upstream_ref: str) -> str | 
             f"{upstream_ref}:refs/heads/{branch}",
         ],
         timeout=T_MUTATE,
+        fallback="fast-forward failed",
     )
-    if result.returncode != 0:
-        return first_line(result.stderr) or "fast-forward failed"
-    return None
 
 
 def delete_branch(repo: Path, name: str, *, force: bool) -> str | None:
@@ -100,26 +110,93 @@ def delete_branch(repo: Path, name: str, *, force: bool) -> str | None:
     if force:
         args.append("--force")
     args.append(name)
-    result = git(repo, args, timeout=T_MUTATE)
-    if result.returncode != 0:
-        return first_line(result.stderr) or "git branch --delete failed"
-    return None
+    return _run(
+        repo, args, timeout=T_MUTATE, fallback="git branch --delete failed"
+    )
 
 
 def remove_worktree(repo: Path, path: Path) -> str | None:
     """Remove a worktree. Never passes --force. Returns an error, or None."""
-    result = git(repo, ["worktree", "remove", "--", str(path)], timeout=T_MUTATE)
-    if result.returncode != 0:
-        return first_line(result.stderr) or "git worktree remove failed"
-    return None
+    return _run(
+        repo,
+        ["worktree", "remove", "--", str(path)],
+        timeout=T_MUTATE,
+        fallback="git worktree remove failed",
+    )
 
 
 def prune_worktrees(repo: Path) -> str | None:
     """Drop admin records whose directory is gone. Touches no working tree."""
-    result = git(repo, ["worktree", "prune"], timeout=T_MUTATE)
-    if result.returncode != 0:
-        return first_line(result.stderr) or "git worktree prune failed"
-    return None
+    return _run(
+        repo,
+        ["worktree", "prune"],
+        timeout=T_MUTATE,
+        fallback="git worktree prune failed",
+    )
+
+
+def switch_default(
+    root: Path,
+    default: str,
+    local_ref: str,
+    checked_out: dict[str, Path],
+    *,
+    dry_run: bool,
+) -> Switch:
+    """
+    Move the main worktree onto the default branch, or explain why not.
+
+    This is the only step that touches a working tree the user can see, which
+    is why it is opt-in (`--switch`). Every blocking condition skips with a
+    reason rather than forcing: nothing here stashes, discards, or detaches.
+
+    It runs *after* the fast-forward so the checkout lands directly on the new
+    tip — one working-tree update, not two — and *before* branches are
+    classified, so the branch it leaves behind is no longer pinned by a
+    worktree and can be cleaned up in the same run.
+    """
+
+    def skipped(detail: str) -> Switch:
+        return Switch(branch=default, status="skipped", detail=detail)
+
+    current = discover.head_branch(root)
+    if current == local_ref:
+        return Switch(branch=default, status="current")
+    if current is None:
+        return skipped("HEAD is detached")
+
+    if default.startswith("-"):
+        return skipped("refusing a default branch name that starts with '-'")
+    if not refs.ref_exists(root, local_ref):
+        # Same rule as fast_forward: never create a branch the user never had.
+        return skipped(f"no local {default}")
+
+    holder = checked_out.get(local_ref)
+    if holder is not None and holder.resolve() != root.resolve():
+        return skipped(f"checked out at {holder}")
+
+    clean, changed, _untracked = discover.is_clean(root, untracked=False)
+    if not clean:
+        return skipped(f"{changed} uncommitted change(s)")
+
+    from_branch = short_branch(current)
+    if dry_run:
+        return Switch(
+            branch=default,
+            status="skipped",
+            from_branch=from_branch,
+            detail="would switch",
+        )
+
+    error = _run(
+        root,
+        ["switch", "--no-guess", default],
+        timeout=T_MUTATE,
+        fallback="git switch failed",
+    )
+    if error is not None:
+        return skipped(error)
+    return Switch(branch=default, status="switched", from_branch=from_branch)
 
 
 def fast_forward(

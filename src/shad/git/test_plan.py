@@ -57,17 +57,14 @@ class ClassifyBranchTests(unittest.TestCase):
         gone_allowed: bool = True,
         shallow: bool = False,
     ) -> BranchInfo | BranchKept:
-        def fake_is_ancestor(_repo: Path, _a: str, b: str) -> bool | None:
-            return pushed if b == "last-known" else merged
-
         with (
-            patch.object(refs, "is_ancestor", side_effect=fake_is_ancestor),
+            patch.object(refs, "is_ancestor", return_value=pushed),
             patch.object(refs, "ref_exists", return_value=upstream_exists),
         ):
             return planning.classify_branch(
                 REPO,
                 branch,
-                default_tips=["tip"],
+                merged={branch.refname} if merged else set(),
                 checked_out=checked_out or {},
                 pruned_oids=pruned_oids or {},
                 gone_allowed=gone_allowed,
@@ -172,6 +169,11 @@ class ClassifyBranchTests(unittest.TestCase):
         with (
             patch.object(refs, "is_ancestor", return_value=True),
             patch.object(refs, "ref_exists", return_value=True),
+            patch.object(
+                refs,
+                "merged_branches",
+                return_value={"refs/heads/main", "refs/heads/feat"},
+            ),
         ):
             plan = planning.classify_branches(
                 REPO,
@@ -365,6 +367,26 @@ class PrunedOidTests(unittest.TestCase):
             self.assertIsNone(
                 planning.stale_upstreams(ROOT, "origin", {}, {}, set(), dry_run=True)
             )
+
+    def test_dry_run_ignores_another_remote(self) -> None:
+        # ls-remote only ever describes one remote, but the ref snapshot covers
+        # all of refs/remotes. Without the prefix filter every upstream/* ref
+        # reads as stale and a branch tracking a live upstream/x is offered up
+        # for deletion.
+        after = {
+            "refs/remotes/origin/a": "aaa",
+            "refs/remotes/origin/gone": "ggg",
+            "refs/remotes/upstream/feat": "fff",
+        }
+        with patch.object(refs, "remote_branch_refs", return_value={"refs/remotes/origin/a"}):
+            result = planning.stale_upstreams(ROOT, "origin", {}, after, set(), dry_run=True)
+        self.assertEqual(result, {"refs/remotes/origin/gone": "ggg"})
+
+    def test_applied_run_ignores_another_remote(self) -> None:
+        before = {"refs/remotes/origin/b": "bbb", "refs/remotes/upstream/feat": "fff"}
+        after = {"refs/remotes/origin/b": "bbb"}
+        result = planning.stale_upstreams(ROOT, "origin", before, after, set(), dry_run=False)
+        self.assertEqual(result, {})
 
 if __name__ == "__main__":
     unittest.main()

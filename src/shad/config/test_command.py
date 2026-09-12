@@ -171,8 +171,31 @@ class ConfigCommandTests(unittest.TestCase):
         self.assertEqual(self._raw()["projects"]["kb"]["path"], str(self.root / "kb"))
 
     def test_set_creates_a_new_project_table(self) -> None:
-        self._run("set", key="projects.fresh.path", value=str(self.root / "kb"))
-        self.assertEqual(self._raw()["projects"]["fresh"]["path"], str(self.root / "kb"))
+        fresh = self.root / "fresh"
+        fresh.mkdir()
+        self._run("set", key="projects.fresh.path", value=str(fresh))
+        self.assertEqual(self._raw()["projects"]["fresh"]["path"], str(fresh))
+
+    def test_set_refuses_a_path_another_project_already_uses(self) -> None:
+        # _commit validates through load() before replacing the file, so the
+        # duplicate-directory rule is enforced on writes without extra wiring.
+        before = self.path.read_text()
+        with self.assertRaises(ShadError) as ctx:
+            self._run("set", key="projects.fresh.path", value=str(self.root / "kb"))
+        self.assertIn("both point at", str(ctx.exception))
+        self.assertEqual(self.path.read_text(), before)
+
+    def test_set_refuses_to_point_a_project_at_another_projects_path(self) -> None:
+        before = self.path.read_text()
+        with self.assertRaises(ShadError) as ctx:
+            self._run(
+                "set",
+                key="projects.alvr.db.path",
+                value=str(self.root / "kb"),
+                force=True,
+            )
+        self.assertIn("both point at", str(ctx.exception))
+        self.assertEqual(self.path.read_text(), before)
 
     def test_set_refuses_a_project_without_a_path(self) -> None:
         before = self.path.read_text()

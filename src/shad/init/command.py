@@ -27,7 +27,7 @@ from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 from rich.text import Text
 
-from shad.shared.config import CONFIG_PATH
+from shad.shared.config import config_path
 from shad.shared.errors import ShadError
 
 console = Console()
@@ -205,7 +205,9 @@ def _toml_key(group: str | None, key: str) -> str:
 
 # ── interactive wizard ────────────────────────────────────────────────────
 
-def cmd_init(*, install_deps: bool = False) -> None:
+def cmd_init(*, install_deps: bool = False, path: Path | None = None) -> None:
+    target = path or config_path()
+
     console.print()
     console.print(Text("shad init", style="bold cyan") + Text(" — add a new project", style="dim"))
     console.print()
@@ -230,9 +232,9 @@ def cmd_init(*, install_deps: bool = False) -> None:
     # --- key ---
     while True:
         key = Prompt.ask("[cyan]  key[/cyan]", default=default_key)
-        if not _key_exists(CONFIG_PATH, group, key):
+        if not _key_exists(target, group, key):
             break
-        err_console.print(Text(f"  ✗ [{_toml_key(group, key)}] already exists in {CONFIG_PATH}", style="bold red"))
+        err_console.print(Text(f"  ✗ [{_toml_key(group, key)}] already exists in {target}", style="bold red"))
 
     # --- session ---
     default_session = f"{group}-{key}" if group else key
@@ -253,14 +255,14 @@ def cmd_init(*, install_deps: bool = False) -> None:
         console.print(Text("  Aborted.", style="dim"))
         return
 
-    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    is_new_file = not CONFIG_PATH.exists()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    is_new_file = not target.exists()
     if is_new_file:
-        _write_defaults_block(CONFIG_PATH)
-    _append_toml(CONFIG_PATH, group, key, project_path, session)
+        _write_defaults_block(target)
+    _append_toml(target, group, key, project_path, session)
 
     console.print()
-    console.print(Text(f"  ✓ Added to {CONFIG_PATH}", style="bold green"))
+    console.print(Text(f"  ✓ Added to {target}", style="bold green"))
     open_cmd = f"shad projects {group} {key}" if group else f"shad projects {key}"
     console.print(Text("  Open with: ", style="dim") + Text(open_cmd, style="cyan"))
     console.print()

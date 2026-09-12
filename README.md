@@ -49,7 +49,45 @@ pip install -e ~/gh/tin/shad
 
 ## Config
 
-Config is read from `~/.config/shad/shad.toml`.
+### Where the config lives
+
+Every command resolves the config file the same way. Highest precedence first:
+
+| Source | Notes |
+|---|---|
+| `--config PATH` | Must come before the subcommand: `shad --config ./scratch.toml git sync` |
+| `$SHAD_CONFIG` | A full path to a file. `~` is expanded. |
+| The per-OS default | See below |
+
+The per-OS default:
+
+| OS | Path |
+|---|---|
+| Linux, BSD | `$XDG_CONFIG_HOME/shad/shad.toml`, or `~/.config/shad/shad.toml` |
+| macOS | `~/Library/Application Support/shad/shad.toml` |
+| Windows | `%APPDATA%\shad\shad.toml` |
+
+`XDG_CONFIG_HOME` is used only when it is an absolute path, as the XDG spec
+requires.
+
+If the per-OS default does not exist but `~/.config/shad/shad.toml` does, that
+file is used instead. This only ever applies on macOS and Windows, and keeps an
+existing config from being shadowed when the default moved. A fresh install
+always writes to the per-OS default.
+
+Run `shad config path` to print the file the current environment resolves to.
+
+### Rules
+
+Two projects must not name the same directory. Paths are compared after
+expanding `~` and resolving symlinks and `..`, so the collision cannot be
+hidden by spelling the path differently. `shad config set` and `shad init`
+validate the result before writing, so the file can never be left in that
+state.
+
+Two projects on *different* directories that happen to be one repository —
+worktrees — are legal. See
+[One repository, two projects](#one-repository-two-projects).
 
 ### First time setup
 
@@ -80,13 +118,13 @@ touch ~/.config/shad/shad.toml
 
 ### Managing config from the CLI
 
-`shad config` reads and edits `~/.config/shad/shad.toml` without opening an editor.
+`shad config` reads and edits the resolved config file without opening an editor.
 
 | Command | Description |
 |---|---|
 | `shad config` / `shad config show` | Print a rendered summary of defaults and projects |
 | `shad config show --raw` | Print the file contents as-is |
-| `shad config path` | Print the config file path |
+| `shad config path` | Print the resolved config file path |
 | `shad config keys` | Print every settable key, one per line |
 | `shad config get <key>` | Print one value; a table is expanded into dotted lines |
 | `shad config set <key> <value>` | Set one value |
@@ -220,6 +258,7 @@ shad projects alvr db stop
 shad git sync                     # every configured project
 shad git sync tin                 # every project in the tin group
 shad git sync tin shad            # one project
+shad git sync --switch            # also check out the default branch
 shad git sync --dry-run           # preview; deletes nothing
 shad git sync --yes               # skip the confirmation prompt
 
@@ -248,6 +287,7 @@ default, or over the projects you name.
 | `shad git sync` | Sync every configured project |
 | `shad git sync <name>` | Sync one top-level project, or a whole group |
 | `shad git sync <group> <name>` | Sync one grouped project |
+| `shad git sync --switch` | Also check out the default branch in each project |
 | `shad git sync --dry-run` | Report what would change; delete nothing |
 | `shad git sync --yes` | Apply the deletions without the prompt |
 
@@ -267,6 +307,29 @@ For each project, in order:
 Steps 1 and 2 are applied immediately. Steps 3 and 4 are listed first and ask
 for one confirmation covering the whole run.
 
+### Checking out the default branch
+
+By default `shad git sync` never touches a working tree. It advances the
+default branch ref underneath you; if you are on `feat/x`, you stay on
+`feat/x`.
+
+Pass `--switch` to also check out the default branch in each project's main
+worktree. It runs after the fast-forward, so the checkout lands directly on
+the new tip.
+
+A project is skipped, with the reason, when it cannot be switched safely:
+
+- The working tree has uncommitted changes. Nothing is stashed or discarded.
+- `HEAD` is detached.
+- The default branch is checked out in another worktree.
+- There is no local copy of the default branch. It is never created.
+
+Switching also **un-pins the branch it leaves behind**. A branch is normally
+kept because the main worktree has it checked out; once you are on the default
+branch, that branch is a deletion candidate like any other, and can be removed
+in the same run if it qualifies. It still appears in the confirmation table
+first, and the deletion rules do not change.
+
 **Declining the prompt does not undo the fetch or the fast-forward.** Only the
 deletions are gated.
 
@@ -281,7 +344,8 @@ them, because by commit ancestry a squashed branch really is unmerged.
 These are never deleted:
 
 - The default branch.
-- A branch checked out in a worktree that is staying.
+- A branch checked out in a worktree that is staying. With `--switch`, the
+  branch you were on stops counting as checked out.
 - A branch with commits that are not on its upstream.
 - A branch that never had an upstream.
 - A branch whose upstream disappeared before this run, because whether its
@@ -302,6 +366,34 @@ recovery path until the next `git gc`.
 A repository is skipped, with the reason, when it is not a git repository, is
 bare, is a path inside a repository rather than its root, or has an operation
 in progress. One project failing never stops the others.
+
+### One repository, two projects
+
+Two configured projects can be one repository — a linked worktree shares its
+ref store, object store and branch list with the main worktree:
+
+```toml
+[projects.myproj]
+path = "~/src/myproj"          # main worktree
+
+[projects.login]
+path = "~/src/myproj-login"    # git worktree add, on feat/login
+```
+
+Both are valid projects and both get their own tmux session. `shad git sync`
+syncs the repository once and reports the other:
+
+```
+  ● login  same repository as myproj
+```
+
+Identity is `git rev-parse --git-common-dir`, so two *clones* of the same
+remote are correctly treated as two repositories and both are synced — they
+have separate local branches. The project configured at the repository root is
+preferred over one configured at a linked worktree.
+
+Two projects pointing at the *same directory* are a config error, rejected at
+load time by every command.
 
 `--dry-run` still fetches — that is how the report is accurate — but it does
 not prune, so a preview never consumes the evidence the real run needs.

@@ -25,13 +25,95 @@ Maximum supported depth: group → project  (2 levels).
 
 from __future__ import annotations
 
+import os
+import sys
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from shad.shared.errors import ShadError
 
-CONFIG_PATH = Path.home() / ".config" / "shad" / "shad.toml"
+# ── where the config lives ────────────────────────────────────────────────
+
+APP_NAME = "shad"
+CONFIG_NAME = "shad.toml"
+
+# Full path to a config file. Overrides the per-OS default entirely, including
+# the directory, so a scratch config need not live in a config directory.
+CONFIG_ENV = "SHAD_CONFIG"
+
+
+
+def legacy_config_dir() -> Path:
+    """
+    The pre-1.0 location, used on every OS.
+
+    Kept as a fallback so an existing install is not silently orphaned when the
+    per-OS default moves out from under it. Resolved at call time, like every
+    other path here, so HOME is read from the running process.
+    """
+    return Path.home() / ".config" / APP_NAME
+
+
+def default_config_dir() -> Path:
+    """
+    The per-OS directory shad stores its config in, before any override.
+
+      Linux/BSD   $XDG_CONFIG_HOME/shad   (default ~/.config/shad)
+      macOS       ~/Library/Application Support/shad
+      Windows     %APPDATA%\\shad
+
+    XDG_CONFIG_HOME is honoured only when it is absolute, as the spec requires;
+    a relative value would resolve against the current directory and put the
+    config somewhere different for every invocation.
+
+    The branch keys off sys.platform, not os.name: pathlib dispatches on
+    os.name, so a test that patched it could not construct a path at all.
+    Cygwin reports "cygwin" and is POSIX-shaped, so it takes the XDG branch.
+    """
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / APP_NAME
+    if sys.platform == "win32":
+        appdata = os.environ.get("APPDATA")
+        base = Path(appdata) if appdata else Path.home() / "AppData" / "Roaming"
+        return base / APP_NAME
+
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    base = Path(xdg) if xdg and Path(xdg).is_absolute() else Path.home() / ".config"
+    return base / APP_NAME
+
+
+def config_path() -> Path:
+    """
+    Resolve the config file to use. Precedence, highest first:
+
+      1. $SHAD_CONFIG          — an explicit file path
+      2. the per-OS default    — see default_config_dir()
+      3. ~/.config/shad/shad.toml, when it exists and (2) does not
+
+    Rule 3 only ever applies where (2) is somewhere else — macOS and Windows —
+    and only when that file is actually there, so it never invents a path.
+    Writers (`shad init`, `shad config set`) get the same answer as readers,
+    which is what keeps an existing config from being shadowed by a new empty
+    one in the per-OS location.
+
+    Resolved on every call rather than at import, so the environment a process
+    actually starts with is the one that decides.
+    """
+    override = os.environ.get(CONFIG_ENV)
+    if override:
+        return Path(override).expanduser()
+
+    preferred = default_config_dir() / CONFIG_NAME
+    if preferred.exists():
+        return preferred
+
+    legacy = legacy_config_dir() / CONFIG_NAME
+    if legacy.exists():
+        return legacy
+
+    return preferred
+
 
 OC_POSITIONS = ("top", "bottom", "left")
 HARNESSES = ("opencode", "claude")
@@ -94,7 +176,9 @@ def _parse_project(
     )
 
 
-def load(path: Path = CONFIG_PATH) -> Config:
+def load(path: Path | None = None) -> Config:
+    if path is None:
+        path = config_path()
     if not path.exists():
         raise ShadError(
             f"config file not found: {path}\n"
@@ -157,7 +241,39 @@ def load(path: Path = CONFIG_PATH) -> Config:
                 )
             groups[key] = group_projects
 
-    return Config(defaults=defaults, projects=projects, groups=groups)
+    cfg = Config(defaults=defaults, projects=projects, groups=groups)
+    _reject_duplicate_paths(cfg)
+    return cfg
+
+
+def _reject_duplicate_paths(cfg: Config) -> None:
+    """
+    Refuse a config where two projects name the same directory.
+
+    A project is a directory plus a session, so two entries on one directory
+    are a mistake in the file, not a layout: `shad projects` would offer two
+    names for the same place, and `shad git sync` would plan the same
+    repository twice and report the second pass as failures.
+
+    Paths are compared after expanduser+resolve, which catches `~`, a relative
+    entry, and the `/home` -> `/var/home` symlink. This is a property of the
+    config text alone — unlike repository identity, it cannot start being true
+    because of something that happened on disk — so failing hard is safe.
+
+    Two *worktrees* or two *clones* of one repository are different
+    directories and stay legal. `shad git sync` handles the shared-ref-store
+    case by deduplicating on --git-common-dir, not by rejecting the config.
+    """
+    seen: dict[Path, str] = {}
+    for project in all_projects(cfg):
+        resolved = project.path.expanduser().resolve()
+        first = seen.get(resolved)
+        if first is not None:
+            raise ShadError(
+                f"'{first}' and '{project.display_name}' both point at {resolved}\n"
+                f"       two projects must not name the same directory"
+            )
+        seen[resolved] = project.display_name
 
 
 def resolve_prefix(candidates: list[str], token: str) -> str | None:
@@ -181,10 +297,9 @@ def resolve_prefix(candidates: list[str], token: str) -> str | None:
 
 @dataclass
 class Target:
-    """The projects named by 0-2 CLI tokens, plus what those tokens named."""
+    """The projects named by 0-2 CLI tokens."""
 
     projects: list[Project]
-    group: str | None = None  # set when the tokens named a whole group
 
 
 def all_projects(cfg: Config) -> list[Project]:
@@ -219,10 +334,7 @@ def resolve_target(
         if match in cfg.projects:
             return Target(projects=[cfg.projects[match]])
         group = cfg.groups[match]
-        return Target(
-            projects=[group[key] for key in sorted(group)],
-            group=match,
-        )
+        return Target(projects=[group[key] for key in sorted(group)])
 
     if len(tokens) == 2:
         group_token, proj_token = tokens
