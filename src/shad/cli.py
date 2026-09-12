@@ -297,7 +297,10 @@ def build_parser() -> argparse.ArgumentParser:
         description=(
             "Print the bash completion script to stdout.\n\n"
             "To install:\n"
-            "  shad completion bash >> ~/.bashrc && source ~/.bashrc"
+            "  echo 'source <(shad completion bash)' >> ~/.bashrc\n\n"
+            "Source the script rather than pasting its text into a startup file.\n"
+            "A pasted copy keeps completing the command surface that existed when\n"
+            "it was written."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )

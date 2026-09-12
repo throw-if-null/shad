@@ -405,8 +405,18 @@ Requires git 2.36 or newer.
 `shad` supports tab completion for bash.
 
 ```sh
-shad completion bash >> ~/.bashrc && source ~/.bashrc
+echo 'source <(shad completion bash)' >> ~/.bashrc && source ~/.bashrc
 ```
+
+Source the script; do not append its text to a startup file. A pasted copy is
+a snapshot. It keeps offering the command surface that existed when it was
+written, so after an upgrade it offers removed options and hides new
+subcommands. Sourcing regenerates it from the installed `shad` on every shell
+start.
+
+Completion covers subcommands, project and group names, actions, config keys,
+and config values. It reads project names from `shad config keys`, honouring
+`--config PATH` when that option precedes the subcommand.
 
 ## tmux cheat sheet
 
