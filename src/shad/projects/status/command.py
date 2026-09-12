@@ -22,12 +22,11 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from rich import box
 from rich.console import Console
-from rich.table import Table
 from rich.text import Text
 
 from shad.shared.config import Project
+from shad.shared.render import make_table
 from shad.shared.tmux import list_project_sessions, tmux_server_running
 
 console = Console()
@@ -102,29 +101,11 @@ _LATEST_FETCHERS: dict[str, Callable[[], str | None]] = {
 }
 
 
-# ── table helpers ─────────────────────────────────────────────────────────
-
-
-def _make_table(title: str) -> Table:
-    t = Table(
-        title=title,
-        box=box.ROUNDED,
-        show_header=False,
-        title_justify="left",
-        title_style="bold cyan",
-        border_style="bright_black",
-        pad_edge=True,
-        show_edge=True,
-        padding=(0, 1),
-    )
-    return t
-
-
 # ── section builders ──────────────────────────────────────────────────────
 
 
 def _print_tmux(project: Project) -> None:
-    t = _make_table("tmux")
+    t = make_table("tmux")
     running = list_project_sessions(project.session)
     if not running:
         if not tmux_server_running():
@@ -157,7 +138,7 @@ def _print_git(path: Path) -> None:
         console.print(Text("  (not a git repository)", style="dim"))
         return
 
-    t = _make_table("git")
+    t = make_table("git")
 
     branch = _capture(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=path)
     t.add_row(Text("branch", style="dim"), Text(branch or "unknown", style="dim"))
@@ -271,7 +252,7 @@ def _print_runtimes(path: Path) -> None:
             return "yellow"
         return "green"
 
-    t = _make_table("runtimes")
+    t = make_table("runtimes")
     t.add_column(style="dim")  # name
     t.add_column()  # installed
     t.add_column()  # latest
@@ -297,7 +278,7 @@ def _print_opencode() -> None:
     version = _capture(["opencode", "--version"])
     if not version:
         return
-    t = _make_table("opencode")
+    t = make_table("opencode")
     t.add_row(Text("version", style="dim"), Text(version.splitlines()[0]))
     console.print(t)
 

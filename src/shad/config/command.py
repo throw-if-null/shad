@@ -27,15 +27,14 @@ import tempfile
 import tomllib
 from pathlib import Path
 
-from rich import box
 from rich.console import Console
-from rich.table import Table
 from rich.text import Text
 
 from shad.config import toml_edit
 from shad.config.schema import PATH, coerce, field_for, infer, known_keys
-from shad.shared.config import CONFIG_PATH, Config, load
+from shad.shared.config import Config, config_path, load
 from shad.shared.errors import ShadError
+from shad.shared.render import make_table
 
 console = Console()
 err_console = Console(stderr=True)
@@ -124,22 +123,8 @@ def _commit(path: Path, text: str, *, hint: str | None = None) -> None:
 # ── show ──────────────────────────────────────────────────────────────────
 
 
-def _make_table(title: str) -> Table:
-    return Table(
-        title=title,
-        box=box.ROUNDED,
-        show_header=False,
-        title_justify="left",
-        title_style="bold cyan",
-        border_style="bright_black",
-        pad_edge=True,
-        show_edge=True,
-        padding=(0, 1),
-    )
-
-
 def _print_defaults(cfg: Config, raw: dict) -> None:
-    table = _make_table("defaults")
+    table = make_table("defaults")
     configured = raw.get("defaults", {})
     if not isinstance(configured, dict):
         configured = {}
@@ -156,7 +141,7 @@ def _print_defaults(cfg: Config, raw: dict) -> None:
 
 
 def _print_projects(cfg: Config) -> None:
-    table = _make_table("projects")
+    table = make_table("projects")
     table.add_column(style="bright_white")   # name
     table.add_column(overflow="fold")        # path
     table.add_column(style="dim")            # session
@@ -384,7 +369,7 @@ def _validate(path: Path) -> None:
 
 
 def cmd_config(args: argparse.Namespace, path: Path | None = None) -> None:
-    target = path or CONFIG_PATH
+    target = path or config_path()
     action = getattr(args, "config_action", None) or "show"
 
     if action == "show":

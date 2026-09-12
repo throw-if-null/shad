@@ -10,6 +10,10 @@ shad projects <group> <name>             # open project inside a group
 shad projects <name> <action>            # run action on top-level project
 shad projects <group> <name> <action>    # run action on grouped project
 shad config <action> [args]              # inspect or edit shad.toml
+shad git sync [<group>] [<name>]         # git maintenance across projects
+
+Config file: --config PATH, else $SHAD_CONFIG, else the per-OS default
+(~/.config/shad/shad.toml on Linux). `shad config path` prints the resolved one.
 
 Actions: status, stop
 
@@ -20,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 from rich.console import Console
 from rich.text import Text
@@ -28,6 +33,7 @@ from shad import __version__
 from shad.cheat.command import cmd_cheat
 from shad.completion.command import print_completion
 from shad.config.command import cmd_config
+from shad.git.command import cmd_git
 from shad.init.command import cmd_init
 from shad.projects.open.banner import print_banner
 from shad.projects.open.command import open_project
@@ -173,6 +179,14 @@ def build_parser() -> argparse.ArgumentParser:
         description="Attach or create project-specific tmux sessions.",
     )
     parser.add_argument("--version", action="version", version=f"shad {__version__}")
+    parser.add_argument(
+        "--config",
+        metavar="PATH",
+        help=(
+            "Config file to use, overriding $SHAD_CONFIG and the per-OS default. "
+            "Must precede the subcommand."
+        ),
+    )
 
     sub = parser.add_subparsers(dest="command", metavar="<command>")
 
@@ -202,6 +216,81 @@ def build_parser() -> argparse.ArgumentParser:
         help="[group] [project] [action]  — action is one of: status, stop",
     )
 
+    p_git = sub.add_parser(
+        "git",
+        help="Run git maintenance across configured projects",
+        description=(
+            "Git maintenance across one, some, or all configured projects.\n\n"
+            "Actions:\n"
+            "  sync     fetch, fast-forward, and prune dead branches and worktrees\n\n"
+            "Examples:\n"
+            "  shad git sync                     every configured project\n"
+            "  shad git sync kb                  one top-level project\n"
+            "  shad git sync alvr                every project in the alvr group\n"
+            "  shad git sync alvr db             one grouped project\n\n"
+            "Prefix matching is supported at each level."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    git_sub = p_git.add_subparsers(dest="git_action", metavar="<action>")
+
+    p_git_sync = git_sub.add_parser(
+        "sync",
+        help="Fetch, fast-forward, and prune dead branches and worktrees",
+        description=(
+            "For each targeted project:\n"
+            "  1. git fetch --prune\n"
+            "  2. fast-forward the default branch (skipped if diverged or dirty)\n"
+            "  3. delete local branches that are merged, or whose upstream was\n"
+            "     pruned in this run after every commit had been pushed\n"
+            "  4. prune worktree records whose directory is gone, and remove\n"
+            "     clean worktrees whose branch is being deleted\n\n"
+            "Steps 1 and 2 are applied immediately and are NOT undone if you\n"
+            "decline the prompt. Only the deletions in steps 3 and 4 are gated.\n\n"
+            "Never deleted: the default branch, a branch checked out in a\n"
+            "worktree that is staying, a branch with unpushed commits, a branch\n"
+            "that never had an upstream, a locked worktree, or a worktree with\n"
+            "local changes.\n\n"
+            "Options:\n"
+            "  --switch    check out the default branch in each main worktree\n"
+            "  --yes       skip the confirmation prompt (use this in scripts)\n"
+            "  --dry-run   report only; still fetches, but deletes nothing\n\n"
+            "--switch is the only step that touches a working tree. A project\n"
+            "is skipped, with the reason, when its tree is dirty, its HEAD is\n"
+            "detached, the default branch is held by another worktree, or it\n"
+            "has no local copy of that branch. Switching also un-pins the\n"
+            "branch it leaves behind, so that branch can be deleted in the\n"
+            "same run if it qualifies.\n\n"
+            "Examples:\n"
+            "  shad git sync\n"
+            "  shad git sync tin shad --dry-run\n"
+            "  shad git sync --switch\n"
+            "  shad git sync --yes"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_git_sync.add_argument(
+        "name",
+        nargs="*",
+        metavar="NAME",
+        help="[group] [project]  — omit to target every configured project",
+    )
+    p_git_sync.add_argument(
+        "--switch",
+        action="store_true",
+        help="Check out the default branch in each project's main worktree",
+    )
+    p_git_sync.add_argument(
+        "--yes",
+        action="store_true",
+        help="Skip the confirmation prompt and apply every listed deletion",
+    )
+    p_git_sync.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Report what would change; still fetches, but deletes nothing",
+    )
+
     p_completion = sub.add_parser(
         "completion",
         help="Print the bash completion script",
@@ -222,7 +311,7 @@ def build_parser() -> argparse.ArgumentParser:
         "init",
         help="Add a new project to the config interactively",
         description=(
-            "Interactive wizard that adds a new project to ~/.config/shad/shad.toml.\n"
+            "Interactive wizard that adds a new project to the resolved config file.\n"
             "Creates the config file with a commented [defaults] block if it does not exist yet.\n\n"
             "Options:\n"
             "  --install-deps  install missing tmux, opencode, and gitui dependencies on Fedora\n\n"
@@ -246,7 +335,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_config = sub.add_parser(
         "config",
-        help="Inspect or edit ~/.config/shad/shad.toml",
+        help="Inspect or edit the shad config file",
         description=(
             "Inspect and edit the shad config file.\n\n"
             "Actions:\n"
@@ -328,6 +417,11 @@ def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
 
+    # None means "resolve normally"; shared.config.config_path() then applies
+    # $SHAD_CONFIG and the per-OS default. Readers and writers get the same
+    # answer because they all go through it.
+    override = Path(args.config).expanduser() if args.config else None
+
     if args.command is None:
         print_banner()
         parser.print_help()
@@ -339,20 +433,22 @@ def main() -> None:
             return
 
         if args.command == "init":
-            cmd_init(install_deps=args.install_deps)
+            cmd_init(install_deps=args.install_deps, path=override)
             return
 
         if args.command == "cheat":
             sys.exit(cmd_cheat())
 
         if args.command == "config":
-            cmd_config(args)
+            cmd_config(args, path=override)
             return
 
-        cfg: Config = load()
+        cfg: Config = load(override)
 
         if args.command == "projects":
             cmd_projects(cfg, args)
+        elif args.command == "git":
+            cmd_git(cfg, args)
 
     except ShadError as exc:
         err_console.print(Text(f"✗ {exc}", style="bold red"))
