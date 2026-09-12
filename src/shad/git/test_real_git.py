@@ -25,7 +25,7 @@ from unittest.mock import patch
 from shad.git import apply, discover, refs
 from shad.git import command as C
 from shad.git import plan as planning
-from shad.git.model import BranchInfo
+from shad.git.model import BranchInfo, Worktree, WorktreeKept
 from shad.shared.config import Project
 
 _ISOLATE = {
@@ -582,6 +582,97 @@ class RepoDedupeTests(unittest.TestCase):
         self.assertEqual(deleted, ["feat/login"])
         self.assertEqual(removed, [str(linked)])
         self.assertEqual(failures, [])
+
+
+@unittest.skipUnless(shutil.which("git"), "git not installed")
+class BareWorktreeTests(unittest.TestCase):
+    """
+    A bare repository must stay unreachable, including through its worktrees.
+
+    discover() refuses a bare path directly, but a linked worktree re-roots
+    onto its main worktree — which for a bare-hub layout *is* the bare
+    directory. That would put a bare record at index 0 of every later worktree
+    scan and the user's own working directory at index 1, where
+    classify_worktrees treats it as a removal candidate.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.addCleanup(self.tmp.cleanup)
+
+        seed = self.root / "seed"
+        seed.mkdir()
+        _git(self.root, "init", "--quiet", "--initial-branch=main", str(seed))
+        _commit(seed, "README.md", "one\n", "Add readme")
+
+        self.bare = self.root / "repo.git"
+        _git(self.root, "clone", "--quiet", "--bare", str(seed), str(self.bare))
+        self.worktree = self.root / "wt-main"
+        _git(self.bare, "worktree", "add", "--quiet", str(self.worktree), "main")
+
+    def test_the_bare_directory_itself_is_refused(self) -> None:
+        with self.assertRaises(discover.NotUsable):
+            discover.discover(self.bare)
+
+    def test_a_worktree_of_a_bare_repository_is_refused(self) -> None:
+        with self.assertRaises(discover.NotUsable) as ctx:
+            discover.discover(self.worktree)
+        self.assertIn("bare repository", str(ctx.exception))
+
+    def test_the_project_is_skipped_rather_than_planned(self) -> None:
+        project = Project(
+            key="hub", group=None, path=self.worktree, session="hub"
+        )
+        plan = C.fetch_and_plan(project)
+        self.assertEqual(plan.status, "skipped")
+        # Above all: the user's own working directory is not a candidate.
+        self.assertEqual(plan.worktree_removals, [])
+
+
+@unittest.skipUnless(shutil.which("git"), "git not installed")
+class WorktreePruneAgreementTests(unittest.TestCase):
+    """shad must never plan a removal `git worktree prune` will not perform."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.addCleanup(self.tmp.cleanup)
+
+        self.repo = self.root / "repo"
+        self.repo.mkdir()
+        _git(self.root, "init", "--quiet", "--initial-branch=main", str(self.repo))
+        _commit(self.repo, "README.md", "one\n", "Add readme")
+        self.wt = self.root / "wt"
+        _git(self.repo, "worktree", "add", "--quiet", str(self.wt), "-b", "x")
+
+    def _classify(self):
+        worktrees = refs.list_worktrees(self.repo)
+        return planning.classify_worktrees(
+            self.repo, worktrees, deleting=set(), known_branches={"refs/heads/x"}
+        )
+
+    def test_a_deleted_directory_is_prunable_and_planned(self) -> None:
+        shutil.rmtree(self.wt)
+        # git marks this prunable immediately: the gitdir file points nowhere.
+        plan = self._classify()
+        self.assertEqual([str(w.path) for w in plan.remove], [str(self.wt)])
+        self.assertTrue(plan.remove[0].prune_only)
+
+    def test_a_missing_directory_git_will_not_prune_is_kept(self) -> None:
+        # Stand in for an unmounted disk: the directory is unreachable, but the
+        # admin record is intact, so git does not call it prunable.
+        records = refs.list_worktrees(self.repo)
+        intact = [w for w in records if w.path == self.wt]
+        self.assertTrue(intact and not intact[0].prunable)
+
+        gone = Worktree(path=self.root / "never-mounted", branch="refs/heads/x")
+        verdict = planning.classify_worktree(
+            self.repo, gone, deleting=set(), known_branches={"refs/heads/x"}
+        )
+        self.assertIsInstance(verdict, WorktreeKept)
+        assert isinstance(verdict, WorktreeKept)
+        self.assertIn("does not consider it prunable", verdict.reason)
 
 
 if __name__ == "__main__":

@@ -227,12 +227,20 @@ def has_full_refspec(repo: Path, remote: str) -> bool:
     With a narrowed refspec (a --single-branch clone), `origin/foo` is absent
     because it was never fetched, not because the server deleted it — so
     upstream-gone deletion must be disabled for that remote.
+
+    Both sides have to match. A refspec like
+    `+refs/heads/release/*:refs/remotes/origin/*` has the expected
+    destination but stores server branch `release/v1` at `origin/v1`, so
+    remote_branch_refs() would build `origin/release/v1`, find none of the
+    real tracking refs, and call every one of them stale.
     """
     result = git(repo, ["config", "--get-all", f"remote.{remote}.fetch"])
     if result.returncode != 0:
         return False
-    want = f":refs/remotes/{remote}/*"
-    return any(line.rstrip().endswith(want) for line in result.stdout.splitlines())
+    want = f"refs/heads/*:refs/remotes/{remote}/*"
+    return any(
+        line.strip().removeprefix("+") == want for line in result.stdout.splitlines()
+    )
 
 
 def default_branch(repo: Path, remote: str, *, allow_network: bool = True) -> str | None:

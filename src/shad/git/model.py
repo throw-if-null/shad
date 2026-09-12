@@ -102,9 +102,10 @@ class BranchInfo:
     """A branch the plan intends to delete."""
 
     name: str
-    sha: str
+    sha: str  # abbreviated, for display only
     reason: str  # "merged" | "pushed-then-gone"
     force: bool = False  # -D rather than -d
+    oid: str = ""  # full OID: the restore command and the TOCTOU re-verify
 
 
 @dataclass(frozen=True)
@@ -129,8 +130,10 @@ class WorktreeInfo:
 
     path: Path
     branch: str | None
-    reason: str  # "prunable" | "branch gone" | "branch merged"
-    prune_only: bool = False  # directory is gone; `worktree prune` handles it
+    # Printed verbatim in the confirmation table. One of git's own prunable
+    # reason, "branch is being deleted", or "branch gone".
+    reason: str
+    prune_only: bool = False  # git calls it prunable; `worktree prune` handles it
 
     @property
     def branch_name(self) -> str:

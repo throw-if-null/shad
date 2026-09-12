@@ -96,6 +96,16 @@ def discover(path: Path) -> Repo:
     worktrees = refs.list_worktrees(toplevel)
     if not worktrees:
         raise NotUsable("could not list worktrees")
+    if worktrees[0].bare:
+        # The bare check above only sees the configured path. A worktree of a
+        # bare repository re-roots onto the bare directory itself, which would
+        # put a bare record at index 0 of every later worktree scan — and the
+        # user's own working directory at index 1, where it becomes a removal
+        # candidate.
+        raise NotUsable(
+            "worktree of a bare repository: not supported\n"
+            f"       the repository is {worktrees[0].path}"
+        )
     return Repo(
         root=worktrees[0].path,
         common_dir=common_dir,
@@ -114,6 +124,11 @@ _IN_PROGRESS = (
 )
 
 
+# What in_progress() reports when git could not answer. Callers must treat it
+# exactly like a real operation: never removable.
+UNKNOWN_OPERATION = "unknown operation"
+
+
 def in_progress(worktree: Path) -> str | None:
     """
     Return the name of an operation in progress in *worktree*, or None.
@@ -121,6 +136,10 @@ def in_progress(worktree: Path) -> str | None:
     The marker files are per-worktree (they live in .git/worktrees/<id>/), so
     they must be located with --git-path rather than assumed under .git/.
     git status does not report in-progress state at all.
+
+    A git failure reports UNKNOWN_OPERATION, not None. This gate protects an
+    in-progress rebase from having its worktree removed, so "cannot tell" has
+    to fail the same direction as is_clean(): toward not touching anything.
     """
     args = ["rev-parse", "--path-format=absolute"]
     for marker, _ in _IN_PROGRESS:
@@ -128,11 +147,11 @@ def in_progress(worktree: Path) -> str | None:
 
     result = git(worktree, args)
     if result.returncode != 0:
-        return None
+        return UNKNOWN_OPERATION
 
     lines = result.stdout.splitlines()
     if len(lines) != len(_IN_PROGRESS):
-        return None
+        return UNKNOWN_OPERATION
     for (_, label), line in zip(_IN_PROGRESS, lines, strict=True):
         if Path(line.strip()).exists():
             return label

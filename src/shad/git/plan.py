@@ -98,14 +98,16 @@ def classify_branch(
         return kept("tracks a local branch")
 
     if branch.refname in merged:
-        return BranchInfo(name=name, sha=sha, reason="merged", force=False)
+        return BranchInfo(name=name, sha=sha, reason="merged", force=False, oid=branch.oid)
 
     if branch.upstream in pruned_oids:
         if not gone_allowed:
             return kept("narrow fetch refspec")
         pushed = refs.is_ancestor(repo, branch.oid, pruned_oids[branch.upstream])
         if pushed is True:
-            return BranchInfo(name=name, sha=sha, reason="pushed-then-gone", force=True)
+            return BranchInfo(
+                name=name, sha=sha, reason="pushed-then-gone", force=True, oid=branch.oid
+            )
         if pushed is False:
             return kept("upstream gone, has unpushed commits")
         return kept("upstream gone, last-known state unavailable")
@@ -185,13 +187,21 @@ def classify_worktree(
         suffix = f": {wt.locked_reason}" if wt.locked_reason else ""
         return kept(f"locked{suffix}")
 
-    if wt.prunable or not wt.path.is_dir():
+    if wt.prunable:
         return WorktreeInfo(
             path=wt.path,
             branch=branch,
             reason=wt.prunable_reason or "directory gone",
             prune_only=True,
         )
+
+    if not wt.path.is_dir():
+        # git did not call it prunable, so `git worktree prune` will not drop
+        # it — gc.worktreePruneExpire can hold a record open. Planning the
+        # removal anyway would promise something git refuses to do. Report it
+        # and leave it: a directory that is merely unreachable right now (an
+        # unmounted disk) must survive.
+        return kept("directory is missing, but git does not consider it prunable")
 
     if wt.detached or branch is None:
         if wt.head and not refs.any_ref_contains(repo, wt.head):

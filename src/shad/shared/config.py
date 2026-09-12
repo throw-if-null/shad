@@ -170,7 +170,10 @@ def _parse_project(
     return Project(
         key=key,
         group=group,
-        path=Path(data["path"]),
+        # Expanded here so every consumer agrees what a project path means:
+        # `~/src/x` is documented in shad.toml, and `git -C ~/src/x` does not
+        # expand it — the shell normally would.
+        path=Path(data["path"]).expanduser(),
         session=data.get("session", default_session),
         harness=harness,
     )

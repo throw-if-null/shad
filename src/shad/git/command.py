@@ -100,21 +100,28 @@ def fetch_and_plan(
         )
         return plan
 
-    before: dict[str, str] = {}
-    symrefs: set[str] = set()
     gone_allowed = False
 
     if remote is not None:
-        before, symrefs = refs.snapshot_remotes(root)
+        before, before_symrefs = refs.snapshot_remotes(root)
         result = apply.fetch(root, remote, prune=not dry_run)
         if not result.ok:
             plan.status = "failed"
             plan.detail = result.error
             return plan
 
-        after, symrefs = refs.snapshot_remotes(root)
+        after, after_symrefs = refs.snapshot_remotes(root)
+        # Union, not just the second snapshot: the applied path looks at refs
+        # present before and absent after, which can never appear in `after`'s
+        # symrefs, so filtering on that alone lets a pruned origin/HEAD through
+        # as a deletion-justifying last-known OID.
         pruned_oids = planning.stale_upstreams(
-            root, remote, before, after, symrefs, dry_run=dry_run
+            root,
+            remote,
+            before,
+            after,
+            before_symrefs | after_symrefs,
+            dry_run=dry_run,
         )
         if pruned_oids is None:
             plan.status = "failed"
@@ -271,7 +278,7 @@ def apply_plan(plan: ProjectPlan) -> ProjectOutcome:
         if current is None:
             outcome.failures.append(f"branch {branch.name}: already gone")
             continue
-        if current[:7] != branch.sha:
+        if current != branch.oid:
             outcome.failures.append(
                 f"branch {branch.name}: moved since the plan was made; skipped"
             )

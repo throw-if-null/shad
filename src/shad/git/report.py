@@ -218,14 +218,19 @@ def render_results(outcomes: list[ProjectOutcome]) -> None:
             if not printed:
                 console.print()
                 printed = True
-            # Deleting a branch drops its reflog, so this OID is the user's
-            # only recovery path until the next gc. Always show it.
+            # Deleting a branch drops its reflog, so this is the user's only
+            # recovery path until the next gc. The command carries the full
+            # OID: a 7-character prefix can be ambiguous in a large repository,
+            # and an undo that fails to resolve is no undo at all.
             console.print(
                 Text("  ✓ ", style="bold green")
                 + Text("deleted branch    ", style="dim")
                 + Text(branch.name, style="cyan")
                 + Text(f"  (was {branch.sha})", style="dim")
-                + Text(f"  restore: git branch {branch.name} {branch.sha}", style="dim")
+                + Text(
+                    f"  restore: git branch {branch.name} {branch.oid or branch.sha}",
+                    style="dim",
+                )
             )
         for failure in outcome.failures:
             if not printed:
@@ -243,6 +248,11 @@ def render_summary(run: SyncRun) -> None:
     worktrees = sum(len(o.removed_worktrees) for o in run.outcomes)
 
     console.print()
+    glyph = (
+        Text("  ✓ ", style="bold green")
+        if synced
+        else Text("  · ", style="dim")
+    )
     parts = [_plural(len(synced), "project") + " synced"]
     if branches:
         parts.append(_plural(branches, "branch", "branches") + " deleted")
@@ -250,7 +260,7 @@ def render_summary(run: SyncRun) -> None:
         parts.append(_plural(worktrees, "worktree") + " removed")
     if skipped:
         parts.append(_plural(len(skipped), "project") + " skipped")
-    console.print(Text("  ✓ ", style="bold green") + Text("   ".join(parts), style="dim"))
+    console.print(glyph + Text("   ".join(parts), style="dim"))
 
     if failed:
         console.print(

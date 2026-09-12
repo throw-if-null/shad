@@ -39,8 +39,13 @@ def _plan(
     )
 
 
-def _branch(name: str = "feat", sha: str = "abc1234", force: bool = False) -> BranchInfo:
-    return BranchInfo(name=name, sha=sha, reason="merged", force=force)
+def _branch(
+    name: str = "feat",
+    sha: str = "abc1234",
+    force: bool = False,
+    oid: str = "abc1234def",
+) -> BranchInfo:
+    return BranchInfo(name=name, sha=sha, reason="merged", force=force, oid=oid)
 
 
 def _resolve_all(projects: list[Project], plans: list[ProjectPlan | None]):
@@ -241,6 +246,18 @@ class ApplyPlanTests(unittest.TestCase):
             outcome = C.apply_plan(plan)
         delete.assert_not_called()
         self.assertEqual(outcome.deleted_branches, [])
+        self.assertIn("moved since the plan was made", outcome.failures[0])
+
+    def test_a_branch_sharing_a_short_prefix_is_not_mistaken_for_the_plan(self) -> None:
+        # The re-verification compares full OIDs. Two objects can share a
+        # 7-character prefix, and -D has no net.
+        plan = _plan(branches=[_branch(sha="abc1234", oid="abc1234def")])
+        with (
+            patch.object(refs, "ref_oid", return_value="abc1234999"),
+            patch.object(apply, "delete_branch") as delete,
+        ):
+            outcome = C.apply_plan(plan)
+        delete.assert_not_called()
         self.assertIn("moved since the plan was made", outcome.failures[0])
 
     def test_a_branch_that_vanished_is_reported(self) -> None:

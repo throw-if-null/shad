@@ -116,5 +116,29 @@ class DiscoverTests(unittest.TestCase):
         self.assertEqual(found.common_dir, (main / ".git").resolve())
 
 
+class InProgressFailureTests(unittest.TestCase):
+    """'Cannot tell' has to fail the same direction as is_clean()."""
+
+    def test_a_git_failure_reports_an_operation_rather_than_none(self) -> None:
+        # Returning None here would let classify_worktree fall through to
+        # is_clean — and a mid-rebase tree can be clean — so a worktree with a
+        # live rebase would be queued for removal.
+        with patch.object(discover, "git", return_value=_completed(128, stderr="boom")):
+            self.assertEqual(
+                discover.in_progress(REPO), discover.UNKNOWN_OPERATION
+            )
+
+    def test_short_output_reports_an_operation_rather_than_none(self) -> None:
+        with patch.object(discover, "git", return_value=_completed(0, stdout="only-one\n")):
+            self.assertEqual(
+                discover.in_progress(REPO), discover.UNKNOWN_OPERATION
+            )
+
+    def test_a_quiet_worktree_still_reports_none(self) -> None:
+        paths = "\n".join(f"/tmp/repo/.git/{m}" for m, _ in discover._IN_PROGRESS)
+        with patch.object(discover, "git", return_value=_completed(0, stdout=paths + "\n")):
+            self.assertIsNone(discover.in_progress(REPO))
+
+
 if __name__ == "__main__":
     unittest.main()

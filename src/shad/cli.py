@@ -311,7 +311,7 @@ def build_parser() -> argparse.ArgumentParser:
         "init",
         help="Add a new project to the config interactively",
         description=(
-            "Interactive wizard that adds a new project to ~/.config/shad/shad.toml.\n"
+            "Interactive wizard that adds a new project to the resolved config file.\n"
             "Creates the config file with a commented [defaults] block if it does not exist yet.\n\n"
             "Options:\n"
             "  --install-deps  install missing tmux, opencode, and gitui dependencies on Fedora\n\n"
@@ -335,7 +335,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_config = sub.add_parser(
         "config",
-        help="Inspect or edit ~/.config/shad/shad.toml",
+        help="Inspect or edit the shad config file",
         description=(
             "Inspect and edit the shad config file.\n\n"
             "Actions:\n"
