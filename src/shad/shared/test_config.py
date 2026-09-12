@@ -412,36 +412,39 @@ class ConfigPathTests(unittest.TestCase):
         ):
             self.assertEqual(config_path(), preferred)
 
+    def _resolve(self, platform: str = "darwin") -> Path:
+        with (
+            patch("shad.shared.config.sys.platform", platform),
+            patch.dict("shad.shared.config.os.environ", {}, clear=True),
+            patch("shad.shared.config.default_config_dir", return_value=self.root / "os"),
+            patch("shad.shared.config.legacy_config_dir", return_value=self.root / "legacy"),
+        ):
+            return config_path()
+
     def test_an_existing_legacy_config_is_not_orphaned(self) -> None:
         # The case that matters on macOS and Windows: the per-OS default moved,
         # but the user's real config is still in ~/.config/shad.
         legacy = self._touch(self.root / "legacy" / "shad.toml")
-        with (
-            patch.dict("shad.shared.config.os.environ", {}, clear=True),
-            patch("shad.shared.config.default_config_dir", return_value=self.root / "os"),
-            patch("shad.shared.config.legacy_config_dir", return_value=self.root / "legacy"),
-        ):
-            self.assertEqual(config_path(), legacy)
+        self.assertEqual(self._resolve("darwin"), legacy)
+        self.assertEqual(self._resolve("win32"), legacy)
+
+    def test_an_explicit_xdg_location_is_never_overridden_by_legacy(self) -> None:
+        # On an XDG platform ~/.config *is* the default, so default_config_dir
+        # returning something else means XDG_CONFIG_HOME was set deliberately.
+        # Falling back would silently ignore the directory the user chose, for
+        # readers and writers alike.
+        self._touch(self.root / "legacy" / "shad.toml")
+        self.assertEqual(self._resolve("linux"), self.root / "os" / "shad.toml")
 
     def test_the_per_os_default_wins_over_legacy_when_both_exist(self) -> None:
         preferred = self._touch(self.root / "os" / "shad.toml")
         self._touch(self.root / "legacy" / "shad.toml")
-        with (
-            patch.dict("shad.shared.config.os.environ", {}, clear=True),
-            patch("shad.shared.config.default_config_dir", return_value=self.root / "os"),
-            patch("shad.shared.config.legacy_config_dir", return_value=self.root / "legacy"),
-        ):
-            self.assertEqual(config_path(), preferred)
+        self.assertEqual(self._resolve("darwin"), preferred)
 
     def test_with_nothing_on_disk_it_names_the_per_os_default(self) -> None:
         # Never returns the legacy path as a *destination* — `shad init` would
         # then write to the old location on a fresh install.
-        with (
-            patch.dict("shad.shared.config.os.environ", {}, clear=True),
-            patch("shad.shared.config.default_config_dir", return_value=self.root / "os"),
-            patch("shad.shared.config.legacy_config_dir", return_value=self.root / "legacy"),
-        ):
-            self.assertEqual(config_path(), self.root / "os" / "shad.toml")
+        self.assertEqual(self._resolve("darwin"), self.root / "os" / "shad.toml")
 
 
 class LoadUsesTheResolverTests(unittest.TestCase):

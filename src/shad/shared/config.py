@@ -89,10 +89,12 @@ def config_path() -> Path:
 
       1. $SHAD_CONFIG          — an explicit file path
       2. the per-OS default    — see default_config_dir()
-      3. ~/.config/shad/shad.toml, when it exists and (2) does not
+      3. ~/.config/shad/shad.toml, on macOS and Windows only, when it exists
+         and (2) does not
 
-    Rule 3 only ever applies where (2) is somewhere else — macOS and Windows —
-    and only when that file is actually there, so it never invents a path.
+    Rule 3 is restricted to the platforms whose default moved away from
+    ~/.config, and only fires when that file is actually there, so it never
+    invents a path and never overrides an explicit $XDG_CONFIG_HOME.
     Writers (`shad init`, `shad config set`) get the same answer as readers,
     which is what keeps an existing config from being shadowed by a new empty
     one in the per-OS location.
@@ -108,9 +110,15 @@ def config_path() -> Path:
     if preferred.exists():
         return preferred
 
-    legacy = legacy_config_dir() / CONFIG_NAME
-    if legacy.exists():
-        return legacy
+    if sys.platform in ("darwin", "win32"):
+        # Only these platforms moved away from ~/.config, so only here can an
+        # existing install be stranded. On an XDG platform ~/.config *is* the
+        # default, which makes the fallback either redundant (XDG_CONFIG_HOME
+        # unset, so it is already `preferred`) or wrong — silently ignoring a
+        # directory the user explicitly chose.
+        legacy = legacy_config_dir() / CONFIG_NAME
+        if legacy.exists():
+            return legacy
 
     return preferred
 

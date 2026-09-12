@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 
 from shad.git import apply, refs
 from shad.git import command as C
-from shad.git.model import BranchInfo, ProjectPlan, Repo, WorktreeInfo
+from shad.git.model import BranchInfo, ProjectOutcome, ProjectPlan, Repo, WorktreeInfo
 from shad.shared.config import Config, Defaults, Project
 from shad.shared.errors import ShadError
 
@@ -288,6 +288,95 @@ class ApplyPlanTests(unittest.TestCase):
             outcome = C.apply_plan(plan)
         self.assertEqual([b.name for b in outcome.deleted_branches], ["b"])
         self.assertIn("branch a: not fully merged", outcome.failures)
+class FailureIsolationTests(unittest.TestCase):
+    """
+    A timeout in one project must never abandon the others.
+
+    run.git raises ShadError on timeout, and two phases now run on the main
+    thread outside the pool's per-future guard: the serial discovery pass and
+    the apply loop.
+    """
+
+    def test_a_discovery_timeout_fails_only_its_own_project(self) -> None:
+        projects = [_project("a"), _project("b"), _project("c")]
+
+        def fake(path: Path) -> Repo:
+            if path == projects[1].path:
+                raise ShadError("git rev-parse timed out after 15s")
+            return Repo(root=path, common_dir=path / ".git")
+
+        plans: list[ProjectPlan | None] = [None] * 3
+        with patch.object(C.discover, "discover", side_effect=fake):
+            jobs = C._resolve(projects, plans)
+
+        self.assertEqual([p.key for _i, p, _r in jobs], ["a", "c"])
+        assert plans[1] is not None
+        self.assertEqual(plans[1].status, "failed")
+        self.assertIn("timed out", plans[1].detail or "")
+
+    def test_an_apply_timeout_fails_only_its_own_project(self) -> None:
+        good, bad = _plan(_project("a"), branches=[_branch()]), _plan(
+            _project("b"), branches=[_branch()]
+        )
+
+        def fake(plan: ProjectPlan) -> ProjectOutcome:
+            if plan.project.key == "b":
+                raise ShadError("git for-each-ref timed out after 15s")
+            return ProjectOutcome(plan=plan, deleted_branches=list(plan.branch_deletions))
+
+        with (
+            patch.object(C, "require_git"),
+            patch.object(C, "_resolve", side_effect=_resolve_all),
+            patch.object(C, "fetch_and_plan", side_effect=lambda p, **_k: {"a": good, "b": bad}[p.key]),
+            patch.object(C, "apply_plan", side_effect=fake),
+            patch.object(C, "report"),
+            patch.object(C, "console"),
+        ):
+            run = C.sync_projects([_project("a"), _project("b")], yes=True)
+
+        by_key = {o.plan.project.key: o for o in run.outcomes}
+        self.assertEqual([b.name for b in by_key["a"].deleted_branches], ["feat"])
+        self.assertEqual(by_key["b"].deleted_branches, [])
+        self.assertIn("timed out", by_key["b"].failures[0])
+
+    def test_an_oid_timeout_keeps_the_deletions_already_applied(self) -> None:
+        # apply_plan must not discard its own accumulated outcome either.
+        plan = _plan(branches=[_branch("first"), _branch("second")])
+        calls = {"n": 0}
+
+        def fake_oid(_root: Path, refname: str) -> str:
+            calls["n"] += 1
+            if calls["n"] > 1:
+                raise ShadError("git for-each-ref timed out after 15s")
+            return "abc1234def"
+
+        with (
+            patch.object(refs, "ref_oid", side_effect=fake_oid),
+            patch.object(apply, "delete_branch", return_value=None),
+            patch.object(apply, "prune_worktrees", return_value=None),
+        ):
+            outcome = C.apply_plan(plan)
+
+        self.assertEqual([b.name for b in outcome.deleted_branches], ["first"])
+        self.assertIn("timed out", outcome.failures[0])
+
+    def test_an_unreadable_worktree_list_fails_the_project(self) -> None:
+        # Returning [] would mean "no branch is checked out anywhere", which
+        # would offer branches held by a linked worktree for deletion.
+        project = _project("kb")
+        with (
+            patch.object(C.discover, "discover", return_value=Repo(root=ROOT, common_dir=ROOT / ".git")),
+            patch.object(C.discover, "in_progress", return_value=None),
+            patch.object(refs, "list_remotes", return_value=[]),
+            patch.object(refs, "list_worktrees", return_value=[]),
+        ):
+            plan = C.fetch_and_plan(project)
+
+        self.assertEqual(plan.status, "failed")
+        self.assertEqual(plan.detail, "could not list worktrees")
+        self.assertEqual(plan.branch_deletions, [])
+
+
 class CmdGitTests(unittest.TestCase):
     def setUp(self) -> None:
         self.cfg = Config(

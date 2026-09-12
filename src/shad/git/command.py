@@ -134,6 +134,14 @@ def fetch_and_plan(
         pruned_oids = {}
 
     worktrees = refs.list_worktrees(root)
+    if not worktrees:
+        # Every usable repository has at least a main worktree, so an empty
+        # list means `git worktree list` failed. Carrying on would treat every
+        # branch as unchecked out: branches held by a linked worktree would be
+        # offered for deletion, and --switch would lose its holder gate.
+        plan.status = "failed"
+        plan.detail = "could not list worktrees"
+        return plan
     checked_out = {w.branch: w.path for w in worktrees if w.branch}
 
     default = (
@@ -197,7 +205,7 @@ def fetch_and_plan(
     # Only the main worktree pins a branch outright. A branch held by a linked
     # worktree is still a delete candidate here, because that worktree may
     # itself be removable — reconcile() settles the pair below.
-    main_worktree = worktrees[0].path if worktrees else root
+    main_worktree = worktrees[0].path
     pinned = {ref: path for ref, path in checked_out.items() if path == main_worktree}
 
     branch_plan = planning.classify_branches(
@@ -253,7 +261,11 @@ def apply_plan(plan: ProjectPlan) -> ProjectOutcome:
             # own opinion — it keeps a record whose gitdir file is recent, and
             # honours gc.worktreePruneExpire — so a clean exit is not proof.
             # Claiming a removal that did not happen hides the leftover record.
-            remaining = {w.path for w in refs.list_worktrees(root)}
+            try:
+                remaining = {w.path for w in refs.list_worktrees(root)}
+            except ShadError as exc:
+                outcome.failures.append(f"worktree prune: {exc}")
+                remaining = {w.path for w in prune_only}  # claim nothing
             for worktree in prune_only:
                 if worktree.path in remaining:
                     outcome.failures.append(
@@ -274,7 +286,14 @@ def apply_plan(plan: ProjectPlan) -> ProjectOutcome:
     for branch in plan.branch_deletions:
         # Re-verify the tip: the user may have been at the prompt while another
         # pane committed. This is the only TOCTOU window, and -D has no net.
-        current = refs.ref_oid(root, f"refs/heads/{branch.name}")
+        try:
+            current = refs.ref_oid(root, f"refs/heads/{branch.name}")
+        except ShadError as exc:
+            # Reported here rather than raised: the deletions already applied
+            # for this project must survive, and so must the projects queued
+            # behind it.
+            outcome.failures.append(f"branch {branch.name}: {exc}")
+            continue
         if current is None:
             outcome.failures.append(f"branch {branch.name}: already gone")
             continue
@@ -350,12 +369,29 @@ def sync_projects(
         report.render_summary(run)
         return run
 
-    outcomes = [apply_plan(p) if p.pending else ProjectOutcome(plan=p) for p in plans]
+    outcomes = [_apply_one(p) for p in plans]
     run = SyncRun(outcomes=outcomes)
     report.render_results(outcomes)
     report.render_summary(run)
     _raise_if_all_failed(run)
     return run
+
+
+def _apply_one(plan: ProjectPlan) -> ProjectOutcome:
+    """
+    Apply one plan, converting an unexpected escape into a recorded failure.
+
+    apply_plan already reports git's own errors, but its plumbing reads raise
+    ShadError on timeout. Without this guard one slow repository would abandon
+    every project queued behind it — after earlier ones had already deleted
+    things.
+    """
+    if not plan.pending:
+        return ProjectOutcome(plan=plan)
+    try:
+        return apply_plan(plan)
+    except Exception as exc:  # noqa: BLE001 — one bad project must not abort the rest
+        return ProjectOutcome(plan=plan, failures=[str(exc)])
 
 
 def _inspect(
@@ -422,6 +458,14 @@ def _resolve(
                 project=project, status="skipped", detail=str(exc)
             )
         except GitMissing as exc:
+            plans[index] = ProjectPlan(
+                project=project, status="failed", detail=str(exc)
+            )
+        except Exception as exc:  # noqa: BLE001 — one bad project must not abort the rest
+            # discover() runs git, so a timeout raises ShadError. This pass is
+            # on the main thread, outside the pool's per-future guard, so an
+            # escape here would abort the whole run before any other project
+            # was even inspected.
             plans[index] = ProjectPlan(
                 project=project, status="failed", detail=str(exc)
             )
