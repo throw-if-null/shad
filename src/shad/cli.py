@@ -11,6 +11,7 @@ shad projects <name> <action>            # run action on top-level project
 shad projects <group> <name> <action>    # run action on grouped project
 shad config <action> [args]              # inspect or edit shad.toml
 shad git sync [<group>] [<name>]         # git maintenance across projects
+shad git panel [<group>] [<name>]        # read-only repository view
 
 Config file: --config PATH, else $SHAD_CONFIG, else the per-OS default
 (~/.config/shad/shad.toml on Linux). `shad config path` prints the resolved one.
@@ -222,7 +223,8 @@ def build_parser() -> argparse.ArgumentParser:
         description=(
             "Git maintenance across one, some, or all configured projects.\n\n"
             "Actions:\n"
-            "  sync     fetch, fast-forward, and prune dead branches and worktrees\n\n"
+            "  sync     fetch, fast-forward, and prune dead branches and worktrees\n"
+            "  panel    read-only branch, worktree and stash view for one repository\n\n"
             "Examples:\n"
             "  shad git sync                     every configured project\n"
             "  shad git sync kb                  one top-level project\n"
@@ -291,6 +293,49 @@ def build_parser() -> argparse.ArgumentParser:
         help="Report what would change; still fetches, but deletes nothing",
     )
 
+    p_git_panel = git_sub.add_parser(
+        "panel",
+        help="Read-only branch, worktree and stash view for one repository",
+        description=(
+            "A read-only view of one repository, shown in shad's third pane.\n\n"
+            "Sections:\n"
+            "  branches    local branches, tracking state, and upstream\n"
+            "  worktrees   path, branch, and locked/prunable/bare flags\n"
+            "  stashes     ref, branch, message, and age\n\n"
+            "The header carries the active branch, how far it is ahead of and\n"
+            "behind upstream, the repository, and the git version — in that\n"
+            "order, because a narrow pane truncates the tail.\n\n"
+            "Unlike `sync`, no name means the current directory, not every\n"
+            "configured project: this view shows one repository. A name that\n"
+            "matches more than one project is an error.\n\n"
+            "The panel fetches on open so the counts are accurate, and `r`\n"
+            "fetches again. It never prunes and never writes to a working\n"
+            "tree — nothing here changes the repository.\n\n"
+            "Keys:\n"
+            "  tab         move focus between the section list and the table\n"
+            "  up/down     move the row cursor (j / k also work)\n"
+            "  r           fetch and reload\n"
+            "  q           quit\n\n"
+            "Examples:\n"
+            "  shad git panel\n"
+            "  shad git panel shad\n"
+            "  shad git panel tin shad\n"
+            "  shad git panel --no-fetch"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_git_panel.add_argument(
+        "name",
+        nargs="*",
+        metavar="NAME",
+        help="[group] [project]  — omit to use the current directory",
+    )
+    p_git_panel.add_argument(
+        "--no-fetch",
+        action="store_true",
+        help="Skip the fetch on open; show local state only",
+    )
+
     p_completion = sub.add_parser(
         "completion",
         help="Print the bash completion script",
@@ -317,7 +362,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Interactive wizard that adds a new project to the resolved config file.\n"
             "Creates the config file with a commented [defaults] block if it does not exist yet.\n\n"
             "Options:\n"
-            "  --install-deps  install missing tmux, opencode, and gitui dependencies on Fedora\n\n"
+            "  --install-deps  install missing tmux and opencode dependencies on Fedora\n\n"
             "Prompts:\n"
             "  path         Absolute path to the project root (must exist)\n"
             "  group        Optional group name; leave blank for a top-level project\n"
@@ -333,7 +378,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_init.add_argument(
         "--install-deps",
         action="store_true",
-        help="Install missing tmux, opencode, and gitui dependencies on Fedora before prompting",
+        help="Install missing tmux and opencode dependencies on Fedora before prompting",
     )
 
     p_config = sub.add_parser(

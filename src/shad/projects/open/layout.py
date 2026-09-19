@@ -9,12 +9,12 @@ Layout variants (controlled by defaults.oc_position):
     ┌─────────────────────────────────┐
     │  opencode          (top pane)   │  ~65% height
     ├─────────────────────┬───────────┤
-    │  bash         (~65%)│  gitui    │  ~35% height
+    │  bash         (~65%)│ git panel │  ~35% height
     └─────────────────────┴───────────┘
 
   bottom:
     ┌─────────────────────┬───────────┐
-    │  bash         (~65%)│  gitui    │  ~65% height
+    │  bash         (~65%)│ git panel │  ~65% height
     ├─────────────────────┴───────────┤
     │  opencode                       │  ~35% height
     └─────────────────────────────────┘
@@ -23,7 +23,7 @@ Layout variants (controlled by defaults.oc_position):
     ┌──────────┬──────────────────────┐
     │          │  bash                │  ~65% of bundle height
     │opencode  ├──────────────────────┤
-    │          │  gitui               │  ~35% of bundle height
+    │          │  git panel           │  ~35% of bundle height
     └──────────┴──────────────────────┘
 """
 
@@ -40,7 +40,7 @@ def _create_session(
     cwd = str(project.path)
     pos = defaults.oc_position
     panel_percent = defaults.panel_percent  # bundle's share of the window
-    split_percent = defaults.split_percent  # gitui's share inside the bundle
+    split_percent = defaults.split_percent  # the git panel's share inside the bundle
 
     # 1. Create session (detached)
     window_title = f"{project.group}|{project.key}" if project.group else project.key
@@ -102,7 +102,7 @@ def _create_session(
             ]
         )
         # pane 0 = bash (top-left of bundle), pane 1 = OC (bottom)
-        # Now split pane 0 horizontally to add gitui on the right of the bundle
+        # Now split pane 0 horizontally to add the git panel on the right of the bundle
         _run(
             [
                 "tmux",
@@ -125,7 +125,7 @@ def _create_session(
         _run(["tmux", "send-keys", "-t", oc_pane, oc_command + "\n"])
 
     else:  # left
-        # OC on left, bundle on right — vertical split within bundle (bash top, gitui bottom)
+        # OC on left, bundle on right — vertical split within bundle (bash top, git panel bottom)
         _run(["tmux", "send-keys", "-t", f"{session}:0.0", oc_command + "\n"])
         _run(
             [
@@ -159,14 +159,13 @@ def _create_session(
             f"{session}:0.2",
         )
 
-    # Launch gitui and shad status
-    _run(["tmux", "send-keys", "-t", git_pane, "gitui\n"])
-
+    # Launch the git panel and shad status
     if project.group:
-        status_cmd = f"shad projects {project.group} {project.key} status"
+        target = f"{project.group} {project.key}"
     else:
-        status_cmd = f"shad projects {project.key} status"
-    _run(["tmux", "send-keys", "-t", bash_pane, status_cmd + "\n"])
+        target = project.key
+    _run(["tmux", "send-keys", "-t", git_pane, f"shad git panel {target}\n"])
+    _run(["tmux", "send-keys", "-t", bash_pane, f"shad projects {target} status\n"])
 
     # Focus the OC pane
     _run(["tmux", "select-pane", "-t", oc_pane])

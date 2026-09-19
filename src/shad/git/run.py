@@ -65,8 +65,8 @@ _SCRUBBED = (
 
 # Read-only commands, which may run without taking optional locks.  This keeps
 # `git status` from rewriting the index and avoids lock contention with the
-# gitui pane shad itself spawns.  Its one side effect — stale stat data read as
-# "modified" — fails in the safe direction.
+# git panel pane shad itself spawns.  Its one side effect — stale stat data
+# read as "modified" — fails in the safe direction.
 _READ_ONLY = frozenset(
     {
         "rev-parse",
@@ -93,6 +93,9 @@ def _is_read_only(args: list[str]) -> bool:
         return False
     if args[0] == "worktree":
         # `worktree list` is a read; prune and remove are mutations.
+        return len(args) > 1 and args[1] == "list"
+    if args[0] == "stash":
+        # `stash list` is a read; push, pop, apply and drop are mutations.
         return len(args) > 1 and args[1] == "list"
     return args[0] in _READ_ONLY
 
@@ -177,6 +180,18 @@ def first_line(text: str) -> str:
         line = line.strip()
         if line:
             return line
+    return ""
+
+
+def git_version_string() -> str:
+    """The git version as git reports it, e.g. "2.55.0", or "" when unparseable."""
+    result = git(None, ["--version"])
+    if result.returncode != 0:
+        return ""
+    for part in first_line(result.stdout).split():
+        bits = part.split(".")
+        if len(bits) >= 2 and bits[0].isdigit() and bits[1].isdigit():
+            return part
     return ""
 
 

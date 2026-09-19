@@ -57,7 +57,7 @@ _DEFAULTS_BLOCK = """\
 # How much of the window the git+bash bundle takes (%).
 # panel_percent = 35
 
-# How much of the bundle gitui takes (%). Bash gets the rest.
+# How much of the bundle the git panel takes (%). Bash gets the rest.
 # split_percent = 35
 
 """
@@ -167,7 +167,6 @@ def _build_dependencies() -> tuple[Dependency, ...]:
     """Build the dependency list with per-dep install strategies."""
     return (
         Dependency(binary="tmux", package="tmux", installer=_install_via_dnf("tmux")),
-        Dependency(binary="gitui", package="gitui", installer=_install_via_dnf("gitui")),
         Dependency(binary="opencode", installer=_install_opencode_systemwide),
     )
 

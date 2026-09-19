@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from shad.git import refs
-from shad.git.model import Worktree
+from shad.git.model import Stash, Worktree
 
 REPO = Path("/tmp/repo")
 
@@ -130,3 +130,78 @@ class RemoteBranchRefsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StashParsingTests(unittest.TestCase):
+    def _run(self, payload: str, returncode: int = 0) -> list[Stash]:
+        with patch.object(
+            refs, "git", return_value=_completed(returncode=returncode, stdout=payload)
+        ):
+            return refs.list_stashes(REPO)
+
+    def test_records_are_recovered_by_field_count(self) -> None:
+        # -z terminates every record with the same NUL that separates fields,
+        # so the stream is flat and the trailing one is not a fourth record.
+        payload = (
+            "stash@{0}\x00On main: first\x001700000000\x00"
+            "stash@{1}\x00WIP on side: abc1234 second\x001700000060\x00"
+        )
+        first, second = self._run(payload)
+        self.assertEqual(first.ref, "stash@{0}")
+        self.assertEqual(first.branch, "main")
+        self.assertEqual(first.message, "first")
+        self.assertEqual(first.timestamp, 1700000000)
+        self.assertEqual(second.branch, "side")
+        self.assertEqual(second.message, "abc1234 second")
+
+    def test_empty_output_is_no_stashes(self) -> None:
+        self.assertEqual(self._run(""), [])
+
+    def test_non_zero_exit_reports_nothing(self) -> None:
+        payload = "stash@{0}\x00On main: x\x001700000000\x00"
+        self.assertEqual(self._run(payload, returncode=128), [])
+
+    def test_message_containing_a_colon_space_keeps_its_tail(self) -> None:
+        payload = "stash@{0}\x00On main: fix: the thing\x001700000000\x00"
+        (entry,) = self._run(payload)
+        self.assertEqual(entry.branch, "main")
+        self.assertEqual(entry.message, "fix: the thing")
+
+    def test_subject_without_a_branch_preamble_is_kept_whole(self) -> None:
+        payload = "stash@{0}\x00some other subject\x001700000000\x00"
+        (entry,) = self._run(payload)
+        self.assertEqual(entry.branch, "")
+        self.assertEqual(entry.message, "some other subject")
+
+    def test_branch_name_containing_a_slash_survives(self) -> None:
+        payload = "stash@{0}\x00WIP on feat/a-b: abc1234 x\x001700000000\x00"
+        (entry,) = self._run(payload)
+        self.assertEqual(entry.branch, "feat/a-b")
+
+    def test_unparseable_timestamp_becomes_zero(self) -> None:
+        payload = "stash@{0}\x00On main: x\x00not-a-number\x00"
+        (entry,) = self._run(payload)
+        self.assertEqual(entry.timestamp, 0)
+
+    def test_a_truncated_trailing_record_is_dropped(self) -> None:
+        payload = "stash@{0}\x00On main: x\x001700000000\x00stash@{1}\x00On main: y\x00"
+        (entry,) = self._run(payload)
+        self.assertEqual(entry.ref, "stash@{0}")
+
+    def test_the_log_separator_is_used_not_the_ref_one(self) -> None:
+        # `stash list` does not interpret %00 and would emit it literally.
+        with patch.object(refs, "git", return_value=_completed()) as git:
+            refs.list_stashes(REPO)
+        (_repo, args), _ = git.call_args
+        fmt = next(a for a in args if a.startswith("--format="))
+        self.assertIn("%x00", fmt)
+        self.assertNotIn("%00", fmt.replace("%x00", ""))
+        self.assertIn("-z", args)
+
+    def test_the_date_is_a_timestamp_not_a_translated_relative_string(self) -> None:
+        with patch.object(refs, "git", return_value=_completed()) as git:
+            refs.list_stashes(REPO)
+        (_repo, args), _ = git.call_args
+        fmt = next(a for a in args if a.startswith("--format="))
+        self.assertIn("%ct", fmt)
+        self.assertNotIn("%cr", fmt)

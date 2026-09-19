@@ -10,9 +10,9 @@ oc_position   = "top"
 # The opencode panel gets the remaining space.
 panel_percent = 35
 
-# How much of the bundle gitui takes (%). Bash gets the rest.
-# When bundle is horizontal (oc top/bottom): gitui is on the right.
-# When bundle is vertical   (oc left/right): gitui is on the bottom.
+# How much of the bundle the git panel takes (%). Bash gets the rest.
+# When bundle is horizontal (oc top/bottom): the git panel is on the right.
+# When bundle is vertical   (oc left/right): the git panel is on the bottom.
 split_percent = 35
 
 # ── Top-level projects ────────────────────────────────────────────────────

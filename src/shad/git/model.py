@@ -27,6 +27,13 @@ NUL = "\x00"
 FMT_SEP = "%00"
 
 
+# The same separator for the log pretty-format family (`log`, `stash list`),
+# which does not interpret `%00` and would emit it as three literal
+# characters.  `-z` terminates each record with the same byte, so a reader
+# splits on NUL and groups by field count rather than by record.
+LOG_SEP = "%x00"
+
+
 @dataclass(frozen=True)
 class Repo:
     """A resolved git repository, rooted at its main worktree."""
@@ -69,6 +76,24 @@ class Worktree:
     locked_reason: str = ""
     prunable: bool = False
     prunable_reason: str = ""
+
+
+@dataclass(frozen=True)
+class Stash:
+    """One entry of `stash list`."""
+
+    ref: str  # stash@{0}
+    subject: str  # the reflog subject, e.g. "WIP on main: 1a2b3c4 ..."
+    timestamp: int  # committer date, seconds since the epoch; 0 when unreadable
+    branch: str  # branch the stash was made on, "" when it cannot be read
+
+    @property
+    def message(self) -> str:
+        """The subject without git's "WIP on <branch>: <oid>" preamble."""
+        head, sep, tail = self.subject.partition(": ")
+        if sep and head.startswith(("WIP on ", "On ")):
+            return tail
+        return self.subject
 
 
 @dataclass(frozen=True)

@@ -214,8 +214,11 @@ class CompletionScriptTests(unittest.TestCase):
 
     # -- git sync ---------------------------------------------------------
 
-    def test_git_offers_its_only_action(self) -> None:
-        self.assertEqual(self._run("shad git "), ["sync"])
+    def test_git_offers_its_actions(self) -> None:
+        self.assertEqual(sorted(self._run("shad git ")), ["panel", "sync"])
+
+    def test_git_offers_nothing_for_an_unknown_action(self) -> None:
+        self.assertEqual(self._run("shad git bogus "), [])
 
     def test_git_sync_offers_projects_and_flags(self) -> None:
         offered = self._run("shad git sync ")
@@ -230,6 +233,18 @@ class CompletionScriptTests(unittest.TestCase):
     def test_git_sync_does_not_repeat_a_flag(self) -> None:
         self.assertNotIn("--dry-run", self._run("shad git sync --dry-run "))
         self.assertNotIn("--yes", self._run("shad git sync kb --yes "))
+
+    def test_git_panel_offers_projects_and_its_own_flag(self) -> None:
+        offered = self._run("shad git panel ")
+        self.assertEqual(sorted(offered), ["--no-fetch", "al", "alvr", "kb", "web"])
+
+    def test_git_panel_does_not_offer_sync_flags(self) -> None:
+        offered = self._run("shad git panel ")
+        for flag in ("--switch", "--yes", "--dry-run"):
+            self.assertNotIn(flag, offered)
+
+    def test_git_panel_offers_subprojects_of_a_group(self) -> None:
+        self.assertIn("db", self._run("shad git panel alvr "))
 
     def test_git_sync_offers_flags_after_a_grouped_project(self) -> None:
         self.assertEqual(sorted(self._run("shad git sync alvr db ")),
