@@ -800,3 +800,62 @@ class SnapshotTests(unittest.TestCase):
         self.assertIsNone(snap.fetched_at)
         self.assertEqual(len(snap.branches), 2)
         self.assertEqual(len(snap.stashes), 2)
+
+
+@unittest.skipUnless(shutil.which("git"), "git not installed")
+class FormatDialectTests(unittest.TestCase):
+    """
+    The external fact behind run._check_format_dialect.
+
+    git's ref-filter and pretty-format languages spell a NUL differently and
+    each emits the other's spelling as literal text, exiting 0 either way.
+    The guard encodes that; this proves it against the installed git, so a
+    future release that changed it would fail here rather than leave the
+    guard rejecting formats that had become valid.
+    """
+
+    tmp: tempfile.TemporaryDirectory[str]
+    repo: Path
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.repo = Path(cls.tmp.name) / "repo"
+        cls.repo.mkdir()
+        _git(Path(cls.tmp.name), "init", "--quiet", "--initial-branch=main", str(cls.repo))
+        _commit(cls.repo, "f.txt", "one\n", "Add f")
+        (cls.repo / "f.txt").write_text("two\n")
+        _git(cls.repo, "stash", "push", "--quiet", "-m", "a message")
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.tmp.cleanup()
+
+    def test_for_each_ref_expands_percent_00_and_not_percent_x00(self) -> None:
+        good = _git(self.repo, "for-each-ref", "--format=%(refname)%00%(objectname)")
+        self.assertIn("\x00", good)
+
+        bad = _git(self.repo, "for-each-ref", "--format=%(refname)%x00%(objectname)")
+        self.assertNotIn("\x00", bad)
+        self.assertIn("%x00", bad)
+
+    def test_stash_list_expands_percent_x00_and_not_percent_00(self) -> None:
+        good = _git(self.repo, "stash", "list", "--format=%gd%x00%gs")
+        self.assertIn("\x00", good)
+
+        bad = _git(self.repo, "stash", "list", "--format=%gd%00%gs")
+        self.assertNotIn("\x00", bad)
+        self.assertIn("%00", bad)
+
+    def test_the_wrong_escape_is_not_an_error_which_is_why_a_guard_exists(self) -> None:
+        # Exit 0, empty stderr: nothing downstream can detect the mistake.
+        env = {**os.environ, **_ISOLATE}
+        result = subprocess.run(
+            ["git", "-C", str(self.repo), "stash", "list", "--format=%gd%00%gs"],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stderr, "")

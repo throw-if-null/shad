@@ -19,18 +19,21 @@ from shad.shared.config import Project
 # ── one repository ────────────────────────────────────────────────
 
 
-# What we split git output on, and what we ask git to emit as a separator.
-# `%00` is git's own escape; a real NUL cannot be passed in argv.
+# What we split git output on. A real NUL cannot be passed in argv, so git is
+# asked to emit one — and git has two --format languages that spell it
+# differently. Neither accepts the other's spelling: the wrong one is emitted
+# as literal text, git still exits 0, and the parse yields plausible garbage.
+# run._check_format_dialect refuses the swap at the call site.
 NUL = "\x00"
 
 
+# ref-filter: `for-each-ref`, `branch --format`, `tag --format`.
 FMT_SEP = "%00"
 
 
-# The same separator for the log pretty-format family (`log`, `stash list`),
-# which does not interpret `%00` and would emit it as three literal
-# characters.  `-z` terminates each record with the same byte, so a reader
-# splits on NUL and groups by field count rather than by record.
+# pretty-format: `log`, `show`, `stash list`, `reflog`. Note that `-z` on these
+# terminates each record with the same byte the fields are separated by, so a
+# reader splits on NUL and groups by field count, not by record.
 LOG_SEP = "%x00"
 
 
