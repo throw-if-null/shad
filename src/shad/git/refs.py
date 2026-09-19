@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from shad.git.model import FMT_SEP, NUL, BranchRef, Worktree
+from shad.git.model import FMT_SEP, LOG_SEP, NUL, BranchRef, Stash, Worktree
 from shad.git.run import T_LS_REMOTE, git
 
 
@@ -202,6 +202,57 @@ def list_worktrees(repo: Path) -> list[Worktree]:
     flush()
 
     return worktrees
+
+
+def list_stashes(repo: Path) -> list[Stash]:
+    """
+    Enumerate the stash reflog.
+
+    Uses LOG_SEP, not FMT_SEP: this is the log pretty-format family, which
+    emits `%00` as three literal characters and needs `%x00` instead.
+
+    -z terminates each record with the same NUL the fields are separated by,
+    so the output is one flat field stream and records are recovered by
+    counting fields, not by splitting on a record separator. %gs is the
+    reflog subject, which git flattens to a single line even when the stash
+    message spans several.
+
+    The date is %ct, not %cr: the relative form is gettext-translated, and a
+    caller that formats a unix timestamp itself cannot be broken by a locale.
+    """
+    fields = ("%gd", "%gs", "%ct")
+    fmt = LOG_SEP.join(fields)
+    result = git(repo, ["stash", "list", "-z", f"--format={fmt}"])
+    if result.returncode != 0:
+        return []
+
+    parts = result.stdout.split(NUL)
+    if parts and parts[-1] == "":
+        parts.pop()  # the final record's terminator
+
+    stashes: list[Stash] = []
+    for i in range(0, len(parts) - len(fields) + 1, len(fields)):
+        ref, subject, when = parts[i], parts[i + 1], parts[i + 2]
+        stashes.append(
+            Stash(
+                ref=ref,
+                subject=subject,
+                timestamp=int(when) if when.isdigit() else 0,
+                branch=_stash_branch(subject),
+            )
+        )
+    return stashes
+
+
+def _stash_branch(subject: str) -> str:
+    """The branch named in a stash reflog subject, or "" when it has none."""
+    head, sep, _ = subject.partition(": ")
+    if not sep:
+        return ""
+    for prefix in ("WIP on ", "On "):
+        if head.startswith(prefix):
+            return head[len(prefix) :]
+    return ""
 
 
 def list_remotes(repo: Path) -> list[str]:

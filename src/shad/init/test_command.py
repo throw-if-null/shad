@@ -64,12 +64,10 @@ class InstallDepsTests(unittest.TestCase):
 
     def test_install_deps_installs_missing_packages_and_opencode(self) -> None:
         tmux_installer = unittest.mock.MagicMock()
-        gitui_installer = unittest.mock.MagicMock()
         opencode_installer = unittest.mock.MagicMock()
 
         missing = [
             Dependency(binary="tmux", package="tmux", installer=tmux_installer),
-            Dependency(binary="gitui", package="gitui", installer=gitui_installer),
             Dependency(binary="opencode", installer=opencode_installer),
         ]
 
@@ -80,7 +78,6 @@ class InstallDepsTests(unittest.TestCase):
             ensure_dependencies_installed()
 
         tmux_installer.assert_called_once_with()
-        gitui_installer.assert_called_once_with()
         opencode_installer.assert_called_once_with()
 
     def test_install_deps_skips_work_when_everything_is_present(self) -> None:

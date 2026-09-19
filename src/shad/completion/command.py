@@ -255,12 +255,15 @@ _shad_complete() {
     local extra=""
     if [[ "$command" == "git" ]]; then
         if ((${#args[@]} == 0)); then
-            _shad_offer "$cur" "sync"
+            _shad_offer "$cur" "sync panel"
             return
         fi
-        [[ "${args[0]}" == "sync" ]] || return
+        case "${args[0]}" in
+        sync) extra="--switch --yes --dry-run" ;;
+        panel) extra="--no-fetch" ;;
+        *) return ;;
+        esac
         args=("${args[@]:1}")
-        extra="--switch --yes --dry-run"
     else
         # An action ends a `projects` line; nothing may follow it.
         for word in "${args[@]}"; do

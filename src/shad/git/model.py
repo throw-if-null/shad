@@ -19,12 +19,22 @@ from shad.shared.config import Project
 # ── one repository ────────────────────────────────────────────────
 
 
-# What we split git output on, and what we ask git to emit as a separator.
-# `%00` is git's own escape; a real NUL cannot be passed in argv.
+# What we split git output on. A real NUL cannot be passed in argv, so git is
+# asked to emit one — and git has two --format languages that spell it
+# differently. Neither accepts the other's spelling: the wrong one is emitted
+# as literal text, git still exits 0, and the parse yields plausible garbage.
+# run._check_format_dialect refuses the swap at the call site.
 NUL = "\x00"
 
 
+# ref-filter: `for-each-ref`, `branch --format`, `tag --format`.
 FMT_SEP = "%00"
+
+
+# pretty-format: `log`, `show`, `stash list`, `reflog`. Note that `-z` on these
+# terminates each record with the same byte the fields are separated by, so a
+# reader splits on NUL and groups by field count, not by record.
+LOG_SEP = "%x00"
 
 
 @dataclass(frozen=True)
@@ -69,6 +79,24 @@ class Worktree:
     locked_reason: str = ""
     prunable: bool = False
     prunable_reason: str = ""
+
+
+@dataclass(frozen=True)
+class Stash:
+    """One entry of `stash list`."""
+
+    ref: str  # stash@{0}
+    subject: str  # the reflog subject, e.g. "WIP on main: 1a2b3c4 ..."
+    timestamp: int  # committer date, seconds since the epoch; 0 when unreadable
+    branch: str  # branch the stash was made on, "" when it cannot be read
+
+    @property
+    def message(self) -> str:
+        """The subject without git's "WIP on <branch>: <oid>" preamble."""
+        head, sep, tail = self.subject.partition(": ")
+        if sep and head.startswith(("WIP on ", "On ")):
+            return tail
+        return self.subject
 
 
 @dataclass(frozen=True)

@@ -9,6 +9,7 @@ A small CLI to attach or create project-specific tmux sessions from the current 
 
 - Python 3.11+
 - tmux
+- git 2.36+ (for `shad git sync` and `shad git panel`)
 
 ## Install
 
@@ -178,9 +179,9 @@ shad config unset projects.alvr.db
 # The opencode panel gets the remaining space.
 # panel_percent = 35
 
-# How much of the bundle gitui takes (%). Bash gets the rest.
-# When bundle is horizontal (oc_position top/bottom): gitui is on the right.
-# When bundle is vertical   (oc_position left):       gitui is on the bottom.
+# How much of the bundle the git panel takes (%). Bash gets the rest.
+# When bundle is horizontal (oc_position top/bottom): the panel is on the right.
+# When bundle is vertical   (oc_position left):       the panel is on the bottom.
 # split_percent = 35
 
 
@@ -213,7 +214,7 @@ path    = "/home/user/gh/alvr/portal"
 |---|---|---|---|
 | `[defaults] oc_position` | no | `"top"` | Side opencode occupies: `top`, `bottom`, or `left` |
 | `[defaults] panel_percent` | no | `35` | % of the window the git+bash bundle takes |
-| `[defaults] split_percent` | no | `35` | % of the bundle that gitui takes (bash gets the rest) |
+| `[defaults] split_percent` | no | `35` | % of the bundle that the git panel takes (bash gets the rest) |
 | `path` | **yes** | — | Absolute path to the project root |
 | `session` | no | key or `<group>-<key>` | tmux session name; must be unique across all projects |
 
@@ -261,6 +262,11 @@ shad git sync tin shad            # one project
 shad git sync --switch            # also check out the default branch
 shad git sync --dry-run           # preview; deletes nothing
 shad git sync --yes               # skip the confirmation prompt
+
+# Read-only repository view (the third pane runs this)
+shad git panel                    # the repository in the current directory
+shad git panel tin shad           # a configured project
+shad git panel --no-fetch         # skip the fetch on open
 
 # Show a tmux cheat sheet popup
 shad cheat
@@ -400,6 +406,58 @@ not prune, so a preview never consumes the evidence the real run needs.
 
 Requires git 2.36 or newer.
 
+## Git panel
+
+`shad git panel` is a read-only view of one repository. It is what shad runs in
+the third pane of every project session.
+
+```
+ main  ·  ↓2  ·  shad  ·  git 2.55.0
+ branches   5  │ branch                            upstream
+ worktrees  1  │   chore/dependabot                origin
+ stashes    0  │ ● main                         =  origin
+```
+
+| Command | Description |
+|---|---|
+| `shad git panel` | The repository in the current directory |
+| `shad git panel <name>` | A configured top-level project |
+| `shad git panel <group> <name>` | A configured grouped project |
+| `shad git panel --no-fetch` | Skip the fetch on open; show local state only |
+
+Unlike `sync`, no name means the current directory rather than every configured
+project, because the panel shows one repository. A name matching more than one
+project is an error.
+
+The header carries the active branch, how far it is ahead of and behind its
+upstream, the repository name, and the git version — in that order, because a
+narrow pane truncates the tail and the branch matters most. A branch with no upstream says so rather
+than reporting itself up to date.
+
+Three sections sit behind the left nav:
+
+- **branches** — name, tracking symbol (`=` `↑` `↓` `↕`), and upstream. A `●`
+  marks a branch some worktree has checked out. An upstream with the same name
+  as its branch shows just the remote.
+- **worktrees** — directory, branch, and any locked, prunable or bare flag.
+- **stashes** — ref, the branch it was made on, message, and age.
+
+| Key | Action |
+|---|---|
+| `↑` `↓` or `k` `j` | Move the row cursor |
+| `tab` | Move focus between the section list and the table |
+| `r` | Fetch and reload |
+| `q` | Quit |
+
+The panel fetches on open so the counts are accurate, and the fetch runs off the
+UI thread — the sections appear immediately and fill in when it returns. A fetch
+that fails is reported in the header and the local sections still populate, so
+the panel is usable offline.
+
+Nothing in the panel changes the repository. The fetch never passes `--prune`:
+pruning a remote-tracking ref takes its reflog with it, and `shad git sync`
+needs those last-known OIDs to prove a gone-upstream branch was fully pushed.
+
 ## Shell completion
 
 `shad` supports tab completion for bash.
@@ -444,14 +502,14 @@ Created once per tmux session on first open, never rebuilt on subsequent attache
 ┌─────────────────────────────────┐
 │  opencode                       │  ~65% height
 ├─────────────────────┬───────────┤
-│  bash         (~65%)│  gitui    │  ~35% height
+│  bash         (~65%)│ git panel │  ~35% height
 └─────────────────────┴───────────┘
 ```
 
 **`oc_position = "bottom"`**
 ```
 ┌─────────────────────┬───────────┐
-│  bash         (~65%)│  gitui    │  ~65% height
+│  bash         (~65%)│ git panel │  ~65% height
 ├─────────────────────┴───────────┤
 │  opencode                       │  ~35% height
 └─────────────────────────────────┘
@@ -462,11 +520,11 @@ Created once per tmux session on first open, never rebuilt on subsequent attache
 ┌──────────┬──────────────────────┐
 │          │  bash                │  ~65% of bundle height
 │opencode  ├──────────────────────┤
-│          │  gitui               │  ~35% of bundle height
+│          │  git panel           │  ~35% of bundle height
 └──────────┴──────────────────────┘
 ```
 
-`panel_percent` controls how much of the window the git+bash bundle takes; `split_percent` controls the gitui/bash split within it.
+`panel_percent` controls how much of the window the git+bash bundle takes; `split_percent` controls the panel/bash split within it.
 
 If `shad` is run from **inside** an existing tmux session it uses `switch-client`; outside tmux it uses `attach-session`.
 
@@ -485,7 +543,6 @@ If `shad` is run from **inside** an existing tmux session it uses `switch-client
 `shad init --install-deps` is tailored for Fedora and installs missing dependencies before starting the init wizard.
 
 - `tmux` via `dnf`
-- `gitui` via `dnf`
 - `opencode` by downloading the latest Linux x64 release into `/usr/local/bin/opencode`
 
 Run it with `sudo`:
@@ -494,29 +551,17 @@ Run it with `sudo`:
 sudo shad init --install-deps
 ```
 
-### gitui
+### Python packages
 
-The bottom-right pane runs [gitui](https://github.com/gitui-org/gitui). Install the binary:
-
-```sh
-mkdir -p ~/.local/bin
-curl -sL https://github.com/gitui-org/gitui/releases/download/v0.28.1/gitui-linux-x86_64.tar.gz \
-  | tar -xz -C ~/.local/bin
-```
-
-Make sure `~/.local/bin` is on your `$PATH`.
-
-### gitui theme (optional)
-
-To match the catppuccin frappe color scheme used in tmux:
+`shad` needs `rich` and `textual`. Both install with the package:
 
 ```sh
-mkdir -p ~/.config/gitui
-curl -sL https://raw.githubusercontent.com/catppuccin/gitui/main/themes/catppuccin-frappe.ron \
-  -o ~/.config/gitui/theme.ron
+pip install -e .
 ```
 
-Other available flavors: `catppuccin-latte`, `catppuccin-macchiato`, `catppuccin-mocha`.
+No other binary is required for the git pane. Earlier versions ran
+[gitui](https://github.com/gitui-org/gitui) there; `shad git panel` replaces
+it, so `gitui` can be uninstalled if nothing else uses it.
 
 ## Project structure
 

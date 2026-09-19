@@ -52,7 +52,7 @@ DEFAULTS_FIELDS: tuple[Field, ...] = (
         "side of the window the harness pane occupies",
     ),
     Field("panel_percent", PERCENT, description="% of the window the git+bash bundle takes"),
-    Field("split_percent", PERCENT, description="% of the bundle gitui takes"),
+    Field("split_percent", PERCENT, description="% of the bundle the git panel takes"),
     Field("harness", ENUM, HARNESSES, "default harness for projects"),
 )
 

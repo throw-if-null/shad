@@ -65,8 +65,8 @@ _SCRUBBED = (
 
 # Read-only commands, which may run without taking optional locks.  This keeps
 # `git status` from rewriting the index and avoids lock contention with the
-# gitui pane shad itself spawns.  Its one side effect — stale stat data read as
-# "modified" — fails in the safe direction.
+# git panel pane shad itself spawns.  Its one side effect — stale stat data
+# read as "modified" — fails in the safe direction.
 _READ_ONLY = frozenset(
     {
         "rev-parse",
@@ -83,6 +83,22 @@ _READ_ONLY = frozenset(
 )
 
 
+# git has two --format languages and they do not share escapes.  ref-filter
+# (`for-each-ref`, `branch`, `tag`) spells a NUL `%00`; the pretty-format
+# family (`log`, `show`, `stash list`, `reflog`) spells it `%x00` and emits
+# `%00` as three literal characters.  Neither reports the other's spelling as
+# an error: git exits 0, the separator never appears, and the parse yields
+# plausible garbage rather than nothing.  _check_format_dialect makes that
+# swap loud at the one place every git call passes through.
+_REF_FILTER_FORMAT = frozenset({"for-each-ref", "branch", "tag"})
+
+
+_PRETTY_FORMAT = frozenset({"log", "show", "reflog", "whatchanged", "stash", "rev-list"})
+
+
+_FORMAT_FLAGS = ("--format", "--pretty")
+
+
 class GitMissing(Exception):
     """git is not installed or not on PATH."""
 
@@ -94,7 +110,51 @@ def _is_read_only(args: list[str]) -> bool:
     if args[0] == "worktree":
         # `worktree list` is a read; prune and remove are mutations.
         return len(args) > 1 and args[1] == "list"
+    if args[0] == "stash":
+        # `stash list` is a read; push, pop, apply and drop are mutations.
+        return len(args) > 1 and args[1] == "list"
     return args[0] in _READ_ONLY
+
+
+def _formats(args: list[str]) -> list[str]:
+    """Every --format / --pretty value in *args*, in either spelling."""
+    found: list[str] = []
+    for index, arg in enumerate(args):
+        for flag in _FORMAT_FLAGS:
+            if arg.startswith(f"{flag}="):
+                found.append(arg[len(flag) + 1 :])
+            elif arg == flag and index + 1 < len(args):
+                found.append(args[index + 1])
+    return found
+
+
+def _check_format_dialect(args: list[str]) -> None:
+    """
+    Raise when a format uses the other command family's NUL escape.
+
+    A caller contract violation, not a runtime condition: it can only happen
+    by writing the wrong constant, it corrupts the parse silently, and no exit
+    code or stderr reveals it. ValueError rather than ShadError because there
+    is no user action that produces it and none that recovers from it.
+    """
+    if not args:
+        return
+    verb = args[0]
+    if verb in _REF_FILTER_FORMAT:
+        wrong, right = "%x00", "FMT_SEP (%00)"
+    elif verb in _PRETTY_FORMAT:
+        wrong, right = "%00", "LOG_SEP (%x00)"
+    else:
+        return
+
+    for fmt in _formats(args):
+        # "%x00" does not contain the substring "%00", so this test is exact
+        # in both directions.
+        if wrong in fmt:
+            raise ValueError(
+                f"git {verb}: format uses {wrong!r}, which this command emits "
+                f"literally; use {right} instead — {fmt!r}"
+            )
 
 
 def _env(*, read_only: bool) -> dict[str, str]:
@@ -128,6 +188,7 @@ def git(
         argv += ["-C", str(repo)]
     argv += args
 
+    _check_format_dialect(args)
     read_only = _is_read_only(args)
 
     try:
@@ -177,6 +238,18 @@ def first_line(text: str) -> str:
         line = line.strip()
         if line:
             return line
+    return ""
+
+
+def git_version_string() -> str:
+    """The git version as git reports it, e.g. "2.55.0", or "" when unparseable."""
+    result = git(None, ["--version"])
+    if result.returncode != 0:
+        return ""
+    for part in first_line(result.stdout).split():
+        bits = part.split(".")
+        if len(bits) >= 2 and bits[0].isdigit() and bits[1].isdigit():
+            return part
     return ""
 
 

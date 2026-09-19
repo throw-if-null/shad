@@ -440,5 +440,79 @@ class CmdGitTests(unittest.TestCase):
         self.assertIn("shad git sync kb", str(ctx.exception))
 
 
+class PanelActionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.cfg = Config(
+            defaults=Defaults(),
+            projects={"kb": _project("kb")},
+            groups={"tin": {"shad": _project("shad", "tin"), "coral": _project("coral", "tin")}},
+        )
+        self.repo = Repo(root=ROOT, common_dir=ROOT / ".git")
+
+    def _args(self, **kwargs: object) -> argparse.Namespace:
+        base: dict[str, object] = {"git_action": "panel", "name": [], "no_fetch": False}
+        base.update(kwargs)
+        return argparse.Namespace(**base)
+
+    def _open(self, **kwargs: object) -> Mock:
+        with (
+            patch.object(C, "require_git"),
+            patch.object(C.discover, "discover", return_value=self.repo) as found,
+            patch("shad.git.panel.run_panel") as run,
+        ):
+            C.cmd_git(self.cfg, self._args(**kwargs))
+            run.discovered = found  # type: ignore[attr-defined]
+            return run
+
+    def test_no_name_uses_the_current_directory(self) -> None:
+        with patch.object(C.Path, "cwd", return_value=Path("/tmp/here")):
+            run = self._open()
+        self.assertEqual(run.discovered.call_args.args[0], Path("/tmp/here"))
+        self.assertIs(run.call_args.args[0], self.repo)
+
+    def test_a_named_project_uses_its_configured_path(self) -> None:
+        run = self._open(name=["kb"])
+        self.assertEqual(run.discovered.call_args.args[0], Path("/tmp/kb"))
+
+    def test_a_grouped_project_resolves_to_one_repository(self) -> None:
+        run = self._open(name=["tin", "shad"])
+        self.assertEqual(run.discovered.call_args.args[0], Path("/tmp/shad"))
+
+    def test_fetch_is_on_by_default(self) -> None:
+        run = self._open()
+        self.assertIs(run.call_args.kwargs["fetch"], True)
+
+    def test_no_fetch_is_forwarded(self) -> None:
+        run = self._open(no_fetch=True)
+        self.assertIs(run.call_args.kwargs["fetch"], False)
+
+    def test_a_group_matching_several_projects_is_rejected(self) -> None:
+        # The panel shows one repository; `sync`'s fan-out has no meaning here.
+        with (
+            patch.object(C, "require_git"),
+            patch("shad.git.panel.run_panel") as run,
+            self.assertRaises(ShadError) as ctx,
+        ):
+            C.cmd_git(self.cfg, self._args(name=["tin"]))
+        self.assertIn("matches 2 projects", str(ctx.exception))
+        run.assert_not_called()
+
+    def test_an_unusable_path_is_reported_as_a_shad_error(self) -> None:
+        with (
+            patch.object(C, "require_git"),
+            patch.object(
+                C.discover,
+                "discover",
+                side_effect=C.discover.NotUsable("not a git repository"),
+            ),
+            self.assertRaises(ShadError) as ctx,
+        ):
+            C.cmd_git(self.cfg, self._args(name=["kb"]))
+        self.assertIn("not a git repository", str(ctx.exception))
+
+    def test_panel_is_a_known_action(self) -> None:
+        self.assertIn("panel", C.ACTIONS)
+
+
 if __name__ == "__main__":
     unittest.main()

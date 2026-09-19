@@ -90,3 +90,71 @@ class VersionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FormatDialectTests(unittest.TestCase):
+    """
+    git's two --format languages do not share the NUL escape, and a mismatch
+    is invisible: git exits 0 and emits the escape as literal text. These pin
+    the guard that turns that into a loud failure.
+    """
+
+    def test_pretty_format_rejects_the_ref_filter_escape(self) -> None:
+        with self.assertRaises(ValueError) as ctx:
+            run._check_format_dialect(["stash", "list", "-z", "--format=%gd%00%gs"])
+        self.assertIn("LOG_SEP", str(ctx.exception))
+
+    def test_ref_filter_rejects_the_pretty_format_escape(self) -> None:
+        with self.assertRaises(ValueError) as ctx:
+            run._check_format_dialect(
+                ["for-each-ref", "--format=%(refname)%x00%(objectname)", "refs/heads"]
+            )
+        self.assertIn("FMT_SEP", str(ctx.exception))
+
+    def test_each_family_accepts_its_own_escape(self) -> None:
+        run._check_format_dialect(["stash", "list", "-z", "--format=%gd%x00%gs"])
+        run._check_format_dialect(["for-each-ref", "--format=%(refname)%00%(objectname)"])
+
+    def test_the_pretty_escape_is_not_read_as_containing_the_ref_filter_one(self) -> None:
+        # "%x00" must not trip the "%00" check, or every correct log format
+        # would be rejected.
+        self.assertNotIn("%00", "%x00")
+
+    def test_commands_with_no_format_language_are_left_alone(self) -> None:
+        run._check_format_dialect(["status", "--porcelain=v2"])
+        run._check_format_dialect(["worktree", "list", "--porcelain", "-z"])
+        run._check_format_dialect([])
+
+    def test_a_format_without_any_separator_is_accepted(self) -> None:
+        run._check_format_dialect(["for-each-ref", "--format=%(refname)"])
+        run._check_format_dialect(["log", "--format=%H"])
+
+    def test_pretty_spelling_of_the_flag_is_checked_too(self) -> None:
+        with self.assertRaises(ValueError):
+            run._check_format_dialect(["log", "--pretty=%H%00%s"])
+
+    def test_a_detached_flag_value_is_checked(self) -> None:
+        with self.assertRaises(ValueError):
+            run._check_format_dialect(["log", "--format", "%H%00%s"])
+
+    def test_the_guard_runs_before_the_subprocess(self) -> None:
+        with (
+            patch.object(run.subprocess, "Popen") as popen,
+            self.assertRaises(ValueError),
+        ):
+            run.git(REPO, ["stash", "list", "--format=%gd%00%gs"])
+        popen.assert_not_called()
+
+    def test_the_real_list_stashes_format_passes_the_guard(self) -> None:
+        from shad.git import refs
+
+        with patch.object(refs, "git", return_value=_completed()) as git:
+            refs.list_stashes(REPO)
+        run._check_format_dialect(git.call_args.args[1])
+
+    def test_the_real_list_branches_format_passes_the_guard(self) -> None:
+        from shad.git import refs
+
+        with patch.object(refs, "git", return_value=_completed()) as git:
+            refs.list_branches(REPO)
+        run._check_format_dialect(git.call_args.args[1])

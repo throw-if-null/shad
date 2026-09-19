@@ -40,7 +40,7 @@ from shad.shared.errors import ShadError
 
 console = Console()
 
-ACTIONS = ("sync",)
+ACTIONS = ("sync", "panel")
 
 # Each unit of work is a `git fetch` subprocess; an uncapped pool would open
 # one per configured project, contending for the ssh-agent and the link.
@@ -516,6 +516,10 @@ def cmd_git(cfg: Config, args: argparse.Namespace) -> None:
             f"unknown git action '{action}'; available: {', '.join(ACTIONS)}"
         )
 
+    if action == "panel":
+        open_panel(cfg, list(args.name), fetch=not getattr(args, "no_fetch", False))
+        return
+
     target = resolve_target(cfg, list(args.name), usage="shad git sync")
     sync_projects(
         target.projects,
@@ -523,3 +527,43 @@ def cmd_git(cfg: Config, args: argparse.Namespace) -> None:
         dry_run=getattr(args, "dry_run", False),
         switch=getattr(args, "switch", False),
     )
+
+
+def open_panel(cfg: Config, name: list[str], *, fetch: bool) -> None:
+    """Run the read-only git panel against exactly one repository."""
+    require_git()
+    repo = _resolve_one(cfg, name)
+    # Imported here, not at module scope: textual costs roughly 100ms to
+    # import, and `shad git sync` must not pay it.
+    from shad.git.panel import run_panel
+
+    run_panel(repo, fetch=fetch)
+
+
+def _resolve_one(cfg: Config, name: list[str]) -> Repo:
+    """
+    The single repository the panel shows.
+
+    With no name this is the current directory, which is what makes the panel
+    usable from any repository rather than only from a configured project.
+    That differs from `sync`, where no name means every configured project —
+    a single-repository view has no all-projects form.
+    """
+    if not name:
+        path = Path.cwd()
+    else:
+        target = resolve_target(cfg, name, usage="shad git panel")
+        if len(target.projects) != 1:
+            names = ", ".join(p.display_name for p in target.projects)
+            raise ShadError(
+                f"'{' '.join(name)}' matches {len(target.projects)} projects "
+                f"({names}); shad git panel shows one repository"
+            )
+        path = target.projects[0].path
+
+    try:
+        return discover.discover(path)
+    except discover.NotUsable as exc:
+        raise ShadError(str(exc)) from None
+    except GitMissing as exc:
+        raise ShadError(str(exc)) from None

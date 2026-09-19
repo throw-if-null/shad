@@ -22,7 +22,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from shad.git import apply, discover, refs
+from shad.git import apply, discover, refs, snapshot
 from shad.git import command as C
 from shad.git import plan as planning
 from shad.git.model import BranchInfo, Worktree, WorktreeKept
@@ -677,3 +677,185 @@ class WorktreePruneAgreementTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(shutil.which("git"), "git not installed")
+class SnapshotTests(unittest.TestCase):
+    """
+    snapshot.collect against a real repository.
+
+    The stash reflog is the reason this class exists. `stash list` belongs to
+    the log pretty-format family, which does not interpret the `%00` escape
+    the rest of the slice uses, and `-z` frames records with the same NUL that
+    separates fields. Both are external contracts a faked stdout cannot check.
+    """
+
+    tmp: tempfile.TemporaryDirectory[str]
+    remote: Path
+    clone: Path
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.tmp = tempfile.TemporaryDirectory()
+        root = Path(cls.tmp.name)
+
+        work = root / "work"
+        work.mkdir()
+        _git(root, "init", "--quiet", "--initial-branch=main", str(work))
+        _commit(work, "README.md", "one\n", "Add readme")
+
+        cls.remote = root / "remote.git"
+        _git(root, "clone", "--quiet", "--bare", str(work), str(cls.remote))
+
+        cls.clone = root / "clone"
+        _git(root, "clone", "--quiet", str(cls.remote), str(cls.clone))
+
+        # A branch with no upstream, and one linked worktree holding it.
+        _git(cls.clone, "branch", "--quiet", "side", "main")
+        _git(cls.clone, "worktree", "add", "--quiet", str(root / "wt-side"), "side")
+        _git(cls.clone, "worktree", "add", "--quiet", "--detach", str(root / "wt-det"))
+
+        # Three stashes: a custom message, a WIP, and one made on `side`.
+        (cls.clone / "README.md").write_text("dirty one\n")
+        _git(cls.clone, "stash", "push", "--quiet", "-m", "custom: with a colon")
+        (cls.clone / "README.md").write_text("dirty two\n")
+        _git(cls.clone, "stash", "push", "--quiet")
+
+        # The remote advances, so `behind` is non-zero after a fetch.
+        _commit(work, "second.txt", "two\n", "Add second")
+        _git(work, "push", "--quiet", str(cls.remote), "main")
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        # Worktrees hold open handles under the temp dir on some platforms.
+        _git(cls.clone, "worktree", "prune")
+        cls.tmp.cleanup()
+
+    def _collect(self, *, fetch: bool) -> snapshot.Snapshot:
+        return snapshot.collect(discover.discover(self.clone), fetch=fetch)
+
+    def test_local_collect_reports_head_branches_worktrees_and_stashes(self) -> None:
+        snap = self._collect(fetch=False)
+        self.assertEqual(snap.head, "main")
+        self.assertEqual(snap.git_version.split(".")[0], "2")
+        self.assertEqual(
+            sorted(b.name for b in snap.branches), ["main", "side"]
+        )
+        self.assertEqual(len(snap.worktrees), 3)
+        self.assertEqual(len(snap.stashes), 2)
+        self.assertIsNone(snap.fetch_error)
+
+    def test_stash_records_survive_a_message_containing_the_separator(self) -> None:
+        stashes = self._collect(fetch=False).stashes
+        # Newest first, as `stash list` orders them.
+        self.assertEqual([s.ref for s in stashes], ["stash@{0}", "stash@{1}"])
+        self.assertTrue(all(s.branch == "main" for s in stashes))
+        self.assertEqual(stashes[1].message, "custom: with a colon")
+        self.assertTrue(all(s.timestamp > 0 for s in stashes))
+
+    def test_worktrees_report_their_branch_and_detached_state(self) -> None:
+        worktrees = self._collect(fetch=False).worktrees
+        by_name = {w.path.name: w for w in worktrees}
+        self.assertEqual(by_name["clone"].branch, "refs/heads/main")
+        self.assertEqual(by_name["wt-side"].branch, "refs/heads/side")
+        self.assertTrue(by_name["wt-det"].detached)
+        self.assertIsNone(by_name["wt-det"].branch)
+
+    def test_checked_out_covers_every_worktree_not_just_the_main_one(self) -> None:
+        snap = self._collect(fetch=False)
+        self.assertEqual(
+            snap.checked_out, {"refs/heads/main", "refs/heads/side"}
+        )
+
+    def test_a_branch_without_an_upstream_reports_none(self) -> None:
+        snap = self._collect(fetch=False)
+        side = next(b for b in snap.branches if b.name == "side")
+        self.assertEqual(side.upstream, "")
+
+    def test_fetch_reports_the_commits_available_to_pull(self) -> None:
+        snap = self._collect(fetch=True)
+        self.assertIsNone(snap.fetch_error)
+        self.assertIsNotNone(snap.fetched_at)
+        self.assertEqual(snap.remote, "origin")
+        self.assertEqual(snap.head_upstream, "refs/remotes/origin/main")
+        self.assertEqual(snap.behind, 1)
+        self.assertEqual(snap.ahead, 0)
+
+    def test_the_panel_fetch_does_not_prune(self) -> None:
+        # A viewer must leave the remote-tracking refs that `shad git sync`
+        # reads as proof a gone branch was fully pushed.
+        _git(self.clone, "update-ref", "refs/remotes/origin/ghost", "HEAD")
+        snap = self._collect(fetch=True)
+        self.assertIsNone(snap.fetch_error)
+        self.assertTrue(refs.ref_exists(self.clone, "refs/remotes/origin/ghost"))
+        _git(self.clone, "update-ref", "-d", "refs/remotes/origin/ghost")
+
+    def test_an_unreachable_remote_still_yields_local_state(self) -> None:
+        _git(self.clone, "remote", "set-url", "origin", str(self.clone / "nope.git"))
+        try:
+            snap = self._collect(fetch=True)
+        finally:
+            _git(self.clone, "remote", "set-url", "origin", str(self.remote))
+        self.assertIsNotNone(snap.fetch_error)
+        self.assertIsNone(snap.fetched_at)
+        self.assertEqual(len(snap.branches), 2)
+        self.assertEqual(len(snap.stashes), 2)
+
+
+@unittest.skipUnless(shutil.which("git"), "git not installed")
+class FormatDialectTests(unittest.TestCase):
+    """
+    The external fact behind run._check_format_dialect.
+
+    git's ref-filter and pretty-format languages spell a NUL differently and
+    each emits the other's spelling as literal text, exiting 0 either way.
+    The guard encodes that; this proves it against the installed git, so a
+    future release that changed it would fail here rather than leave the
+    guard rejecting formats that had become valid.
+    """
+
+    tmp: tempfile.TemporaryDirectory[str]
+    repo: Path
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.repo = Path(cls.tmp.name) / "repo"
+        cls.repo.mkdir()
+        _git(Path(cls.tmp.name), "init", "--quiet", "--initial-branch=main", str(cls.repo))
+        _commit(cls.repo, "f.txt", "one\n", "Add f")
+        (cls.repo / "f.txt").write_text("two\n")
+        _git(cls.repo, "stash", "push", "--quiet", "-m", "a message")
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.tmp.cleanup()
+
+    def test_for_each_ref_expands_percent_00_and_not_percent_x00(self) -> None:
+        good = _git(self.repo, "for-each-ref", "--format=%(refname)%00%(objectname)")
+        self.assertIn("\x00", good)
+
+        bad = _git(self.repo, "for-each-ref", "--format=%(refname)%x00%(objectname)")
+        self.assertNotIn("\x00", bad)
+        self.assertIn("%x00", bad)
+
+    def test_stash_list_expands_percent_x00_and_not_percent_00(self) -> None:
+        good = _git(self.repo, "stash", "list", "--format=%gd%x00%gs")
+        self.assertIn("\x00", good)
+
+        bad = _git(self.repo, "stash", "list", "--format=%gd%00%gs")
+        self.assertNotIn("\x00", bad)
+        self.assertIn("%00", bad)
+
+    def test_the_wrong_escape_is_not_an_error_which_is_why_a_guard_exists(self) -> None:
+        # Exit 0, empty stderr: nothing downstream can detect the mistake.
+        env = {**os.environ, **_ISOLATE}
+        result = subprocess.run(
+            ["git", "-C", str(self.repo), "stash", "list", "--format=%gd%00%gs"],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stderr, "")
