@@ -100,6 +100,15 @@ class Stash:
 
 
 @dataclass(frozen=True)
+class Commit:
+    """One entry of `log`, for display."""
+
+    short_oid: str
+    subject: str
+    timestamp: int  # committer date, seconds since the epoch; 0 when unreadable
+
+
+@dataclass(frozen=True)
 class FetchResult:
     ok: bool
     error: str | None = None

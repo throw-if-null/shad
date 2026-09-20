@@ -25,17 +25,23 @@ from pathlib import Path
 from rich.console import Console
 from rich.text import Text
 
+from shad.git import refs
+from shad.git.discover import head_branch, is_clean
+from shad.git.model import short_branch
 from shad.shared.config import Project
-from shad.shared.render import make_table
+from shad.shared.render import make_table, relative_age
 from shad.shared.tmux import list_project_sessions, tmux_server_running
 
 console = Console()
+
+RECENT_COMMITS = 3
 
 
 # ── subprocess / fetch helpers ────────────────────────────────────────────
 
 
 def _capture(args: list[str], *, cwd: Path | None = None) -> str:
+    """Run a non-git helper and return its stdout, or "" on any failure."""
     try:
         r = subprocess.run(args, capture_output=True, text=True, cwd=cwd, check=False)
         return r.stdout.strip() if r.returncode == 0 else ""
@@ -134,41 +140,52 @@ def _print_tmux(project: Project) -> None:
 
 
 def _print_git(path: Path) -> None:
+    """
+    Print the git section for *path*.
+
+    Every query goes through shad.git.run.git rather than a bare subprocess:
+    that wrapper scrubs an inherited GIT_DIR, which would otherwise make this
+    table describe whichever repository invoked shad — a git hook, or a tmux
+    pane started by one — instead of the project. It also passes an explicit
+    `-C` and a timeout, so a slow or wedged repository cannot hang the report.
+    """
     if not (path / ".git").exists():
         console.print(Text("  (not a git repository)", style="dim"))
         return
 
     t = make_table("git")
 
-    branch = _capture(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=path)
-    t.add_row(Text("branch", style="dim"), Text(branch or "unknown", style="dim"))
+    head = head_branch(path)
+    branch = short_branch(head) if head else "detached"
+    t.add_row(Text("branch", style="dim"), Text(branch, style="dim"))
 
-    tag = _capture(["git", "describe", "--tags", "--abbrev=0"], cwd=path)
+    tag = refs.latest_tag(path)
     t.add_row(
         Text("latest tag", style="dim"),
         Text(tag if tag else "—", style="" if tag else "dim"),
     )
 
-    dirty = _capture(["git", "status", "--short"], cwd=path)
-    dirty_count = len([line for line in dirty.splitlines() if line.strip()])
+    # Counts every untracked file, where `status --short` collapsed an
+    # untracked directory into a single entry. An untracked directory holding
+    # two files now reads as two, which is what the "file(s)" label claims.
+    _clean, changed, untracked = is_clean(path, untracked=True)
+    dirty_count = changed + untracked
     if dirty_count:
         dirty_val = Text(f"{dirty_count} file(s)", style="yellow")
     else:
         dirty_val = Text("clean", style="dim")
     t.add_row(Text("uncommitted", style="dim"), dirty_val)
 
-    log = _capture(["git", "log", "--format=%h\x1f%s\x1f%cr", "-3"], cwd=path)
-    if log:
-        for i, entry in enumerate(log.splitlines()):
-            parts = entry.split("\x1f", 2)
-            h, subj, age = (parts + ["", "", ""])[:3]
+    commits = refs.recent_commits(path, RECENT_COMMITS)
+    if commits:
+        for i, commit in enumerate(commits):
             label = Text("commits", style="dim") if i == 0 else Text("")
             row = Text()
-            row.append(h, style="yellow")
+            row.append(commit.short_oid, style="yellow")
             row.append("  ")
-            row.append(subj)
+            row.append(commit.subject)
             row.append("  ")
-            row.append(age, style="dim")
+            row.append(relative_age(commit.timestamp), style="dim")
             t.add_row(label, row)
     else:
         t.add_row(Text("commits", style="dim"), Text("none", style="dim"))

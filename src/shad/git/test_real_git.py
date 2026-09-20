@@ -859,3 +859,66 @@ class FormatDialectTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stderr, "")
+
+
+@unittest.skipUnless(shutil.which("git"), "git not installed")
+class StatusQueryTests(unittest.TestCase):
+    """
+    latest_tag and recent_commits against a real repository.
+
+    `shad projects ... status` renders these, and both are log/describe
+    commands whose formats and exit codes are external contracts.
+    """
+
+    tmp: tempfile.TemporaryDirectory[str]
+    repo: Path
+    empty: Path
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.tmp = tempfile.TemporaryDirectory()
+        root = Path(cls.tmp.name)
+
+        cls.repo = root / "repo"
+        cls.repo.mkdir()
+        _git(root, "init", "--quiet", "--initial-branch=main", str(cls.repo))
+        _commit(cls.repo, "a.txt", "one\n", "Add a")
+        _git(cls.repo, "tag", "v0.1.0")
+        _commit(cls.repo, "b.txt", "two\n", "fix: add b")
+
+        cls.empty = root / "empty"
+        cls.empty.mkdir()
+        _git(root, "init", "--quiet", "--initial-branch=main", str(cls.empty))
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.tmp.cleanup()
+
+    def test_latest_tag_finds_a_reachable_tag(self) -> None:
+        self.assertEqual(refs.latest_tag(self.repo), "v0.1.0")
+
+    def test_latest_tag_is_empty_when_there_are_no_tags(self) -> None:
+        self.assertEqual(refs.latest_tag(self.empty), "")
+
+    def test_recent_commits_are_newest_first_with_real_timestamps(self) -> None:
+        commits = refs.recent_commits(self.repo, 3)
+        self.assertEqual([c.subject for c in commits], ["fix: add b", "Add a"])
+        self.assertTrue(all(c.timestamp > 0 for c in commits))
+        self.assertTrue(all(c.short_oid for c in commits))
+
+    def test_recent_commits_honours_the_count(self) -> None:
+        self.assertEqual(len(refs.recent_commits(self.repo, 1)), 1)
+
+    def test_recent_commits_on_an_unborn_head_is_empty(self) -> None:
+        self.assertEqual(refs.recent_commits(self.empty, 3), [])
+
+    def test_an_inherited_git_dir_cannot_retarget_the_query(self) -> None:
+        # The bug this migration fixed: a bare subprocess with cwd= reported
+        # whichever repository GIT_DIR named, not the project.
+        with patch.dict(
+            os.environ,
+            {"GIT_DIR": str(self.empty / ".git"), "GIT_WORK_TREE": str(self.empty)},
+        ):
+            self.assertEqual(refs.latest_tag(self.repo), "v0.1.0")
+            self.assertEqual(len(refs.recent_commits(self.repo, 3)), 2)
+            self.assertEqual(discover.head_branch(self.repo), "refs/heads/main")

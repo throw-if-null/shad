@@ -16,7 +16,7 @@ src/shad/
 ├── shared/                     # cross-cutting utilities
 │   ├── config.py               # TOML config loading, Project/Defaults, target resolution
 │   ├── errors.py               # ShadError exception
-│   ├── render.py               # make_table() — the shared rich table style
+│   ├── render.py               # make_table() and relative_age() — shared presentation
 │   └── tmux.py                 # low-level tmux subprocess wrappers
 ├── projects/
 │   ├── open/                   # "shad projects <name>" — session picker + layout
@@ -24,7 +24,7 @@ src/shad/
 │   │   ├── sessions.py         # OC session picker (SQLite query + TUI)
 │   │   ├── layout.py           # tmux 3-pane layout creation
 │   │   └── banner.py           # ASCII art banner
-│   ├── status/command.py       # "shad projects <name> status"
+│   ├── status/command.py       # "shad projects <name> status" — reads git via the git slice
 │   └── stop/command.py         # "shad projects <name> stop"
 ├── config/                     # "shad config" — inspect and edit shad.toml
 │   ├── command.py              # action dispatch (show/path/keys/get/set/unset/edit/validate)
@@ -91,6 +91,8 @@ Tests use `unittest.TestCase` with `unittest.mock.patch` for isolating subproces
 - **textual is imported lazily**: `git/command.py::open_panel` imports `shad.git.panel` inside the function, not at module scope. `textual.app` costs roughly 100ms to import and every `shad projects <name>` and `shad git sync` would otherwise pay it. Keep every `textual` import inside `panel.py`.
 - **Panel tests**: `git/test_panel.py` uses stdlib `unittest.IsolatedAsyncioTestCase` with textual's `App.run_test()`, so the suite needs no `pytest-asyncio`. The logic worth testing lives in `snapshot.py`, which is synchronous — keep it that way and keep the panel a thin view, or the testable surface moves into the async layer.
 - **Panel sizing**: the pane is about 70x17 at the default `panel_percent`/`split_percent`. That is why the header is one line rather than a table, the nav column is a fixed 16 (12-char label + 2 padding + 1 border, or the labels wrap), and the stash age is `5m` rather than `5 minutes ago`.
+- **All git goes through `shad.git.run.git`**: `projects/status/command.py` used to shell out with `subprocess.run(..., cwd=path)`. That path inherits `GIT_DIR`, so `shad projects <name> status` reported whichever repository invoked shad — a git hook, or a tmux pane started by one — instead of the project, and it had no timeout. It now uses `discover.head_branch`, `discover.is_clean`, `refs.latest_tag` and `refs.recent_commits`. `_capture` survives only for the non-git version probes (`python3 --version` and friends); do not route git through it again. `projects/status/test_command.py` asserts no `["git"` literal remains in the module.
+- **The status dirty count changed with that migration**: `is_clean(untracked=True)` counts every untracked file, where `status --short` collapsed an untracked directory into one entry. An untracked directory holding two files now reads as two, which is what the "file(s)" label claims.
 - **git output parsing**: always use plumbing with explicit formats, and decide from exit codes. Git messages are gettext-translated, `fetch.output = compact` rewrites ref names, and `git branch` layout depends on terminal width. A real NUL byte cannot be passed in argv, so the separator is an escape git expands — and the spelling depends on the command family: ref-filter (`for-each-ref`, `branch`, `tag`) takes `%00` (`FMT_SEP`), the pretty-format family (`log`, `show`, `stash list`, `reflog`) takes `%x00` (`LOG_SEP`). Neither accepts the other's, and neither reports the mismatch — `run._check_format_dialect` raises on it instead.
 - **Completion input**: the completion script parses `shad config keys`, not `shad projects`. The latter prints ●/◆ bullets for humans. The script is generated from a template in `completion/command.py` with the `config/schema.py` enum values interpolated, and is installed by *sourcing* `shad completion bash`, never by pasting its text into a startup file — a pasted copy silently keeps completing an older command surface. `completion/test_command.py` drives the script in a real bash process against a fixture config, so a new subcommand that the script does not know about fails the suite.
 - **Project identity**: a project is a *directory plus a tmux session*, not a repository — projects need not be git repos at all. Two projects on the same directory are rejected by `_reject_duplicate_paths` in `shared/config.py`, which is safe to fail hard on because it is a property of the config text alone. Two projects on different directories that resolve to one repository (linked worktrees) are legal, and `git/command.py::_resolve` deduplicates them on `--git-common-dir` before any fetch runs. Do not conflate the two: two *clones* of one remote have different common dirs and different local branches, so both must be synced.

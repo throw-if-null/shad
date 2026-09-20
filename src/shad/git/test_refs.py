@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from shad.git import refs
-from shad.git.model import Stash, Worktree
+from shad.git.model import Commit, Stash, Worktree
 
 REPO = Path("/tmp/repo")
 
@@ -205,3 +205,53 @@ class StashParsingTests(unittest.TestCase):
         fmt = next(a for a in args if a.startswith("--format="))
         self.assertIn("%ct", fmt)
         self.assertNotIn("%cr", fmt)
+
+
+class RecentCommitsTests(unittest.TestCase):
+    def _run(self, payload: str, returncode: int = 0) -> list[Commit]:
+        with patch.object(
+            refs, "git", return_value=_completed(returncode=returncode, stdout=payload)
+        ):
+            return refs.recent_commits(REPO, 3)
+
+    def test_records_are_recovered_by_field_count(self) -> None:
+        payload = "abc1234\x00Add a thing\x001700000000\x00def5678\x00Fix it\x001700000060\x00"
+        first, second = self._run(payload)
+        self.assertEqual(first.short_oid, "abc1234")
+        self.assertEqual(first.subject, "Add a thing")
+        self.assertEqual(first.timestamp, 1700000000)
+        self.assertEqual(second.subject, "Fix it")
+
+    def test_an_unborn_head_reports_nothing(self) -> None:
+        self.assertEqual(self._run("", returncode=128), [])
+
+    def test_a_subject_containing_a_colon_is_kept_whole(self) -> None:
+        payload = "abc1234\x00fix: the thing\x001700000000\x00"
+        (entry,) = self._run(payload)
+        self.assertEqual(entry.subject, "fix: the thing")
+
+    def test_a_truncated_trailing_record_is_dropped(self) -> None:
+        payload = "abc1234\x00one\x001700000000\x00def5678\x00two\x00"
+        (entry,) = self._run(payload)
+        self.assertEqual(entry.short_oid, "abc1234")
+
+    def test_it_uses_the_log_separator_and_a_timestamp(self) -> None:
+        with patch.object(refs, "git", return_value=_completed()) as git:
+            refs.recent_commits(REPO, 3)
+        (_repo, args), _ = git.call_args
+        fmt = next(a for a in args if a.startswith("--format="))
+        self.assertIn("%x00", fmt)
+        self.assertNotIn("%00", fmt.replace("%x00", ""))
+        self.assertIn("%ct", fmt)
+        self.assertIn("-z", args)
+        self.assertIn("-3", args)
+
+
+class LatestTagTests(unittest.TestCase):
+    def test_the_tag_is_returned_stripped(self) -> None:
+        with patch.object(refs, "git", return_value=_completed(stdout="v1.2.3\n")):
+            self.assertEqual(refs.latest_tag(REPO), "v1.2.3")
+
+    def test_no_tags_yields_empty_not_an_error(self) -> None:
+        with patch.object(refs, "git", return_value=_completed(returncode=128)):
+            self.assertEqual(refs.latest_tag(REPO), "")

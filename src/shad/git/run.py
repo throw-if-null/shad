@@ -72,6 +72,8 @@ _READ_ONLY = frozenset(
         "rev-parse",
         "for-each-ref",
         "status",
+        "describe",
+        "log",
         "merge-base",
         "rev-list",
         "show-ref",
