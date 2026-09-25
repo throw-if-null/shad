@@ -7,7 +7,7 @@ name = "shad"
 version = "0.1.0"
 description = "Attach or create project-specific tmux sessions from the current terminal"
 requires-python = ">=3.11"
-dependencies = ["rich>=15.0.0", "textual>=8.0.0"]
+dependencies = ["rich>=15.0.0", "textual>=8.2.8"]
 
 [project.optional-dependencies]
 dev = ["pytest==9.1.1", "ruff==0.16.8", "mypy==2.3.1"]
