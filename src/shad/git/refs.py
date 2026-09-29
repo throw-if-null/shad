@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from shad.git.model import FMT_SEP, LOG_SEP, NUL, BranchRef, Stash, Worktree
+from shad.git.model import FMT_SEP, LOG_SEP, NUL, BranchRef, Commit, Stash, Worktree
 from shad.git.run import T_LS_REMOTE, git
 
 
@@ -242,6 +242,49 @@ def list_stashes(repo: Path) -> list[Stash]:
             )
         )
     return stashes
+
+
+def latest_tag(repo: Path) -> str:
+    """
+    The most recent tag reachable from HEAD, or "" when there is none.
+
+    Exit 128 covers both "no tags" and "no commits yet", and neither is an
+    error worth reporting — the caller renders an em dash either way.
+    """
+    result = git(repo, ["describe", "--tags", "--abbrev=0"])
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def recent_commits(repo: Path, count: int) -> list[Commit]:
+    """
+    The newest *count* commits on HEAD, newest first.
+
+    Same framing as list_stashes, and for the same reason: this is the log
+    pretty-format language, so the separator is LOG_SEP and -z terminates each
+    record with that same byte. %s is the subject line alone, so it cannot
+    contain a newline. An unborn HEAD exits 128 and yields [].
+    """
+    fields = ("%h", "%s", "%ct")
+    fmt = LOG_SEP.join(fields)
+    result = git(repo, ["log", "-z", f"--format={fmt}", f"-{count}"])
+    if result.returncode != 0:
+        return []
+
+    parts = result.stdout.split(NUL)
+    if parts and parts[-1] == "":
+        parts.pop()
+
+    commits: list[Commit] = []
+    for i in range(0, len(parts) - len(fields) + 1, len(fields)):
+        short_oid, subject, when = parts[i], parts[i + 1], parts[i + 2]
+        commits.append(
+            Commit(
+                short_oid=short_oid,
+                subject=subject,
+                timestamp=int(when) if when.isdigit() else 0,
+            )
+        )
+    return commits
 
 
 def _stash_branch(subject: str) -> str:

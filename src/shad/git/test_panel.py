@@ -18,7 +18,7 @@ from textual.coordinate import Coordinate
 from textual.widgets import ContentSwitcher, DataTable, ListItem, ListView, Static
 
 from shad.git.model import BranchRef, Repo, Stash, Worktree
-from shad.git.panel import BRANCHES, STASHES, WORKTREES, GitPanel, _age, _upstream
+from shad.git.panel import BRANCHES, STASHES, WORKTREES, GitPanel, _upstream
 from shad.git.snapshot import Snapshot
 
 ROOT = Path("/tmp/repo")
@@ -182,28 +182,6 @@ class UpstreamLabelTests(unittest.TestCase):
     def test_a_slashed_branch_name_still_matches_its_upstream(self) -> None:
         branch = _branch("feat/a", upstream="refs/remotes/origin/feat/a")
         self.assertEqual(_upstream(branch), "origin")
-
-
-class AgeTests(unittest.TestCase):
-    NOW = 1_700_000_000.0
-
-    def _age(self, seconds: int) -> str:
-        return _age(int(self.NOW) - seconds, now=self.NOW)
-
-    def test_units_step_up_with_the_interval(self) -> None:
-        self.assertEqual(self._age(5), "5s")
-        self.assertEqual(self._age(90), "1m")
-        self.assertEqual(self._age(7200), "2h")
-        self.assertEqual(self._age(3 * 86400), "3d")
-        self.assertEqual(self._age(14 * 86400), "2w")
-        self.assertEqual(self._age(60 * 86400), "2mo")
-        self.assertEqual(self._age(800 * 86400), "2y")
-
-    def test_a_missing_timestamp_renders_a_dash(self) -> None:
-        self.assertEqual(_age(0, now=self.NOW), "—")
-
-    def test_a_future_timestamp_does_not_render_a_negative_age(self) -> None:
-        self.assertEqual(_age(int(self.NOW) + 60, now=self.NOW), "now")
 
 
 if __name__ == "__main__":

@@ -15,7 +15,6 @@ module lazily, so `shad projects` and `shad git sync` never pay for it.
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
 from typing import ClassVar
 
@@ -33,6 +32,7 @@ from textual.widgets import (
 
 from shad.git.model import BranchRef, Repo, short_branch
 from shad.git.snapshot import Snapshot, collect
+from shad.shared.render import relative_age
 
 # Nav entries, in display order. The id is also the DataTable/ContentSwitcher id.
 BRANCHES = "branches"
@@ -78,32 +78,6 @@ def _upstream(branch: BranchRef) -> str:
     tracked = branch.upstream.removeprefix("refs/remotes/")
     remote, _, name = tracked.partition("/")
     return remote if name == branch.name else tracked
-
-
-def _age(timestamp: int, *, now: float | None = None) -> str:
-    """
-    A unix timestamp as a compact age: 5m, 3h, 2d, 6w, 14mo, 3y.
-
-    Computed here rather than read from git's %cr, which is a translated
-    string, and kept short because the stash table has four columns in a
-    pane about 56 characters wide.
-    """
-    if timestamp <= 0:
-        return "—"
-    seconds = int((time.time() if now is None else now) - timestamp)
-    if seconds < 0:
-        return "now"
-    for limit, divisor, suffix in (
-        (60, 1, "s"),
-        (3600, 60, "m"),
-        (86400, 3600, "h"),
-        (604800, 86400, "d"),
-        (2592000, 604800, "w"),
-        (31536000, 2592000, "mo"),
-    ):
-        if seconds < limit:
-            return f"{seconds // divisor}{suffix}"
-    return f"{seconds // 31536000}y"
 
 
 class GitPanel(App[None]):
@@ -272,7 +246,7 @@ class GitPanel(App[None]):
         table = self._reset(STASHES)
         for stash in snap.stashes:
             table.add_row(
-                stash.ref, stash.branch or "—", stash.message, _age(stash.timestamp)
+                stash.ref, stash.branch or "—", stash.message, relative_age(stash.timestamp)
             )
 
     def _reset(self, section_id: str) -> DataTable[str]:
