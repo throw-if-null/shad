@@ -18,7 +18,7 @@ def open_project(project: Project, defaults: Defaults) -> int | None:
     Returns the tmux exit code on success, or None if the user cancelled.
     """
     if project.harness == "claude":
-        target = pick_claude_target(project.path.name)
+        target = pick_claude_target(project.path, "claude")
     else:
         target = pick_opencode_target(project.path, "opencode")
 

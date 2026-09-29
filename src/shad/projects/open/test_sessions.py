@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import os
 import sqlite3
 import tempfile
 import unittest
@@ -10,8 +12,11 @@ from unittest.mock import patch
 from shad.projects.open.sessions import (
     OcSession,
     OpencodeTarget,
+    _claude_project_dir,
+    _query_claude_sessions,
     _query_sessions,
     _truncate,
+    pick_claude_target,
     pick_opencode_target,
 )
 
@@ -225,6 +230,241 @@ class QuerySessionsTests(unittest.TestCase):
         ids = [s.id for s in result]
         self.assertIn("sess-active", ids)
         self.assertNotIn("sess-archived", ids)
+
+
+# ---------------------------------------------------------------------------
+# _claude_project_dir / _query_claude_sessions
+# ---------------------------------------------------------------------------
+
+
+def _write_transcript(
+    directory: Path, session_id: str, entries: list[dict], mtime: float
+) -> Path:
+    path = directory / f"{session_id}.jsonl"
+    path.write_text("".join(json.dumps(e) + "\n" for e in entries))
+    os.utime(path, (mtime, mtime))
+    return path
+
+
+def _user_entry(text: str, *, meta: bool = False) -> dict:
+    entry: dict = {"type": "user", "message": {"role": "user", "content": text}}
+    if meta:
+        entry["isMeta"] = True
+    return entry
+
+
+class ClaudeProjectDirTests(unittest.TestCase):
+    def test_path_separators_become_hyphens(self) -> None:
+        with patch(
+            "shad.projects.open.sessions.CLAUDE_PROJECTS_DIR", Path("/projects")
+        ):
+            result = _claude_project_dir(Path("/var/home/me/src/tin/shad"))
+        self.assertEqual(result.name, "-var-home-me-src-tin-shad")
+
+    def test_dots_become_hyphens(self) -> None:
+        with patch(
+            "shad.projects.open.sessions.CLAUDE_PROJECTS_DIR", Path("/projects")
+        ):
+            result = _claude_project_dir(Path("/home/me/.local/share/chezmoi"))
+        self.assertEqual(result.name, "-home-me--local-share-chezmoi")
+
+
+class QueryClaudeSessionsTests(unittest.TestCase):
+    def test_returns_empty_list_when_directory_does_not_exist(self) -> None:
+        with patch(
+            "shad.projects.open.sessions.CLAUDE_PROJECTS_DIR",
+            Path("/nonexistent/claude/projects"),
+        ):
+            result = _query_claude_sessions(Path("/tmp/project"))
+        self.assertEqual(result, [])
+
+    def test_titles_sessions_with_the_first_real_user_prompt(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp) / "-tmp-project"
+            directory.mkdir()
+            _write_transcript(
+                directory,
+                "sess-a",
+                [
+                    {"type": "mode", "mode": "normal"},
+                    _user_entry("<local-command-caveat>Caveat: ...", meta=True),
+                    _user_entry("<command-name>/clear</command-name>"),
+                    _user_entry("Fix the login bug"),
+                    _user_entry("and then the logout bug"),
+                ],
+                mtime=1000,
+            )
+            with patch(
+                "shad.projects.open.sessions.CLAUDE_PROJECTS_DIR", Path(tmp)
+            ):
+                result = _query_claude_sessions(Path("/tmp/project"))
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].id, "sess-a")
+        self.assertEqual(result[0].title, "Fix the login bug")
+        self.assertEqual(result[0].time_updated, 1000 * 1000)
+
+    def test_orders_sessions_newest_first(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp) / "-tmp-project"
+            directory.mkdir()
+            _write_transcript(directory, "old", [_user_entry("older")], mtime=1000)
+            _write_transcript(directory, "new", [_user_entry("newer")], mtime=2000)
+            with patch(
+                "shad.projects.open.sessions.CLAUDE_PROJECTS_DIR", Path(tmp)
+            ):
+                result = _query_claude_sessions(Path("/tmp/project"))
+
+        self.assertEqual([s.id for s in result], ["new", "old"])
+
+    def test_skips_transcripts_without_a_user_prompt(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp) / "-tmp-project"
+            directory.mkdir()
+            _write_transcript(
+                directory,
+                "empty",
+                [{"type": "mode", "mode": "normal"}],
+                mtime=2000,
+            )
+            _write_transcript(directory, "real", [_user_entry("a prompt")], mtime=1000)
+            with patch(
+                "shad.projects.open.sessions.CLAUDE_PROJECTS_DIR", Path(tmp)
+            ):
+                result = _query_claude_sessions(Path("/tmp/project"))
+
+        self.assertEqual([s.id for s in result], ["real"])
+
+    def test_honours_the_session_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp) / "-tmp-project"
+            directory.mkdir()
+            for i in range(4):
+                _write_transcript(
+                    directory, f"sess-{i}", [_user_entry(f"p{i}")], mtime=1000 + i
+                )
+            with patch(
+                "shad.projects.open.sessions.CLAUDE_PROJECTS_DIR", Path(tmp)
+            ):
+                result = _query_claude_sessions(Path("/tmp/project"), limit=2)
+
+        self.assertEqual([s.id for s in result], ["sess-3", "sess-2"])
+
+    def test_reads_text_blocks_from_structured_content(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp) / "-tmp-project"
+            directory.mkdir()
+            _write_transcript(
+                directory,
+                "sess-a",
+                [
+                    {
+                        "type": "user",
+                        "message": {
+                            "role": "user",
+                            "content": [
+                                {"type": "image"},
+                                {"type": "text", "text": "describe  this\nimage"},
+                            ],
+                        },
+                    }
+                ],
+                mtime=1000,
+            )
+            with patch(
+                "shad.projects.open.sessions.CLAUDE_PROJECTS_DIR", Path(tmp)
+            ):
+                result = _query_claude_sessions(Path("/tmp/project"))
+
+        self.assertEqual(result[0].title, "describe this image")
+
+
+# ---------------------------------------------------------------------------
+# pick_claude_target
+# ---------------------------------------------------------------------------
+
+
+class PickClaudeTargetTests(unittest.TestCase):
+    def test_returns_fresh_target_when_no_sessions_exist(self) -> None:
+        with patch(
+            "shad.projects.open.sessions._query_claude_sessions", return_value=[]
+        ):
+            target = pick_claude_target(Path("/tmp/project"), "claude")
+
+        assert target is not None
+        self.assertEqual(target.command, "claude")
+        self.assertTrue(target.fresh)
+        self.assertEqual(target.session_prefix, "cc")
+        assert target.session_key is not None
+        self.assertTrue(target.session_key.startswith("fresh-"))
+
+    def test_resumed_sessions_get_distinct_session_keys(self) -> None:
+        sessions = [
+            OcSession(id="uuid-a", title="First", time_updated=2000),
+            OcSession(id="uuid-b", title="Second", time_updated=1000),
+        ]
+
+        targets = []
+        for chosen in (1, 2):
+            with (
+                patch(
+                    "shad.projects.open.sessions._query_claude_sessions",
+                    return_value=sessions,
+                ),
+                patch(
+                    "shad.projects.open.sessions._run_picker", return_value=chosen
+                ),
+            ):
+                targets.append(pick_claude_target(Path("/tmp/project"), "claude"))
+
+        self.assertEqual(
+            targets,
+            [
+                OpencodeTarget(
+                    command="claude --resume uuid-a",
+                    session_key="uuid-a",
+                    session_prefix="cc",
+                ),
+                OpencodeTarget(
+                    command="claude --resume uuid-b",
+                    session_key="uuid-b",
+                    session_prefix="cc",
+                ),
+            ],
+        )
+
+    def test_returns_fresh_target_when_new_session_selected(self) -> None:
+        sessions = [OcSession(id="uuid-a", title="First", time_updated=0)]
+
+        with (
+            patch(
+                "shad.projects.open.sessions._query_claude_sessions",
+                return_value=sessions,
+            ),
+            patch("shad.projects.open.sessions._run_picker", return_value=0),
+        ):
+            target = pick_claude_target(Path("/tmp/project"), "claude")
+
+        assert target is not None
+        self.assertEqual(target.command, "claude")
+        self.assertTrue(target.fresh)
+        self.assertEqual(target.session_prefix, "cc")
+
+    def test_returns_none_when_picker_cancelled(self) -> None:
+        sessions = [OcSession(id="uuid-a", title="First", time_updated=0)]
+
+        with (
+            patch(
+                "shad.projects.open.sessions._query_claude_sessions",
+                return_value=sessions,
+            ),
+            patch("shad.projects.open.sessions._run_picker", return_value=None),
+        ):
+            target = pick_claude_target(Path("/tmp/project"), "claude")
+
+        self.assertIsNone(target)
+
+
 
 
 if __name__ == "__main__":

@@ -3,16 +3,21 @@ AI session pickers for shad.
 
 Provides interactive arrow-key pickers for each supported AI harness:
 - pick_opencode_target: queries the OpenCode SQLite DB for recent sessions
-- pick_claude_target: two-option picker (new / resume) for Claude Code
+- pick_claude_target: reads the Claude Code transcript directory for recent sessions
+
+Both pickers resolve a concrete session id before returning, because the caller
+derives the tmux session name from it. A picker that returned a constant key
+would map every resumed conversation onto one tmux session.
 
 Public API
 ----------
 pick_opencode_target(project_path, base_opencode_cmd) -> OpencodeTarget | None
-pick_claude_target(project_name) -> OpencodeTarget | None
+pick_claude_target(project_path, base_claude_cmd) -> OpencodeTarget | None
 """
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -32,7 +37,21 @@ from rich.panel import Panel
 from rich.text import Text
 
 DB_PATH = Path.home() / ".local" / "share" / "opencode" / "opencode.db"
+CLAUDE_PROJECTS_DIR = Path.home() / ".claude" / "projects"
 SESSION_LIMIT = 5
+
+# Claude Code writes one transcript per session. Only the opening entries are
+# needed to label it, so the scan stops well before the end of a long file.
+_CLAUDE_TITLE_SCAN_LINES = 200
+
+_CLAUDE_SLUG_RE = re.compile(r"[^A-Za-z0-9]")
+
+# Slash commands, hook output and pasted attachments are recorded as user
+# entries wrapped in these tags. None of them is a prompt the user typed.
+_CLAUDE_WRAPPER_RE = re.compile(
+    r"^<(local-command-caveat|local-command-stdout|command-name|command-message"
+    r"|command-args|bash-input|bash-stdout|bash-stderr|system-reminder)\b"
+)
 
 _NEW_SESSION_RE = re.compile(r"^New session\s*-\s*\d{4}-\d{2}-\d{2}T[\d:.]+Z$")
 
@@ -93,12 +112,96 @@ def _query_sessions(project_path: Path, limit: int = SESSION_LIMIT) -> list[OcSe
         return []
 
 
+def _claude_project_dir(project_path: Path) -> Path:
+    """Return the Claude Code transcript directory for *project_path*.
+
+    Claude Code derives the directory name from the working directory by
+    replacing every character outside [A-Za-z0-9] with a hyphen.
+    """
+    return CLAUDE_PROJECTS_DIR / _CLAUDE_SLUG_RE.sub("-", str(project_path))
+
+
+def _claude_session_title(transcript: Path) -> str | None:
+    """Return the first real user prompt in *transcript*, or None if it has none.
+
+    Entries flagged ``isMeta`` and the command wrappers Claude Code records for
+    slash commands are not prompts the user typed, so they are skipped. A
+    transcript with no prompt at all is an empty session and is not offered.
+    """
+    try:
+        with transcript.open(encoding="utf-8") as handle:
+            for _, line in zip(range(_CLAUDE_TITLE_SCAN_LINES), handle, strict=False):
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if entry.get("type") != "user" or entry.get("isMeta"):
+                    continue
+                text = _claude_entry_text(entry)
+                if text:
+                    return text
+    except OSError:
+        return None
+    return None
+
+
+def _claude_entry_text(entry: dict) -> str | None:
+    """Return the prompt text of a transcript user entry, or None."""
+    content = entry.get("message", {}).get("content")
+    if isinstance(content, str):
+        blocks = [content]
+    elif isinstance(content, list):
+        blocks = [b.get("text", "") for b in content if b.get("type") == "text"]
+    else:
+        return None
+
+    for block in blocks:
+        text = " ".join(block.split())
+        if text and not _CLAUDE_WRAPPER_RE.match(text):
+            return text
+    return None
+
+
+def _query_claude_sessions(
+    project_path: Path, limit: int = SESSION_LIMIT
+) -> list[OcSession]:
+    """Return up to *limit* most-recent Claude Code sessions for *project_path*."""
+    directory = _claude_project_dir(project_path)
+    try:
+        transcripts = sorted(
+            directory.glob("*.jsonl"),
+            key=lambda f: f.stat().st_mtime,
+            reverse=True,
+        )
+    except OSError as exc:
+        warnings.warn(
+            f"shad: could not read claude session directory: {exc}", stacklevel=2
+        )
+        return []
+
+    sessions: list[OcSession] = []
+    for transcript in transcripts:
+        if len(sessions) == limit:
+            break
+        title = _claude_session_title(transcript)
+        if title is None:
+            continue
+        sessions.append(
+            OcSession(
+                id=transcript.stem,
+                title=title,
+                time_updated=int(transcript.stat().st_mtime * 1000),
+            )
+        )
+    return sessions
+
+
 def _truncate(text: str, max_len: int) -> str:
     return text if len(text) <= max_len else text[: max_len - 1] + "…"
 
 
 def _render_picker(
-    sessions: list[OcSession], selected: int, project_name: str
+    sessions: list[OcSession], selected: int, project_name: str, harness: str
 ) -> Panel:
     """Build the Rich renderable for the current picker state."""
     items = [None] + sessions  # index 0 = new session sentinel
@@ -129,7 +232,7 @@ def _render_picker(
 
     return Panel(
         lines,
-        title=f"[bold cyan]opencode session[/bold cyan]  [dim]─[/dim]  [bright_white]{project_name}[/bright_white]",
+        title=f"[bold cyan]{harness} session[/bold cyan]  [dim]─[/dim]  [bright_white]{project_name}[/bright_white]",
         border_style="cyan",
         padding=(0, 1),
     )
@@ -149,12 +252,16 @@ def _read_key(fd: int) -> str:
 
 
 def _render_panel(
-    sessions: list[OcSession], selected: int, project_name: str, width: int
+    sessions: list[OcSession],
+    selected: int,
+    project_name: str,
+    width: int,
+    harness: str,
 ) -> bytes:
     """Render picker panel to ANSI bytes."""
     buf = StringIO()
     Console(file=buf, force_terminal=True, width=width, highlight=False).print(
-        _render_picker(sessions, selected, project_name)
+        _render_picker(sessions, selected, project_name, harness)
     )
     return buf.getvalue().encode()
 
@@ -215,9 +322,11 @@ def _generic_picker(render_fn: Callable[[int], bytes], total: int) -> int | None
         return None
 
 
-def _run_picker(sessions: list[OcSession], project_name: str) -> int | None:
+def _run_picker(
+    sessions: list[OcSession], project_name: str, harness: str = "opencode"
+) -> int | None:
     """
-    OpenCode session picker.
+    Session picker.
     Returns index into [NEW_SESSION] + sessions, or None if cancelled.
     Index 0 = New session, 1..n = sessions[0..n-1].
     """
@@ -225,7 +334,7 @@ def _run_picker(sessions: list[OcSession], project_name: str) -> int | None:
     term_width = shutil.get_terminal_size().columns
 
     def render(selected: int) -> bytes:
-        return _render_panel(sessions, selected, project_name, term_width)
+        return _render_panel(sessions, selected, project_name, term_width, harness)
 
     return _generic_picker(render, len(items))
 
@@ -258,48 +367,38 @@ def pick_opencode_target(project_path: Path, base_cmd: str) -> OpencodeTarget | 
     return OpencodeTarget(command=f"{base_cmd} -s {session.id}", session_key=session.id)
 
 
-def pick_claude_target(project_name: str) -> OpencodeTarget | None:
+def pick_claude_target(
+    project_path: Path, base_cmd: str = "claude"
+) -> OpencodeTarget | None:
     """
-    Show a 2-option picker for Claude Code: New session or Resume.
-    Returns None if the user cancelled.
+    Show an interactive session picker and return the Claude Code target to run.
+
+    Returns None if the user explicitly cancelled (q / Esc).
+    Falls back to base_cmd when the project has no recorded sessions.
     """
-    labels = ["+ New session", "↩  Resume session"]
-    term_width = shutil.get_terminal_size().columns
+    sessions = _query_claude_sessions(project_path)
+    if not sessions:
+        return _fresh_claude_target(base_cmd)
 
-    def render(selected: int) -> bytes:
-        lines = Text()
-        for i, label in enumerate(labels):
-            is_sel = i == selected
-            pointer = "❯ " if is_sel else "  "
-            row = Text()
-            row.append(pointer, style="bold bright_green" if is_sel else "dim")
-            row.append(label, style="bold bright_white" if is_sel else "white")
-            lines.append_text(row)
-            lines.append("\n")
-        footer = Text("\n ↑↓ / j k  navigate   Enter  select   q  cancel", style="dim")
-        lines.append_text(footer)
-        panel = Panel(
-            lines,
-            title=f"[bold cyan]claude session[/bold cyan]  [dim]─[/dim]  [bright_white]{project_name}[/bright_white]",
-            border_style="cyan",
-            padding=(0, 1),
-        )
-        buf = StringIO()
-        Console(file=buf, force_terminal=True, width=term_width, highlight=False).print(panel)
-        return buf.getvalue().encode()
+    chosen = _run_picker(sessions, project_path.name, harness="claude")
 
-    chosen = _generic_picker(render, len(labels))
     if chosen is None:
-        return None
+        return None  # user cancelled — caller should abort
     if chosen == 0:
-        return OpencodeTarget(
-            command="claude",
-            session_key=f"fresh-{int(time.time())}",
-            fresh=True,
-            session_prefix="cc",
-        )
+        return _fresh_claude_target(base_cmd)
+
+    session = sessions[chosen - 1]
     return OpencodeTarget(
-        command="claude --resume",
-        session_key="resume",
+        command=f"{base_cmd} --resume {session.id}",
+        session_key=session.id,
+        session_prefix="cc",
+    )
+
+
+def _fresh_claude_target(base_cmd: str) -> OpencodeTarget:
+    return OpencodeTarget(
+        command=base_cmd,
+        session_key=f"fresh-{int(time.time())}",
+        fresh=True,
         session_prefix="cc",
     )

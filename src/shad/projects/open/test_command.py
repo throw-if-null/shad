@@ -126,5 +126,67 @@ class OpenProjectTests(unittest.TestCase):
         )
 
 
+class OpenProjectClaudeHarnessTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.project = Project(
+            key="shad",
+            group="tin",
+            path=Path("/tmp/shad"),
+            session="tin-shad",
+            harness="claude",
+        )
+        self.defaults = Defaults()
+
+    def _open(self, target: OpencodeTarget) -> str:
+        with (
+            patch(
+                "shad.projects.open.command.pick_claude_target", return_value=target
+            ),
+            patch("shad.projects.open.command.session_exists", return_value=False),
+            patch("shad.projects.open.command._create_session") as create_session,
+            patch("shad.projects.open.command._attach"),
+        ):
+            open_project(self.project, self.defaults)
+        return create_session.call_args.args[3]
+
+    def test_each_resumed_conversation_gets_its_own_tmux_session(self) -> None:
+        first = self._open(
+            OpencodeTarget(
+                command="claude --resume uuid-a",
+                session_key="uuid-a",
+                session_prefix="cc",
+            )
+        )
+        second = self._open(
+            OpencodeTarget(
+                command="claude --resume uuid-b",
+                session_key="uuid-b",
+                session_prefix="cc",
+            )
+        )
+
+        self.assertEqual(first, "tin-shad--cc-uuid-a")
+        self.assertEqual(second, "tin-shad--cc-uuid-b")
+        self.assertNotEqual(first, second)
+
+    def test_claude_picker_receives_the_project_path(self) -> None:
+        target = OpencodeTarget(
+            command="claude --resume uuid-a",
+            session_key="uuid-a",
+            session_prefix="cc",
+        )
+
+        with (
+            patch(
+                "shad.projects.open.command.pick_claude_target", return_value=target
+            ) as picker,
+            patch("shad.projects.open.command.session_exists", return_value=False),
+            patch("shad.projects.open.command._create_session"),
+            patch("shad.projects.open.command._attach"),
+        ):
+            open_project(self.project, self.defaults)
+
+        picker.assert_called_once_with(Path("/tmp/shad"), "claude")
+
 if __name__ == "__main__":
     unittest.main()
