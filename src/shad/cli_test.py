@@ -283,9 +283,8 @@ class ProjectsHarnessOverrideTests(unittest.TestCase):
     def test_parser_rejects_an_unknown_harness(self) -> None:
         parser = build_parser()
 
-        with self.assertRaises(SystemExit):
-            with patch("sys.stderr"):
-                parser.parse_args(["projects", "shad", "--harness", "nope"])
+        with self.assertRaises(SystemExit), patch("sys.stderr"):
+            parser.parse_args(["projects", "shad", "--harness", "nope"])
 
 
 class MainErrorHandlingTests(unittest.TestCase):
