@@ -247,6 +247,10 @@ shad projects alvr
 shad projects alvr db
 shad projects al d      # prefix matching per level
 
+# Open with a different harness, just this once
+shad projects kb --harness claude
+shad projects alvr db --harness opencode
+
 # Show session status without opening
 shad projects kb status
 shad projects alvr db status

@@ -185,6 +185,14 @@ _shad_complete() {
         return
     fi
 
+    # `--harness NAME` takes one of a fixed set. These names mirror
+    # shared/config.py::HARNESSES; the completion tests assert they match.
+    if [[ "$prev" == "--harness" ]] ||
+        { [[ "$prev" == "=" ]] && ((COMP_CWORD > 1)) && [[ "${COMP_WORDS[COMP_CWORD - 2]}" == "--harness" ]]; }; then
+        _shad_offer "$cur" "opencode claude"
+        return
+    fi
+
     # Drop that option pair from the word list so it cannot shift any later
     # position, and replay it to the `shad config keys` call below; otherwise
     # the project names offered come from a different file than the one the
@@ -199,6 +207,16 @@ _shad_complete() {
                 _shad_cmd+=(--config "${COMP_WORDS[index]}")
                 index=$((index + 1))
             fi
+            continue
+        fi
+        if [[ "${COMP_WORDS[index]}" == "--harness" ]]; then
+            # Keep the flag itself, so it is not offered a second time, but
+            # drop its value: it is not a project name and must not shift
+            # any later position.
+            words+=("${COMP_WORDS[index]}")
+            index=$((index + 1))
+            [[ "${COMP_WORDS[index]}" == "=" ]] && index=$((index + 1))
+            ((index < COMP_CWORD)) && index=$((index + 1))
             continue
         fi
         words+=("${COMP_WORDS[index]}")
@@ -271,6 +289,11 @@ _shad_complete() {
             status | stop) return ;;
             esac
         done
+        # Two names is the longest valid `projects` line; past that the
+        # command itself errors, so offer nothing.
+        ((${#args[@]} > 2)) && return
+        # Open only, so it is dropped above once an action is present.
+        extra="--harness"
     fi
 
     local flag_words
@@ -290,7 +313,7 @@ _shad_complete() {
         ;;
     2)
         if [[ "$command" == "projects" ]]; then
-            _shad_offer "$cur" "status stop"
+            _shad_offer "$cur" "status stop" "$flag_words"
         else
             _shad_offer "$cur" "$flag_words"
         fi

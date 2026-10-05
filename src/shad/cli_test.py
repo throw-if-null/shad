@@ -21,8 +21,8 @@ def _make_project(
     )
 
 
-def _make_args(name: list[str]) -> argparse.Namespace:
-    return argparse.Namespace(name=name)
+def _make_args(name: list[str], harness: str | None = None) -> argparse.Namespace:
+    return argparse.Namespace(name=name, harness=harness)
 
 
 # ---------------------------------------------------------------------------
@@ -44,7 +44,7 @@ class ProjectsCommandTests(unittest.TestCase):
             cmd_projects(cfg, args)
 
         self.assertEqual(ctx.exception.code, 0)
-        open_project.assert_called_once_with(project, cfg.defaults)
+        open_project.assert_called_once_with(project, cfg.defaults, harness=None)
 
     def test_top_level_project_open_dispatches_to_open_project(self) -> None:
         project = _make_project("shad")
@@ -59,7 +59,7 @@ class ProjectsCommandTests(unittest.TestCase):
             cmd_projects(cfg, args)
 
         self.assertEqual(ctx.exception.code, 0)
-        open_project.assert_called_once_with(project, cfg.defaults)
+        open_project.assert_called_once_with(project, cfg.defaults, harness=None)
 
 
 class ProjectsListTests(unittest.TestCase):
@@ -211,7 +211,7 @@ class ProjectsListTests(unittest.TestCase):
         cfg = Config(defaults=Defaults(), projects={"shad": project})
 
         with self.assertRaises(ShadError) as ctx:
-            _run_action(cfg, project, "restart")
+            _run_action(cfg, project, "restart", None)
 
         self.assertIn("unknown action", str(ctx.exception))
 
@@ -219,6 +219,73 @@ class ProjectsListTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # main() error handling
 # ---------------------------------------------------------------------------
+
+
+
+class ProjectsHarnessOverrideTests(unittest.TestCase):
+    def test_override_is_forwarded_for_a_top_level_project(self) -> None:
+        project = _make_project("shad")
+        cfg = Config(defaults=Defaults(), projects={"shad": project})
+        args = _make_args(["shad"], harness="claude")
+
+        with (
+            patch("shad.cli.print_banner"),
+            patch("shad.cli.open_project", return_value=0) as open_project,
+            self.assertRaises(SystemExit),
+        ):
+            cmd_projects(cfg, args)
+
+        open_project.assert_called_once_with(project, cfg.defaults, harness="claude")
+
+    def test_override_is_forwarded_for_a_grouped_project(self) -> None:
+        project = _make_project("shad", group="tin")
+        cfg = Config(defaults=Defaults(), groups={"tin": {"shad": project}})
+        args = _make_args(["tin", "shad"], harness="opencode")
+
+        with (
+            patch("shad.cli.print_banner"),
+            patch("shad.cli.open_project", return_value=0) as open_project,
+            self.assertRaises(SystemExit),
+        ):
+            cmd_projects(cfg, args)
+
+        open_project.assert_called_once_with(project, cfg.defaults, harness="opencode")
+
+    def test_status_action_ignores_the_override(self) -> None:
+        project = _make_project("shad")
+        cfg = Config(defaults=Defaults(), projects={"shad": project})
+        args = _make_args(["shad", "status"], harness="claude")
+
+        with (
+            patch("shad.cli.print_status") as print_status,
+            patch("shad.cli.open_project") as open_project,
+        ):
+            cmd_projects(cfg, args)
+
+        print_status.assert_called_once_with(project)
+        open_project.assert_not_called()
+
+    def test_parser_accepts_harness_on_the_projects_subcommand(self) -> None:
+        parser = build_parser()
+
+        args = parser.parse_args(["projects", "tin", "shad", "--harness", "claude"])
+
+        self.assertEqual(args.harness, "claude")
+        self.assertEqual(args.name, ["tin", "shad"])
+
+    def test_parser_defaults_harness_to_none(self) -> None:
+        parser = build_parser()
+
+        args = parser.parse_args(["projects", "shad"])
+
+        self.assertIsNone(args.harness)
+
+    def test_parser_rejects_an_unknown_harness(self) -> None:
+        parser = build_parser()
+
+        with self.assertRaises(SystemExit):
+            with patch("sys.stderr"):
+                parser.parse_args(["projects", "shad", "--harness", "nope"])
 
 
 class MainErrorHandlingTests(unittest.TestCase):

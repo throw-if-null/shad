@@ -188,5 +188,77 @@ class OpenProjectClaudeHarnessTests(unittest.TestCase):
 
         picker.assert_called_once_with(Path("/tmp/shad"), "claude")
 
+
+class OpenProjectHarnessOverrideTests(unittest.TestCase):
+    """`--harness` wins over the project's configured harness for one open."""
+
+    def setUp(self) -> None:
+        self.defaults = Defaults()
+
+    def _project(self, harness: str) -> Project:
+        return Project(
+            key="shad",
+            group="tin",
+            path=Path("/tmp/shad"),
+            session="tin-shad",
+            harness=harness,
+        )
+
+    def test_override_sends_an_opencode_project_to_the_claude_picker(self) -> None:
+        target = OpencodeTarget(
+            command="claude", session_key="uuid-a", session_prefix="cc"
+        )
+
+        with (
+            patch(
+                "shad.projects.open.command.pick_claude_target", return_value=target
+            ) as claude_picker,
+            patch(
+                "shad.projects.open.command.pick_opencode_target"
+            ) as opencode_picker,
+            patch("shad.projects.open.command.session_exists", return_value=False),
+            patch("shad.projects.open.command._create_session"),
+            patch("shad.projects.open.command._attach"),
+        ):
+            open_project(self._project("opencode"), self.defaults, harness="claude")
+
+        claude_picker.assert_called_once_with(Path("/tmp/shad"), "claude")
+        opencode_picker.assert_not_called()
+
+    def test_override_sends_a_claude_project_to_the_opencode_picker(self) -> None:
+        target = OpencodeTarget(command="opencode", session_key="sess-1")
+
+        with (
+            patch(
+                "shad.projects.open.command.pick_opencode_target", return_value=target
+            ) as opencode_picker,
+            patch("shad.projects.open.command.pick_claude_target") as claude_picker,
+            patch("shad.projects.open.command.session_exists", return_value=False),
+            patch("shad.projects.open.command._create_session"),
+            patch("shad.projects.open.command._attach"),
+        ):
+            open_project(self._project("claude"), self.defaults, harness="opencode")
+
+        opencode_picker.assert_called_once_with(Path("/tmp/shad"), "opencode")
+        claude_picker.assert_not_called()
+
+    def test_no_override_keeps_the_configured_harness(self) -> None:
+        target = OpencodeTarget(
+            command="claude", session_key="uuid-a", session_prefix="cc"
+        )
+
+        with (
+            patch(
+                "shad.projects.open.command.pick_claude_target", return_value=target
+            ) as claude_picker,
+            patch("shad.projects.open.command.session_exists", return_value=False),
+            patch("shad.projects.open.command._create_session"),
+            patch("shad.projects.open.command._attach"),
+        ):
+            open_project(self._project("claude"), self.defaults, harness=None)
+
+        claude_picker.assert_called_once_with(Path("/tmp/shad"), "claude")
+
+
 if __name__ == "__main__":
     unittest.main()

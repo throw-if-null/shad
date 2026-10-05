@@ -9,6 +9,7 @@ shad projects <name>                     # open top-level project or list group
 shad projects <group> <name>             # open project inside a group
 shad projects <name> <action>            # run action on top-level project
 shad projects <group> <name> <action>    # run action on grouped project
+shad projects <name> --harness <h>       # open with a one-off harness
 shad config <action> [args]              # inspect or edit shad.toml
 shad git sync [<group>] [<name>]         # git maintenance across projects
 shad git panel [<group>] [<name>]        # read-only repository view
@@ -40,7 +41,7 @@ from shad.projects.open.banner import print_banner
 from shad.projects.open.command import open_project
 from shad.projects.status.command import print_status
 from shad.projects.stop.command import stop_project
-from shad.shared.config import Config, Project, load, resolve_prefix
+from shad.shared.config import HARNESSES, Config, Project, load, resolve_prefix
 from shad.shared.errors import ShadError
 
 console = Console()
@@ -85,11 +86,16 @@ def _list_group(cfg: Config, group_name: str) -> None:
             )
 
 
-def _run_action(cfg: Config, project: Project, action: str | None) -> None:
-    """Dispatch open / status / stop for a resolved project."""
+def _run_action(
+    cfg: Config, project: Project, action: str | None, harness: str | None
+) -> None:
+    """Dispatch open / status / stop for a resolved project.
+
+    *harness* applies to open only; status and stop ignore it.
+    """
     if action is None:
         print_banner()
-        code = open_project(project, cfg.defaults)
+        code = open_project(project, cfg.defaults, harness=harness)
         if code is None:
             return  # user cancelled the picker — exit cleanly
         sys.exit(code)
@@ -103,6 +109,7 @@ def _run_action(cfg: Config, project: Project, action: str | None) -> None:
 
 def cmd_projects(cfg: Config, args: argparse.Namespace) -> None:
     parts: list[str] = args.name  # 0–3 tokens: [group] [name] [action]
+    harness: str | None = args.harness
 
     # --- no args: list everything ---
     if not parts:
@@ -126,7 +133,7 @@ def cmd_projects(cfg: Config, args: argparse.Namespace) -> None:
             raise ShadError(f"no project or group matching '{token}'")
 
         if match in cfg.projects:
-            _run_action(cfg, cfg.projects[match], action)
+            _run_action(cfg, cfg.projects[match], action, harness)
         else:
             if action:
                 raise ShadError(
@@ -159,7 +166,7 @@ def cmd_projects(cfg: Config, args: argparse.Namespace) -> None:
                 f"available: {', '.join(sorted(group_projects))}"
             )
 
-        _run_action(cfg, group_projects[proj_match], action)
+        _run_action(cfg, group_projects[proj_match], action, harness)
         return
 
     # --- too many tokens ---
@@ -205,7 +212,8 @@ def build_parser() -> argparse.ArgumentParser:
             "  shad projects myapp               open myapp\n"
             "  shad projects tin shad            open grouped project\n"
             "  shad projects tin shad status     show status\n"
-            "  shad projects tin shad stop       kill session\n\n"
+            "  shad projects tin shad stop       kill session\n"
+            "  shad projects myapp --harness claude   open with claude once\n\n"
             "Prefix matching is supported at each level."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -215,6 +223,14 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="*",
         metavar="NAME",
         help="[group] [project] [action]  — action is one of: status, stop",
+    )
+    p_projects.add_argument(
+        "--harness",
+        choices=HARNESSES,
+        help=(
+            "Open with this harness instead of the project's configured one. "
+            "Applies to open only; status and stop ignore it."
+        ),
     )
 
     p_git = sub.add_parser(

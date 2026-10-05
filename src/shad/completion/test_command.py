@@ -24,6 +24,7 @@ from tempfile import TemporaryDirectory
 import shad
 from shad.cli import build_parser
 from shad.completion.command import BASH_COMPLETION, print_completion
+from shad.shared.config import HARNESSES
 from shad.shared.errors import ShadError
 
 BASH = shutil.which("bash") or ""
@@ -179,30 +180,79 @@ class CompletionScriptTests(unittest.TestCase):
 
     def test_config_option_selects_the_file_project_names_come_from(self) -> None:
         offered = self._run(f"shad --config {self.other_config} projects ")
-        self.assertEqual(offered, ["elsewhere"])
+        self.assertEqual(offered, ["elsewhere", "--harness"])
+
+    # -- the projects --harness option ------------------------------------
+
+    def test_projects_offers_the_harness_flag(self) -> None:
+        self.assertIn("--harness", self._run("shad projects "))
+
+    def test_harness_flag_offers_every_known_harness(self) -> None:
+        """A harness added to config.HARNESSES must reach the script too."""
+        self.assertEqual(
+            sorted(self._run("shad projects --harness ")), sorted(HARNESSES)
+        )
+
+    def test_harness_flag_offers_values_for_the_equals_spelling(self) -> None:
+        self.assertEqual(
+            sorted(self._run("shad projects --harness = ")), sorted(HARNESSES)
+        )
+
+    def test_harness_value_does_not_shift_project_positions(self) -> None:
+        self.assertEqual(
+            sorted(self._run("shad projects --harness claude ")),
+            ["al", "alvr", "kb", "web"],
+        )
+
+    def test_harness_value_does_not_shift_sub_project_positions(self) -> None:
+        self.assertEqual(
+            sorted(self._run("shad projects --harness claude alvr ")), ["api", "db"]
+        )
+
+    def test_harness_flag_is_not_offered_twice(self) -> None:
+        self.assertNotIn("--harness", self._run("shad projects --harness claude "))
+
+    def test_harness_flag_is_not_offered_after_an_action(self) -> None:
+        self.assertNotIn("--harness", self._run("shad projects kb status "))
+
+    def test_harness_flag_is_not_offered_for_git(self) -> None:
+        self.assertNotIn("--harness", self._run("shad git sync "))
 
     # -- projects ---------------------------------------------------------
 
     def test_projects_offers_top_level_keys_and_group_names(self) -> None:
-        self.assertEqual(sorted(self._run("shad projects ")), ["al", "alvr", "kb", "web"])
+        self.assertEqual(
+            sorted(self._run("shad projects ")),
+            ["--harness", "al", "alvr", "kb", "web"],
+        )
 
     def test_projects_offers_sub_projects_of_a_group(self) -> None:
-        self.assertEqual(sorted(self._run("shad projects alvr ")), ["api", "db"])
+        self.assertEqual(
+            sorted(self._run("shad projects alvr ")), ["--harness", "api", "db"]
+        )
 
     def test_projects_offers_actions_for_a_top_level_project(self) -> None:
-        self.assertEqual(sorted(self._run("shad projects kb ")), ["status", "stop"])
+        self.assertEqual(
+            sorted(self._run("shad projects kb ")), ["--harness", "status", "stop"]
+        )
 
     def test_projects_offers_actions_for_a_prefix_of_a_project(self) -> None:
-        self.assertEqual(sorted(self._run("shad projects k ")), ["status", "stop"])
+        self.assertEqual(
+            sorted(self._run("shad projects k ")), ["--harness", "status", "stop"]
+        )
 
     def test_projects_offers_actions_for_a_grouped_project(self) -> None:
-        self.assertEqual(sorted(self._run("shad projects alvr db ")), ["status", "stop"])
+        self.assertEqual(
+            sorted(self._run("shad projects alvr db ")),
+            ["--harness", "status", "stop"],
+        )
 
     def test_project_that_is_also_a_group_prefix_offers_both_continuations(self) -> None:
         # `shad projects al` opens the project; `shad projects al db` opens
         # the grouped one. Both resolve, so both are completable.
         self.assertEqual(
-            sorted(self._run("shad projects al ")), ["api", "db", "status", "stop"]
+            sorted(self._run("shad projects al ")),
+            ["--harness", "api", "db", "status", "stop"],
         )
 
     def test_projects_stops_completing_after_an_action(self) -> None:

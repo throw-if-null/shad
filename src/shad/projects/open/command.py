@@ -12,15 +12,23 @@ from shad.shared.config import Defaults, Project
 from shad.shared.tmux import _attach, _run, project_session_name, session_exists
 
 
-def open_project(project: Project, defaults: Defaults) -> int | None:
+def open_project(
+    project: Project, defaults: Defaults, harness: str | None = None
+) -> int | None:
     """Attach to project session, creating it with the configured layout if needed.
+
+    *harness* overrides the project's configured harness for this open only;
+    None keeps it. Config parsing already seeds every project with the
+    [defaults] harness, so project.harness is the fallback.
 
     Returns the tmux exit code on success, or None if the user cancelled.
     """
-    if project.harness == "claude":
-        target = pick_claude_target(project.path, "claude")
+    selected = harness or project.harness
+
+    if selected == "claude":
+        target = pick_claude_target(project.path, selected)
     else:
-        target = pick_opencode_target(project.path, "opencode")
+        target = pick_opencode_target(project.path, selected)
 
     if target is None:
         return None
