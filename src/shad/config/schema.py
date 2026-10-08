@@ -7,6 +7,7 @@ The key namespace mirrors the TOML layout:
                                        todo_percent, harness
   projects.<key>.<field>               path, session, harness
   projects.<group>.<key>.<field>       path, session, harness
+  todo.<field>                         path
 
 `set` accepts only these keys unless --force is given, so a typo cannot
 silently add dead config.
@@ -71,8 +72,13 @@ PROJECT_FIELDS: tuple[Field, ...] = (
     Field("harness", ENUM, HARNESSES, "harness for this project"),
 )
 
+TODO_FIELDS: tuple[Field, ...] = (
+    Field("path", PATH, description="directory that holds the todo files"),
+)
+
 _DEFAULTS_BY_NAME = {field.name: field for field in DEFAULTS_FIELDS}
 _PROJECT_BY_NAME = {field.name: field for field in PROJECT_FIELDS}
+_TODO_BY_NAME = {field.name: field for field in TODO_FIELDS}
 
 
 def field_for(parts: list[str]) -> Field | None:
@@ -81,6 +87,8 @@ def field_for(parts: list[str]) -> Field | None:
         return _DEFAULTS_BY_NAME.get(parts[1])
     if parts[:1] == ["projects"] and len(parts) in (3, 4):
         return _PROJECT_BY_NAME.get(parts[-1])
+    if parts[:1] == ["todo"] and len(parts) == 2:
+        return _TODO_BY_NAME.get(parts[1])
     return None
 
 
@@ -97,6 +105,7 @@ def known_keys(projects: list[list[str]]) -> list[tuple[str, Field]]:
     for project in projects:
         prefix = ".".join(["projects", *project])
         keys.extend((f"{prefix}.{field.name}", field) for field in PROJECT_FIELDS)
+    keys.extend((f"todo.{field.name}", field) for field in TODO_FIELDS)
     return keys
 
 

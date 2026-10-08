@@ -35,6 +35,7 @@ from shad.config.schema import PATH, coerce, field_for, infer, known_keys
 from shad.shared.config import Config, config_path, load
 from shad.shared.errors import ShadError
 from shad.shared.render import make_table
+from shad.todo.store import todo_dir
 
 console = Console()
 err_console = Console(stderr=True)
@@ -190,6 +191,10 @@ def _print_todo(cfg: Config) -> None:
         Text("labels", style="dim"),
         Text(labels, style="bright_white" if cfg.todo_labels else "dim"),
     )
+    path = Text(str(todo_dir(cfg)), style="bright_white", overflow="fold")
+    if cfg.todo_path is None:
+        path.append("  default", style="dim")
+    table.add_row(Text("path", style="dim"), path)
     console.print(table)
 
 
@@ -237,8 +242,9 @@ def _effective(path: Path, parts: list[str]) -> object:
     """
     Resolve a key that is absent from the file to the value shad actually uses.
 
-    Covers `[defaults]` fields and the per-project `session` / `harness`
-    fallbacks.  Returns _MISSING when the key has no resolved value.
+    Covers `[defaults]` fields, the per-project `session` / `harness`
+    fallbacks, and the default todo path.  Returns _MISSING when the key has
+    no resolved value.
     """
     if field_for(parts) is None:
         return _MISSING
@@ -247,6 +253,9 @@ def _effective(path: Path, parts: list[str]) -> object:
 
     if parts[0] == "defaults":
         return getattr(cfg.defaults, parts[1], _MISSING)
+
+    if parts[0] == "todo":
+        return str(todo_dir(cfg))
 
     if len(parts) == 3:
         project = cfg.projects.get(parts[1])

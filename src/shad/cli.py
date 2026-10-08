@@ -13,7 +13,7 @@ shad projects <name> --harness <h>       # open with a one-off harness
 shad config <action> [args]              # inspect or edit shad.toml
 shad git sync [<group>] [<name>]         # git maintenance across projects
 shad git panel [<group>] [<name>]        # read-only repository view
-shad todo <action> [args]                # the todo list of the current project
+shad todo <action> [args]                # the todo list
 
 Config file: --config PATH, else $SHAD_CONFIG, else the per-OS default
 (~/.config/shad/shad.toml on Linux). `shad config path` prints the resolved one.
@@ -357,10 +357,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_todo = sub.add_parser(
         "todo",
-        help="Manage a project's todo list",
+        help="Manage the todo list",
         description=(
-            "The todo list of one project: one text file per item, shown in\n"
-            "shad's fourth pane when defaults.todo_percent is set.\n\n"
+            "One todo list, not tied to a project: one text file per item,\n"
+            "shown in shad's fourth pane when defaults.todo_percent is set.\n\n"
             "Actions:\n"
             "  panel    the pane: list, status keys, add, delete, edit\n"
             "  add      create an item; its key is a slug of the title. With no\n"
@@ -370,12 +370,11 @@ def build_parser() -> argparse.ArgumentParser:
             "  edit     open an item in $EDITOR\n"
             "  rm       delete an item's file\n"
             "  label    add, rm, list: the label vocabulary in shad.toml\n\n"
-            "The project is the one whose directory contains the current\n"
-            "directory. --project names another: 'kb', 'alvr/db' or 'alvr db'.\n"
             "An item key accepts any unique prefix.\n\n"
-            "Files live in $XDG_DATA_HOME/shad/todo/<group>-<key>/<item>.md\n"
-            "(~/.local/share/shad on Linux), as a header block, a blank line,\n"
-            "and the body. They are meant to be edited by hand.\n\n"
+            "Files live in <todo dir>/<item>.md, as a header block, a blank\n"
+            "line, and the body. They are meant to be edited by hand. The todo\n"
+            "dir is [todo] path in shad.toml, or $XDG_DATA_HOME/shad/todo\n"
+            "(~/.local/share/shad/todo on Linux) when it is not set.\n\n"
             "Examples:\n"
             "  shad todo add\n"
             "  shad todo add \"Fix panel resize\" --label chore\n"
@@ -384,21 +383,15 @@ def build_parser() -> argparse.ArgumentParser:
             "  shad todo edit fix-panel\n"
             "  shad todo rm fix-panel\n"
             "  shad todo label add investigation\n"
-            "  shad todo panel --project alvr/db"
+            "  shad todo panel"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    todo_common = argparse.ArgumentParser(add_help=False)
-    todo_common.add_argument(
-        "--project",
-        metavar="NAME",
-        help="Target this project instead of the one containing the current directory",
-    )
     todo_sub = p_todo.add_subparsers(dest="todo_action", metavar="<action>")
 
-    todo_sub.add_parser("panel", parents=[todo_common], help="Show the todo pane")
+    todo_sub.add_parser("panel", help="Show the todo pane")
 
-    p_todo_add = todo_sub.add_parser("add", parents=[todo_common], help="Create an item")
+    p_todo_add = todo_sub.add_parser("add", help="Create an item")
     p_todo_add.add_argument(
         "title",
         metavar="TITLE",
@@ -412,23 +405,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="A configured label; repeat for more than one",
     )
 
-    p_todo_list = todo_sub.add_parser("list", parents=[todo_common], help="Print the items")
+    p_todo_list = todo_sub.add_parser("list", help="Print the items")
     p_todo_list.add_argument(
         "--keys", action="store_true", help="Print only the item keys, one per line"
     )
 
-    p_todo_status = todo_sub.add_parser(
-        "status", parents=[todo_common], help="Set an item's status"
-    )
+    p_todo_status = todo_sub.add_parser("status", help="Set an item's status")
     p_todo_status.add_argument("key", metavar="KEY", help="Item key, or a unique prefix")
     p_todo_status.add_argument("status", metavar="STATUS", choices=STATUSES)
 
-    p_todo_edit = todo_sub.add_parser(
-        "edit", parents=[todo_common], help="Open an item in $EDITOR"
-    )
+    p_todo_edit = todo_sub.add_parser("edit", help="Open an item in $EDITOR")
     p_todo_edit.add_argument("key", metavar="KEY", help="Item key, or a unique prefix")
 
-    p_todo_rm = todo_sub.add_parser("rm", parents=[todo_common], help="Delete an item")
+    p_todo_rm = todo_sub.add_parser("rm", help="Delete an item")
     p_todo_rm.add_argument("key", metavar="KEY", help="Item key, or a unique prefix")
 
     p_todo_label = todo_sub.add_parser("label", help="Manage the label vocabulary")

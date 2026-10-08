@@ -10,17 +10,14 @@ Actions:
   rm             delete one item's file
   label          add, rm, list: the label vocabulary in shad.toml
 
-The target project is the one whose directory contains the current directory,
-because the shell pane and the harness pane both run there. --project names
-another one. A directory outside every configured project is an error: a todo
-belongs to a project, unlike `shad git panel`, which shows any repository.
+There is one list, in store.todo_dir(). No item belongs to a project, so every
+action works the same from any directory.
 """
 
 from __future__ import annotations
 
 import argparse
 import os
-import re
 import subprocess
 import sys
 import tempfile
@@ -31,14 +28,7 @@ from rich.prompt import Confirm
 from rich.text import Text
 
 from shad.config.command import resolve_editor, write_value
-from shad.shared.config import (
-    LABEL_RE,
-    Config,
-    Project,
-    all_projects,
-    config_path,
-    resolve_target,
-)
+from shad.shared.config import LABEL_RE, Config, config_path
 from shad.shared.errors import ShadError
 from shad.shared.render import make_table
 from shad.todo import store
@@ -49,41 +39,6 @@ console = Console()
 
 ACTIONS = ("panel", "add", "list", "status", "edit", "rm", "label")
 LABEL_ACTIONS = ("add", "rm", "list")
-
-_PROJECT_SEP = re.compile(r"[\s/]+")
-
-
-# ── project resolution ────────────────────────────────────────────────────
-
-
-def resolve_project(cfg: Config, spec: str | None) -> Project:
-    """
-    The project *spec* names ("kb", "alvr/db", "alvr db"), or with no spec the
-    configured project whose directory contains the current directory. Nested
-    projects resolve to the deepest match.
-    """
-    if spec is not None:
-        tokens = [token for token in _PROJECT_SEP.split(spec.strip()) if token]
-        target = resolve_target(cfg, tokens, usage="shad todo --project")
-        if len(target.projects) != 1:
-            names = ", ".join(p.display_name for p in target.projects)
-            raise ShadError(
-                f"--project '{spec}' matches {len(target.projects)} projects ({names}); "
-                f"name one"
-            )
-        return target.projects[0]
-
-    cwd = Path.cwd().resolve()
-    inside = [
-        project
-        for project in all_projects(cfg)
-        if cwd == project.path.resolve() or cwd.is_relative_to(project.path.resolve())
-    ]
-    if not inside:
-        raise ShadError(
-            f"{cwd} is not inside a configured project; pass --project <name>"
-        )
-    return max(inside, key=lambda project: len(project.path.resolve().parts))
 
 
 # ── actions ───────────────────────────────────────────────────────────────
@@ -106,7 +61,7 @@ def add_in_editor(directory: Path, labels: list[str], vocabulary: list[str]) -> 
         raise ShadError("no title given, and stdin is not a terminal to open an editor in")
     check_labels(labels, vocabulary)
 
-    fd, name = tempfile.mkstemp(prefix=f"shad-todo-{directory.name}-", suffix=".md")
+    fd, name = tempfile.mkstemp(prefix="shad-todo-", suffix=".md")
     draft = Path(name)
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
         fh.write(template(labels, vocabulary))
@@ -147,14 +102,14 @@ def _report_added(directory: Path, item: Item) -> None:
     )
 
 
-def _list(cfg: Config, project: Project, directory: Path, *, keys_only: bool) -> None:
+def _list(cfg: Config, directory: Path, *, keys_only: bool) -> None:
     if keys_only:
         for key in store.keys(directory):
             print(key)
         return
 
     items = store.list_items(directory)
-    table = make_table(f"todo · {project.display_name}")
+    table = make_table("todo")
     for _ in range(5):
         table.add_column(no_wrap=True, overflow="ellipsis")
     if not items:
@@ -241,11 +196,10 @@ def _label(cfg: Config, args: argparse.Namespace, path: Path) -> None:
         if name not in cfg.todo_labels:
             known = ", ".join(cfg.todo_labels) if cfg.todo_labels else "none"
             raise ShadError(f"label '{name}' is not configured; configured labels: {known}")
-        usage = store.label_usage(store.todo_root(), name)
+        usage = store.label_usage(store.todo_dir(cfg), name)
         if usage and not getattr(args, "force", False):
-            where = ", ".join(f"{project} ({count})" for project, count in usage.items())
             raise ShadError(
-                f"label '{name}' is still used by: {where}\n"
+                f"label '{name}' is still used by {usage} item(s)\n"
                 f"       remove it from those items first, or pass --force"
             )
         write_value(path, "todo.labels", [label for label in cfg.todo_labels if label != name])
@@ -255,12 +209,12 @@ def _label(cfg: Config, args: argparse.Namespace, path: Path) -> None:
     raise ShadError(f"unknown label action '{action}'; available: {', '.join(LABEL_ACTIONS)}")
 
 
-def open_panel(project: Project, directory: Path, labels: list[str]) -> None:
+def open_panel(directory: Path, labels: list[str]) -> None:
     # Imported here, not at module scope: textual costs roughly 100ms to
     # import, and `shad todo add` from a script must not pay it.
     from shad.todo.panel import run_panel
 
-    run_panel(directory, labels, name=project.display_name)
+    run_panel(directory, labels)
 
 
 # ── dispatch ──────────────────────────────────────────────────────────────
@@ -277,11 +231,10 @@ def cmd_todo(cfg: Config, args: argparse.Namespace, path: Path | None = None) ->
         _label(cfg, args, path or config_path())
         return
 
-    project = resolve_project(cfg, getattr(args, "project", None))
-    directory = store.project_dir(project)
+    directory = store.todo_dir(cfg)
 
     if action == "panel":
-        open_panel(project, directory, cfg.todo_labels)
+        open_panel(directory, cfg.todo_labels)
     elif action == "add":
         labels = list(args.label or [])
         if args.title is None:
@@ -290,7 +243,7 @@ def cmd_todo(cfg: Config, args: argparse.Namespace, path: Path | None = None) ->
             item = store.add(directory, args.title, labels, cfg.todo_labels)
         _report_added(directory, item)
     elif action == "list":
-        _list(cfg, project, directory, keys_only=getattr(args, "keys", False))
+        _list(cfg, directory, keys_only=getattr(args, "keys", False))
     elif action == "status":
         if args.status not in STATUSES:
             raise ShadError(

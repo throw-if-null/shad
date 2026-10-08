@@ -1,11 +1,11 @@
 """
 Where todo files live, and every read and write of them.
 
-    <data dir>/todo/<group>-<key>/<item key>.md
+    <todo dir>/<item key>.md
 
-The directory is named from the project's config identity, which is unique by
-construction and reads well in an editor command line. Renaming a project in
-shad.toml orphans its directory; `mv` reconnects it.
+The todo dir is the [todo] path from shad.toml, or <data dir>/todo when it is
+not set. There is one list, and no item belongs to a project: the todo pane
+in every project session shows the same files.
 
 Every write touches one file. A new item is created with O_EXCL, so two adds
 of the same key cannot both succeed, and a status change goes through a
@@ -23,7 +23,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from shad.shared.config import Project, default_data_dir, resolve_prefix
+from shad.shared.config import Config, default_data_dir, resolve_prefix
 from shad.shared.errors import ShadError
 from shad.todo.model import (
     STATUSES,
@@ -40,16 +40,10 @@ from shad.todo.model import (
 SUFFIX = ".md"
 
 
-def todo_root() -> Path:
+def todo_dir(cfg: Config) -> Path:
+    if cfg.todo_path is not None:
+        return cfg.todo_path
     return default_data_dir() / "todo"
-
-
-def project_dir_name(project: Project) -> str:
-    return f"{project.group}-{project.key}" if project.group else project.key
-
-
-def project_dir(project: Project) -> Path:
-    return todo_root() / project_dir_name(project)
 
 
 def item_path(directory: Path, key: str) -> Path:
@@ -170,16 +164,9 @@ def remove(directory: Path, key: str) -> Path:
     return path
 
 
-def label_usage(root: Path, label: str) -> dict[str, int]:
-    """How many items in each project directory under *root* carry *label*."""
-    usage: dict[str, int] = {}
-    if not root.is_dir():
-        return usage
-    for directory in sorted(p for p in root.iterdir() if p.is_dir()):
-        count = sum(1 for item in list_items(directory) if label in item.labels)
-        if count:
-            usage[directory.name] = count
-    return usage
+def label_usage(directory: Path, label: str) -> int:
+    """How many items in *directory* carry *label*."""
+    return sum(1 for item in list_items(directory) if label in item.labels)
 
 
 # ── file primitives ───────────────────────────────────────────────────────

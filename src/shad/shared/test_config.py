@@ -386,6 +386,28 @@ class TodoConfigTests(unittest.TestCase):
             self._load('[todo]\nlabels = ["a", "a"]\n')
         self.assertIn("duplicate", str(ctx.exception))
 
+    def test_todo_path_is_unset_by_default(self) -> None:
+        self.assertIsNone(self._load("[todo]\nlabels = []\n").todo_path)
+
+    def test_todo_path_keeps_an_absolute_path(self) -> None:
+        cfg = self._load('[todo]\npath = "/notes/todo"\n')
+        self.assertEqual(cfg.todo_path, Path("/notes/todo"))
+
+    def test_todo_path_expands_the_home_directory(self) -> None:
+        with patch.dict("os.environ", {"HOME": "/home/u"}):
+            cfg = self._load('[todo]\npath = "~/notes/todo"\n')
+        self.assertEqual(cfg.todo_path, Path("/home/u/notes/todo"))
+
+    def test_a_relative_todo_path_is_rejected(self) -> None:
+        with self.assertRaises(ShadError) as ctx:
+            self._load('[todo]\npath = "notes/todo"\n')
+        self.assertIn("absolute", str(ctx.exception))
+
+    def test_todo_path_must_be_a_non_empty_string(self) -> None:
+        for value in ("1", '""', '["/a"]'):
+            with self.subTest(value=value), self.assertRaises(ShadError):
+                self._load(f"[todo]\npath = {value}\n")
+
 
 class DefaultDataDirTests(unittest.TestCase):
     """Data is kept apart from config; each platform branch is asserted on."""

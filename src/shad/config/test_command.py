@@ -67,6 +67,7 @@ class ConfigCommandTests(unittest.TestCase):
         self.assertIn("defaults.harness", keys)
         self.assertIn("projects.kb.session", keys)
         self.assertIn("projects.alvr.db.harness", keys)
+        self.assertIn("todo.path", keys)
 
     def test_get_prints_scalar_value(self) -> None:
         self.assertEqual(self._run("get", key="defaults.panel_percent").strip(), "35")
@@ -84,6 +85,11 @@ class ConfigCommandTests(unittest.TestCase):
 
     def test_get_falls_back_to_default_harness(self) -> None:
         self.assertEqual(self._run("get", key="projects.kb.harness").strip(), "opencode")
+
+    def test_get_falls_back_to_the_default_todo_path(self) -> None:
+        with patch("shad.todo.store.default_data_dir", return_value=self.root / "data"):
+            output = self._run("get", key="todo.path")
+        self.assertEqual(output.strip(), str(self.root / "data" / "todo"))
 
     def test_get_unknown_project_raises(self) -> None:
         with self.assertRaises(ShadError):
@@ -169,6 +175,18 @@ class ConfigCommandTests(unittest.TestCase):
         with patch.dict("os.environ", {"HOME": str(self.root)}):
             self._run("set", key="projects.kb.path", value="~/kb")
         self.assertEqual(self._raw()["projects"]["kb"]["path"], str(self.root / "kb"))
+
+    def test_set_todo_path_creates_the_todo_table(self) -> None:
+        notes = self.root / "notes"
+        notes.mkdir()
+        self._run("set", key="todo.path", value=str(notes))
+        self.assertEqual(self._raw()["todo"]["path"], str(notes))
+        self.assertEqual(self._run("get", key="todo.path").strip(), str(notes))
+
+    def test_set_rejects_a_missing_todo_path(self) -> None:
+        with self.assertRaises(ShadError) as ctx:
+            self._run("set", key="todo.path", value=str(self.root / "gone"))
+        self.assertIn("path does not exist", str(ctx.exception))
 
     def test_set_creates_a_new_project_table(self) -> None:
         fresh = self.root / "fresh"

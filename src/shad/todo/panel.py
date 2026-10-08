@@ -1,5 +1,5 @@
 """
-The todo panel — the pane that shows one project's todo files.
+The todo panel — the pane that shows the todo files.
 
 A list over a detail box, under a one-line header. Every read and write goes
 through store.py; this module only draws and dispatches keys. It polls the
@@ -38,7 +38,7 @@ POLL_SECONDS = 1.0
 
 
 class TodoPanel(App[None]):
-    """One project's todo list, with status, add, delete and edit keys."""
+    """The todo list, with status, add, delete and edit keys."""
 
     CSS = """
     Screen { layers: base; }
@@ -66,11 +66,10 @@ class TodoPanel(App[None]):
         Binding("k", "cursor_up", "up", show=False),
     ]
 
-    def __init__(self, directory: Path, labels: list[str], *, name: str) -> None:
+    def __init__(self, directory: Path, labels: list[str]) -> None:
         super().__init__()
         self._directory = directory
         self._labels = labels
-        self._project_name = name
         self._items: dict[str, Item] = {}
         self._signature = store.signature(directory)
         self._pending_delete: str | None = None
@@ -136,7 +135,7 @@ class TodoPanel(App[None]):
             open_count = sum(1 for item in self._items.values() if not item.finished)
             done_count = len(self._items) - open_count
             wrong = sum(1 for item in self._items.values() if problems(item, self._labels))
-            bits = [self._project_name, f"{open_count} open", f"{done_count} done"]
+            bits = ["todo", f"{open_count} open", f"{done_count} done"]
             if wrong:
                 bits.append(f"{wrong} to fix")
             text = Text("  ·  ".join(bits))
@@ -249,5 +248,5 @@ class TodoPanel(App[None]):
         self.query_one("#items", DataTable).action_cursor_up()
 
 
-def run_panel(directory: Path, labels: list[str], *, name: str) -> None:
-    TodoPanel(directory, labels, name=name).run()
+def run_panel(directory: Path, labels: list[str]) -> None:
+    TodoPanel(directory, labels).run()
