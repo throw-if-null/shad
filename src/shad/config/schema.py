@@ -3,7 +3,8 @@ Settable config keys for `shad config`.
 
 The key namespace mirrors the TOML layout:
 
-  defaults.<field>                     oc_position, panel_percent, split_percent, harness
+  defaults.<field>                     oc_position, panel_percent, split_percent,
+                                       todo_percent, harness
   projects.<key>.<field>               path, session, harness
   projects.<group>.<key>.<field>       path, session, harness
 
@@ -22,6 +23,7 @@ from shad.shared.errors import ShadError
 
 ENUM = "enum"
 PERCENT = "percent"
+PERCENT_OR_OFF = "percent_or_off"  # 0 disables the feature the key sizes
 PATH = "path"
 STRING = "string"
 
@@ -39,6 +41,8 @@ class Field:
             return " | ".join(self.choices)
         if self.kind == PERCENT:
             return "integer 1-99"
+        if self.kind == PERCENT_OR_OFF:
+            return "integer 0-99 (0 = off)"
         if self.kind == PATH:
             return "directory path"
         return "string"
@@ -53,6 +57,11 @@ DEFAULTS_FIELDS: tuple[Field, ...] = (
     ),
     Field("panel_percent", PERCENT, description="% of the window the git+bash bundle takes"),
     Field("split_percent", PERCENT, description="% of the bundle the git panel takes"),
+    Field(
+        "todo_percent",
+        PERCENT_OR_OFF,
+        description="% of the window width the todo column takes; 0 = no todo pane",
+    ),
     Field("harness", ENUM, HARNESSES, "default harness for projects"),
 )
 
@@ -108,16 +117,17 @@ def coerce(field: Field, raw: str, key: str) -> tuple[object, str]:
             )
         return lowered, format_value(lowered)
 
-    if field.kind == PERCENT:
+    if field.kind in (PERCENT, PERCENT_OR_OFF):
         try:
             number = int(value)
         except ValueError:
             raise ShadError(
                 f"invalid value for '{key}': {raw!r}; expected an integer"
             ) from None
-        if not 1 <= number <= 99:
+        low = 0 if field.kind == PERCENT_OR_OFF else 1
+        if not low <= number <= 99:
             raise ShadError(
-                f"invalid value for '{key}': {number}; must be between 1 and 99"
+                f"invalid value for '{key}': {number}; must be between {low} and 99"
             )
         return number, format_value(number)
 

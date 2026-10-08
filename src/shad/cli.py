@@ -13,6 +13,7 @@ shad projects <name> --harness <h>       # open with a one-off harness
 shad config <action> [args]              # inspect or edit shad.toml
 shad git sync [<group>] [<name>]         # git maintenance across projects
 shad git panel [<group>] [<name>]        # read-only repository view
+shad todo <action> [args]                # the todo list of the current project
 
 Config file: --config PATH, else $SHAD_CONFIG, else the per-OS default
 (~/.config/shad/shad.toml on Linux). `shad config path` prints the resolved one.
@@ -43,6 +44,8 @@ from shad.projects.status.command import print_status
 from shad.projects.stop.command import stop_project
 from shad.shared.config import HARNESSES, Config, Project, load, resolve_prefix
 from shad.shared.errors import ShadError
+from shad.todo.command import cmd_todo
+from shad.todo.model import STATUSES
 
 console = Console()
 err_console = Console(stderr=True)
@@ -352,6 +355,93 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip the fetch on open; show local state only",
     )
 
+    p_todo = sub.add_parser(
+        "todo",
+        help="Manage a project's todo list",
+        description=(
+            "The todo list of one project: one text file per item, shown in\n"
+            "shad's fourth pane when defaults.todo_percent is set.\n\n"
+            "Actions:\n"
+            "  panel    the pane: list, status keys, add, delete, edit\n"
+            "  add      create an item; its key is a slug of the title. With no\n"
+            "           title, write the item in $EDITOR from a template\n"
+            "  list     print the items (--keys: just the keys, one per line)\n"
+            "  status   set an item's status: todo | in-progress | done | wont-do\n"
+            "  edit     open an item in $EDITOR\n"
+            "  rm       delete an item's file\n"
+            "  label    add, rm, list: the label vocabulary in shad.toml\n\n"
+            "The project is the one whose directory contains the current\n"
+            "directory. --project names another: 'kb', 'alvr/db' or 'alvr db'.\n"
+            "An item key accepts any unique prefix.\n\n"
+            "Files live in $XDG_DATA_HOME/shad/todo/<group>-<key>/<item>.md\n"
+            "(~/.local/share/shad on Linux), as a header block, a blank line,\n"
+            "and the body. They are meant to be edited by hand.\n\n"
+            "Examples:\n"
+            "  shad todo add\n"
+            "  shad todo add \"Fix panel resize\" --label chore\n"
+            "  shad todo list\n"
+            "  shad todo status fix-panel in-progress\n"
+            "  shad todo edit fix-panel\n"
+            "  shad todo rm fix-panel\n"
+            "  shad todo label add investigation\n"
+            "  shad todo panel --project alvr/db"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    todo_common = argparse.ArgumentParser(add_help=False)
+    todo_common.add_argument(
+        "--project",
+        metavar="NAME",
+        help="Target this project instead of the one containing the current directory",
+    )
+    todo_sub = p_todo.add_subparsers(dest="todo_action", metavar="<action>")
+
+    todo_sub.add_parser("panel", parents=[todo_common], help="Show the todo pane")
+
+    p_todo_add = todo_sub.add_parser("add", parents=[todo_common], help="Create an item")
+    p_todo_add.add_argument(
+        "title",
+        metavar="TITLE",
+        nargs="?",
+        help="The item title; its key is a slug of it. Omit it to write the item in $EDITOR",
+    )
+    p_todo_add.add_argument(
+        "--label",
+        action="append",
+        metavar="LABEL",
+        help="A configured label; repeat for more than one",
+    )
+
+    p_todo_list = todo_sub.add_parser("list", parents=[todo_common], help="Print the items")
+    p_todo_list.add_argument(
+        "--keys", action="store_true", help="Print only the item keys, one per line"
+    )
+
+    p_todo_status = todo_sub.add_parser(
+        "status", parents=[todo_common], help="Set an item's status"
+    )
+    p_todo_status.add_argument("key", metavar="KEY", help="Item key, or a unique prefix")
+    p_todo_status.add_argument("status", metavar="STATUS", choices=STATUSES)
+
+    p_todo_edit = todo_sub.add_parser(
+        "edit", parents=[todo_common], help="Open an item in $EDITOR"
+    )
+    p_todo_edit.add_argument("key", metavar="KEY", help="Item key, or a unique prefix")
+
+    p_todo_rm = todo_sub.add_parser("rm", parents=[todo_common], help="Delete an item")
+    p_todo_rm.add_argument("key", metavar="KEY", help="Item key, or a unique prefix")
+
+    p_todo_label = todo_sub.add_parser("label", help="Manage the label vocabulary")
+    label_sub = p_todo_label.add_subparsers(dest="label_action", metavar="<action>")
+    p_label_add = label_sub.add_parser("add", help="Add a label to [todo] labels")
+    p_label_add.add_argument("name", metavar="NAME")
+    p_label_rm = label_sub.add_parser("rm", help="Remove a label from [todo] labels")
+    p_label_rm.add_argument("name", metavar="NAME")
+    p_label_rm.add_argument(
+        "--force", action="store_true", help="Remove the label even when items still carry it"
+    )
+    label_sub.add_parser("list", help="Print the labels, one per line")
+
     p_completion = sub.add_parser(
         "completion",
         help="Print the bash completion script",
@@ -513,6 +603,8 @@ def main() -> None:
             cmd_projects(cfg, args)
         elif args.command == "git":
             cmd_git(cfg, args)
+        elif args.command == "todo":
+            cmd_todo(cfg, args, path=override)
 
     except ShadError as exc:
         err_console.print(Text(f"✗ {exc}", style="bold red"))

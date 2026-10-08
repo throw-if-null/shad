@@ -120,6 +120,19 @@ def _commit(path: Path, text: str, *, hint: str | None = None) -> None:
         tmp.unlink(missing_ok=True)
 
 
+def write_value(path: Path, key: str, value: object) -> None:
+    """
+    Set *key* to *value* in the config file, keeping comments and layout.
+
+    The entry point for commands that own a key the `set` schema does not
+    cover, such as the `[todo] labels` array that `shad todo label` manages.
+    The result is validated the same way as every other write.
+    """
+    text = path.read_text() if path.exists() else ""
+    parts = toml_edit.split_dotted(key)
+    _commit(path, toml_edit.set_value(text, parts, toml_edit.format_value(value)))
+
+
 # ── show ──────────────────────────────────────────────────────────────────
 
 
@@ -129,7 +142,7 @@ def _print_defaults(cfg: Config, raw: dict) -> None:
     if not isinstance(configured, dict):
         configured = {}
 
-    for name in ("oc_position", "panel_percent", "split_percent", "harness"):
+    for name in ("oc_position", "panel_percent", "split_percent", "todo_percent", "harness"):
         value = getattr(cfg.defaults, name)
         origin = "set" if name in configured else "default"
         table.add_row(
@@ -170,6 +183,16 @@ def _print_projects(cfg: Config) -> None:
     console.print(table)
 
 
+def _print_todo(cfg: Config) -> None:
+    table = make_table("todo")
+    labels = ", ".join(cfg.todo_labels) if cfg.todo_labels else "none"
+    table.add_row(
+        Text("labels", style="dim"),
+        Text(labels, style="bright_white" if cfg.todo_labels else "dim"),
+    )
+    console.print(table)
+
+
 def _show(path: Path, *, raw_output: bool) -> None:
     if raw_output:
         text = _read_text(path)
@@ -185,6 +208,8 @@ def _show(path: Path, *, raw_output: bool) -> None:
     _print_defaults(cfg, raw)
     console.print()
     _print_projects(cfg)
+    console.print()
+    _print_todo(cfg)
     console.print()
 
 
@@ -333,7 +358,8 @@ def _parse_or_fail(text: str) -> dict:
 # ── edit / validate ───────────────────────────────────────────────────────
 
 
-def _resolve_editor() -> str:
+def resolve_editor() -> str:
+    """$VISUAL, then $EDITOR, then the first installed fallback."""
     editor = os.environ.get("VISUAL") or os.environ.get("EDITOR")
     if editor:
         return editor
@@ -344,7 +370,7 @@ def _resolve_editor() -> str:
 
 
 def _edit(path: Path) -> None:
-    editor = _resolve_editor()
+    editor = resolve_editor()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.touch(exist_ok=True)
 

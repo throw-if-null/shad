@@ -26,6 +26,8 @@ from shad.cli import build_parser
 from shad.completion.command import BASH_COMPLETION, print_completion
 from shad.shared.config import HARNESSES
 from shad.shared.errors import ShadError
+from shad.todo import store
+from shad.todo.model import STATUSES
 
 BASH = shutil.which("bash") or ""
 SHELLCHECK = shutil.which("shellcheck") or ""
@@ -58,6 +60,9 @@ path = "{root}/alvr/db"
 
 [projects.alvr.api]
 path = "{root}/alvr/api"
+
+[todo]
+labels = ["chore", "poc"]
 """
 
 _OTHER_CONFIG = """\
@@ -134,6 +139,8 @@ class CompletionScriptTests(unittest.TestCase):
         env["PATH"] = f"{self.bin}{os.pathsep}{env['PATH']}"
         env["PYTHONPATH"] = str(Path(shad.__file__).parent.parent)
         env["SHAD_CONFIG"] = str(config or self.config)
+        # Todo files for the key completions live under here, not in ~.
+        env["XDG_DATA_HOME"] = str(self.root / "xdg")
 
         result = subprocess.run(
             [BASH, str(self.driver), str(self.script), str(words_file),
@@ -352,6 +359,75 @@ class CompletionScriptTests(unittest.TestCase):
     def test_config_read_only_actions_offer_nothing(self) -> None:
         for action in ("path", "keys", "edit", "validate"):
             self.assertEqual(self._run(f"shad config {action} "), [], action)
+
+    # -- todo -------------------------------------------------------------
+
+    def _todo_items(self, project_dir: str, *titles: str) -> None:
+        directory = self.root / "xdg" / "shad" / "todo" / project_dir
+        for title in titles:
+            store.add(directory, title, [], [])
+
+    def test_todo_offers_its_actions(self) -> None:
+        self.assertEqual(
+            sorted(self._run("shad todo ")),
+            ["add", "edit", "label", "list", "panel", "rm", "status"],
+        )
+
+    def test_todo_actions_offer_the_project_flag_once(self) -> None:
+        self.assertEqual(self._run("shad todo panel "), ["--project"])
+        self.assertEqual(self._run("shad todo panel --project kb "), [])
+
+    def test_todo_project_flag_offers_every_project_as_one_word(self) -> None:
+        self.assertEqual(
+            sorted(self._run("shad todo add t --project ")),
+            ["al", "alvr/api", "alvr/db", "kb", "web"],
+        )
+        self.assertEqual(
+            sorted(self._run("shad todo add t --project = ")),
+            ["al", "alvr/api", "alvr/db", "kb", "web"],
+        )
+
+    def test_todo_add_offers_the_label_flag_repeatedly_and_label_values(self) -> None:
+        self.assertEqual(sorted(self._run("shad todo add t ")), ["--label", "--project"])
+        self.assertEqual(sorted(self._run("shad todo add t --label chore ")),
+                         ["--label", "--project"])
+        self.assertEqual(sorted(self._run("shad todo add t --label ")), ["chore", "poc"])
+
+    def test_todo_list_offers_its_flag_once(self) -> None:
+        self.assertEqual(sorted(self._run("shad todo list ")), ["--keys", "--project"])
+        self.assertEqual(self._run("shad todo list --keys "), ["--project"])
+
+    def test_todo_status_offers_every_status_after_the_key(self) -> None:
+        self.assertEqual(
+            sorted(self._run("shad todo status some-key ")),
+            ["--project", *sorted(STATUSES)],
+        )
+
+    def test_todo_keys_come_from_the_targeted_project(self) -> None:
+        """
+        The current directory is outside every fixture project, so without
+        --project there are no keys to offer; with it, the keys of that
+        project are offered and the flag's value shifts no position.
+        """
+        self._todo_items("kb", "Fix panel", "Write docs")
+        self._todo_items("alvr-db", "Migrate")
+        self.assertEqual(self._run("shad todo rm "), ["--project"])
+        self.assertEqual(
+            sorted(self._run("shad todo rm --project kb ")), ["fix-panel", "write-docs"]
+        )
+        self.assertEqual(
+            sorted(self._run("shad todo status --project alvr/db ")), ["migrate"]
+        )
+        self.assertEqual(
+            sorted(self._run("shad todo edit --project kb fi")), ["fix-panel"]
+        )
+
+    def test_todo_label_offers_its_actions_and_configured_labels(self) -> None:
+        self.assertEqual(sorted(self._run("shad todo label ")), ["add", "list", "rm"])
+        self.assertEqual(sorted(self._run("shad todo label rm ")), ["chore", "poc"])
+        self.assertEqual(self._run("shad todo label rm chore "), ["--force"])
+        self.assertEqual(self._run("shad todo label add "), [])
+        self.assertEqual(self._run("shad todo label list "), [])
 
     # -- other subcommands ------------------------------------------------
 

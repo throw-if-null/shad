@@ -140,3 +140,20 @@ class RemovePathTests(unittest.TestCase):
         with self.assertRaises(ShadError) as ctx:
             remove_path('[defaults]\nharness = "claude"\n', ["defaults", "nope"])
         self.assertIn("key not found", str(ctx.exception))
+
+
+class ArrayValueTests(unittest.TestCase):
+    def test_format_value_renders_a_list_on_one_line(self) -> None:
+        self.assertEqual(format_value(["a", "b c", 'q"x']), '["a", "b c", "q\\"x"]')
+        self.assertEqual(format_value([]), "[]")
+        self.assertEqual(format_value([1, True]), "[1, true]")
+
+    def test_set_value_replaces_an_existing_single_line_array(self) -> None:
+        text = '[todo]\nlabels = ["a"]   # keep\n'
+        result = set_value(text, ["todo", "labels"], format_value(["a", "b"]))
+        self.assertEqual(result, '[todo]\nlabels = ["a", "b"]   # keep\n')
+
+    def test_set_value_still_rejects_a_multi_line_array(self) -> None:
+        text = '[todo]\nlabels = [\n  "a",\n]\n'
+        with self.assertRaises(ShadError):
+            set_value(text, ["todo", "labels"], "[]")

@@ -69,7 +69,14 @@ def format_key(parts: list[str]) -> str:
 
 
 def format_value(value: object) -> str:
-    """Render a Python scalar as a TOML value literal."""
+    """
+    Render a Python scalar, or a list of scalars, as a TOML value literal.
+
+    A list renders on one line, which is what keeps it inside the scope of
+    set_value(): a value that spans lines is rejected there, not rewritten.
+    """
+    if isinstance(value, (list, tuple)):
+        return "[" + ", ".join(format_value(item) for item in value) + "]"
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, int):

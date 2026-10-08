@@ -2,7 +2,7 @@
 
 ## Project overview
 
-`shad` is a Python CLI tool that manages project-specific tmux sessions. It creates a 3-pane tmux layout (opencode, bash, git panel) per project and handles session lifecycle (open, status, stop). Configuration lives in `~/.config/shad/shad.toml`.
+`shad` is a Python CLI tool that manages project-specific tmux sessions. It creates a 3-pane tmux layout (opencode, bash, git panel) per project — or a 2x2 grid with a todo pane when `todo_percent` is set — and handles session lifecycle (open, status, stop). Configuration lives in `~/.config/shad/shad.toml`; todo files live in the per-OS data directory.
 
 Entry point: `shad.cli:main` (registered as the `shad` console script).
 
@@ -14,7 +14,7 @@ The codebase follows a **vertical slice** layout — each CLI subcommand owns it
 src/shad/
 ├── cli.py                      # arg parsing, dispatch, top-level error handling
 ├── shared/                     # cross-cutting utilities
-│   ├── config.py               # TOML config loading, Project/Defaults, target resolution
+│   ├── config.py               # TOML config loading, Project/Defaults, target resolution, data dir
 │   ├── errors.py               # ShadError exception
 │   ├── render.py               # make_table() and relative_age() — shared presentation
 │   └── tmux.py                 # low-level tmux subprocess wrappers
@@ -22,7 +22,7 @@ src/shad/
 │   ├── open/                   # "shad projects <name>" — session picker + layout
 │   │   ├── command.py          # open_project() orchestration
 │   │   ├── sessions.py         # OC session picker (SQLite query + TUI)
-│   │   ├── layout.py           # tmux 3-pane layout creation
+│   │   ├── layout.py           # tmux layout creation: 3 panes, or the 2x2 grid with todo
 │   │   └── banner.py           # ASCII art banner
 │   ├── status/command.py       # "shad projects <name> status" — reads git via the git slice
 │   └── stop/command.py         # "shad projects <name> stop"
@@ -41,6 +41,12 @@ src/shad/
 │   ├── snapshot.py             # one read-only reading of a repository, for the panel
 │   ├── panel.py                # the textual app "shad git panel" runs
 │   └── command.py              # target resolution, parallel inspect, gate, apply
+├── todo/                       # "shad todo": one text file per item, and the todo pane
+│   ├── model.py                # Item, Status, the header format, slug keys; no I/O
+│   ├── store.py                # the directory layout and every read and write
+│   ├── render.py               # rich styling shared by `list` and the panel
+│   ├── panel.py                # the textual app "shad todo panel" runs
+│   └── command.py              # project resolution, actions, label vocabulary
 ├── init/command.py             # "shad init" interactive wizard
 ├── cheat/command.py            # "shad cheat" tmux cheat sheet
 └── completion/command.py       # "shad completion bash"
@@ -98,4 +104,14 @@ Tests use `unittest.TestCase` with `unittest.mock.patch` for isolating subproces
 - **Completion input**: the completion script parses `shad config keys`, not `shad projects`. The latter prints ●/◆ bullets for humans. The script is generated from a template in `completion/command.py` with the `config/schema.py` enum values interpolated, and is installed by *sourcing* `shad completion bash`, never by pasting its text into a startup file — a pasted copy silently keeps completing an older command surface. `completion/test_command.py` drives the script in a real bash process against a fixture config, so a new subcommand that the script does not know about fails the suite.
 - **Project identity**: a project is a *directory plus a tmux session*, not a repository — projects need not be git repos at all. Two projects on the same directory are rejected by `_reject_duplicate_paths` in `shared/config.py`, which is safe to fail hard on because it is a property of the config text alone. Two projects on different directories that resolve to one repository (linked worktrees) are legal, and `git/command.py::_resolve` deduplicates them on `--git-common-dir` before any fetch runs. Do not conflate the two: two *clones* of one remote have different common dirs and different local branches, so both must be synced.
 - **Config path resolution**: never hard-code `~/.config/shad/shad.toml`. Call `shared.config.config_path()`, which applies `$SHAD_CONFIG`, then the per-OS default from `default_config_dir()`, then an existing legacy `~/.config/shad` file. `cli.main()` passes a `--config` override down to `load()`, `cmd_config()` and `cmd_init()`; readers and writers must resolve identically or `shad init` will write to a file nothing reads. `default_config_dir()` branches on `sys.platform`, not `os.name`, because pathlib dispatches on `os.name` and a test that patched it could not construct a path at all.
-- **Config writes**: the stdlib has no TOML writer and shad adds no dependencies, so `config/toml_edit.py` edits the file as text to keep comments. It handles scalar values only and rejects multi-line values. Every write is parsed with `tomllib` and loaded with `shared.config.load()` in a temporary file first, then `os.replace`d into position.
+- **Config writes**: the stdlib has no TOML writer and shad adds no dependencies, so `config/toml_edit.py` edits the file as text to keep comments. It handles scalar values and single-line arrays of scalars, and rejects multi-line values. Every write is parsed with `tomllib` and loaded with `shared.config.load()` in a temporary file first, then `os.replace`d into position. `config/command.py::write_value` is the entry point for a key outside the `set` schema; `shad todo label` uses it for the `[todo] labels` array.
+- **Todo files are the source of truth**: `shad todo` keeps one file per item under `default_data_dir()/todo/<group>-<key>/<item key>.md` — a header block, a blank line, the body. `todo/model.py::parse` never raises: a hand edit that leaves an unknown status or label is surfaced by `problems()`, and a header shad does not define rides along in `Item.extra`. `serialize(parse(text))` must round-trip the body byte for byte, because a status change from the panel rewrites the file. `store.add` creates with `O_EXCL`, so two adds of one key cannot both win; every other write touches one file through a temp file and `os.replace`. There is no lock, and nothing may be added that reads one file to write another.
+- **`shad todo add` without a title**: `todo/command.py::add_in_editor` writes `model.template()` to a file in the temporary directory, not the data directory, so the list and the panel never show an unfinished draft. The template's help lines start with `#`. `parse()` skips them only because `_HEADER` requires a header name to start with a letter, so do not loosen that pattern. A draft that `store.add` rejects is reopened on request and kept on decline. The command refuses to open an editor when stdin is not a terminal, because an editor reading a pipe blocks the caller.
+- **The panel's `a` key and `App.suspend()`**: `panel.py::action_add` calls `add_in_editor` inside `self.suspend()`, because the editor and the "Edit again?" prompt use the terminal. In textual 8.2, `suspend()` resumes the app only when its block exits normally. An exception that leaves the block leaves the panel suspended, and it stops reading keys. `action_add` therefore catches `ShadError`, `KeyboardInterrupt` and `EOFError` inside the block. `test_panel.py` replaces `suspend` with a recorder that has the same behavior, and asserts that the app resumed.
+- **Data dir is not config dir**: todo files resolve through `shared.config.default_data_dir()` (`$XDG_DATA_HOME/shad` on Linux), never through `config_path()`. A config directory is often a dotfiles repository; todo files must not be dragged into one by default. Tests patch `shad.todo.store.default_data_dir` or set `XDG_DATA_HOME`.
+- **`shad todo` targets the project containing cwd**, not the current directory itself, and unlike `shad git panel` it refuses a directory outside every configured project. `--project` is one word (`kb`, `alvr/db`, or a quoted `"alvr db"`) because the title is the positional. The layout sends `shad todo panel --project <group>/<key>` for the same reason.
+- **The todo grid layout addresses panes by id**: with `todo_percent` set, `layout.py::_layout_grid` captures `#{pane_id}` from each `split-window -P -F` and never uses `session:0.N`, because a fourth split makes every later index depend on the order of the earlier ones. `left` with `todo_percent` is rejected in `shared.config.load()`, so the layout never sees it.
+- **textual is imported lazily, again**: `todo/command.py::open_panel` imports `shad.todo.panel` inside the function. `todo/test_command.py` reads the module source and asserts the import is indented. Keep every `textual` import inside `panel.py`.
+- **A textual `App` subclass must not set `self._name`**: `DOMNode.__init__` owns that attribute and `App.name` reads it. The todo panel stores the project name as `_project_name`. mypy catches the collision only when the value type differs.
+- **Todo panel polling**: the panel calls `store.signature()` once a second and reloads on any change — name, mtime, or size of any item file. `load()` is synchronous because the directory is tens of files; do not move it to a worker. The panel's tests call `app.poll()` directly rather than waiting out the interval.
+- **Completion input for todo**: the script parses `shad todo list --keys` and `shad todo label list`, both one plain word per line, and replays `--project` to the keys call so the keys come from the project the command will act on. `shad todo list` without `--keys` is a rich table for humans and is not safe to parse.

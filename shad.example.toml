@@ -15,6 +15,18 @@ panel_percent = 35
 # When bundle is vertical   (oc left/right): the git panel is on the bottom.
 split_percent = 35
 
+# How much of the window width the todo column takes (%). 0 = no todo pane.
+# With a value, the window is a 2x2 grid: opencode over bash on the left,
+# todo over git on the right. Needs oc_position top or bottom; split_percent
+# is then ignored.
+todo_percent  = 0
+
+# ── Todo labels ───────────────────────────────────────────────────────────
+# The labels `shad todo add --label` accepts. Managed by `shad todo label`.
+
+[todo]
+labels = ["chore", "documentation", "investigation", "poc"]
+
 # ── Top-level projects ────────────────────────────────────────────────────
 # Access: shad projects kb
 
