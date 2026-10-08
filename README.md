@@ -184,6 +184,15 @@ shad config unset projects.alvr.db
 # When bundle is vertical   (oc_position left):       the panel is on the bottom.
 # split_percent = 35
 
+# How much of the window width the todo column takes (%). 0 = no todo pane.
+# With a value, the window is a 2x2 grid: harness over bash on the left,
+# todo over git on the right. Needs oc_position top or bottom.
+# todo_percent = 0
+
+# The labels `shad todo add --label` accepts. Managed by `shad todo label`.
+# [todo]
+# labels = ["chore", "documentation", "investigation", "poc"]
+
 
 # ── Top-level projects ────────────────────────────────────────────────
 # Accessed with:  shad projects <key>
@@ -215,6 +224,8 @@ path    = "/home/user/gh/alvr/portal"
 | `[defaults] oc_position` | no | `"top"` | Side opencode occupies: `top`, `bottom`, or `left` |
 | `[defaults] panel_percent` | no | `35` | % of the window the git+bash bundle takes |
 | `[defaults] split_percent` | no | `35` | % of the bundle that the git panel takes (bash gets the rest) |
+| `[defaults] todo_percent` | no | `0` | % of the window width the todo column takes; `0` means no todo pane. Needs `oc_position` `top` or `bottom`; `split_percent` is then ignored |
+| `[todo] labels` | no | `[]` | The labels `shad todo add --label` accepts; managed by `shad todo label` |
 | `path` | **yes** | — | Absolute path to the project root |
 | `session` | no | key or `<group>-<key>` | tmux session name; must be unique across all projects |
 
@@ -271,6 +282,16 @@ shad git sync --yes               # skip the confirmation prompt
 shad git panel                    # the repository in the current directory
 shad git panel tin shad           # a configured project
 shad git panel --no-fetch         # skip the fetch on open
+
+# Todo list of the project containing the current directory
+shad todo add                     # write the item in $EDITOR from a template
+shad todo add "Fix panel resize" --label chore
+shad todo list                    # --keys prints just the keys
+shad todo status fix in-progress  # keys accept a unique prefix
+shad todo edit fix                # open the item in $EDITOR
+shad todo rm fix
+shad todo label add investigation # the label vocabulary lives in shad.toml
+shad todo panel --project tin/shad  # the fourth pane runs this
 
 # Show a tmux cheat sheet popup
 shad cheat
@@ -462,6 +483,106 @@ Nothing in the panel changes the repository. The fetch never passes `--prune`:
 pruning a remote-tracking ref takes its reflog with it, and `shad git sync`
 needs those last-known OIDs to prove a gone-upstream branch was fully pushed.
 
+## Todo panel
+
+`shad todo` keeps a small todo list per project: one text file per item, meant
+to be edited by hand as much as through the CLI. With `todo_percent` set, the
+panel runs in the fourth pane of every project session.
+
+```
+ tin shad  ·  2 open  ·  1 done
+ ◐ Fix panel resize            chore
+ ○ Write docs                  documentation
+ ● Bump textual                chore
+ ──────────────────────────────────────────
+ Fix panel resize
+ in-progress  chore
+ created 2026-10-07T10:12:00+02:00  ·  updated 3h
+
+ The resize handler fires twice on tmux zoom.
+```
+
+### Files
+
+```
+~/.local/share/shad/todo/<group>-<key>/<item key>.md
+```
+
+The directory follows `$XDG_DATA_HOME` on Linux (`~/Library/Application
+Support/shad` on macOS, `%LOCALAPPDATA%\shad` on Windows). It is kept apart from
+the config directory so a dotfiles repository does not pick the files up.
+Renaming a project in `shad.toml` orphans its directory; `mv` reconnects it.
+
+Each item is a header block, a blank line, and the body:
+
+```
+title: Fix panel resize
+status: in-progress
+labels: chore, investigation
+created: 2026-10-07T10:12:00+02:00
+
+Free text. Markdown is fine; the panel shows it as text.
+```
+
+The file name is the item key: a slug of the title, at most 40 characters. The
+CLI accepts any unique prefix of a key. A status change rewrites the headers
+and copies the body byte for byte. A header shad does not know is kept. A hand
+edit that leaves an unknown status or label is reported in the panel header
+and in `shad todo list`, never fatal.
+
+### Commands
+
+| Command | Description |
+|---|---|
+| `shad todo add [--label L ...]` | Create the item from a template opened in the editor |
+| `shad todo add "title" [--label L ...]` | Create the item; prints its key and path |
+| `shad todo list [--keys]` | Print the items, or just their keys one per line |
+| `shad todo status <key> <status>` | `todo`, `in-progress`, `done`, or `wont-do` |
+| `shad todo edit <key>` | Open the file in `$VISUAL`, `$EDITOR`, or the first editor found |
+| `shad todo rm <key>` | Delete the file |
+| `shad todo label add\|rm\|list [name]` | Manage `[todo] labels` in `shad.toml` |
+| `shad todo panel` | The pane |
+
+The project is the one whose directory contains the current directory. The
+shell pane and the harness pane both run there, so no name is needed, and an
+agent in the harness pane can use the same commands. `--project` names another
+project as one word: `kb`, `alvr/db`, or `"alvr db"`. A directory outside every
+configured project is an error.
+
+`add` without a title opens a template in `$VISUAL`, `$EDITOR`, or the first
+editor found. The template is the item file format with an empty title. `--label`
+fills in the `labels` header. Lines that start with `#` above the first blank
+line are help, and shad does not write them to the item. To cancel, save the
+template with an empty title and an empty body. When shad cannot create the item
+from the saved text, it shows the error and asks to open the editor again. If you
+decline, shad keeps the draft in the temporary directory and prints its path.
+`add` with a title does not open an editor, so a script or an agent can add an
+item without a terminal.
+
+`label rm` refuses while an item still carries the label, and says which
+projects do; `--force` removes it anyway and the items then show the label in
+red.
+
+### Keys
+
+| Key | Action |
+|---|---|
+| `↑` `↓` or `k` `j` | Move the row cursor; the detail follows |
+| `1` `2` `3` `4` | Set the status: todo, in-progress, done, wont-do |
+| `a` | Add an item in the editor, as `shad todo add` without a title does. The cursor moves to the new item |
+| `d` then `y` | Delete the item (`n` or `esc` cancels) |
+| `e` | Open the item in `$EDITOR`; the panel reloads on return |
+| `r` | Reload |
+| `q` | Quit |
+
+Rows sort in-progress first, then todo, done, and wont-do. In-progress rows are
+bold yellow, done rows dim green, and wont-do rows struck through. Label
+colours follow the label's position in `[todo] labels`.
+
+The panel polls the directory once a second, so an item added from the CLI, or
+a file saved in another pane, appears without a keypress. Nothing in the panel
+touches a file other than the one item a key acts on.
+
 ## Shell completion
 
 `shad` supports tab completion for bash.
@@ -529,6 +650,22 @@ Created once per tmux session on first open, never rebuilt on subsequent attache
 ```
 
 `panel_percent` controls how much of the window the git+bash bundle takes; `split_percent` controls the panel/bash split within it.
+
+**`todo_percent` set (with `top` or `bottom`)**
+```
+┌─────────────────────┬───────────┐
+│  opencode           │ todo      │  100 - panel_percent
+├─────────────────────┼───────────┤
+│  bash               │ git panel │  panel_percent
+└─────────────────────┴───────────┘
+   100 - todo_percent  todo_percent
+```
+
+The window becomes a 2x2 grid: the harness over bash on the left, the todo
+panel over the git panel on the right, with the columns aligned. `bottom`
+mirrors it vertically. `split_percent` is ignored, because the git panel's
+width is the column's. `left` has no slot for a fourth pane that lines up, so
+`left` with `todo_percent` set is a config error.
 
 If `shad` is run from **inside** an existing tmux session it uses `switch-client`; outside tmux it uses `attach-session`.
 
@@ -609,9 +746,15 @@ shad/
         │   │   └── command.py
         │   └── stop/
         │       └── command.py
-        └── shared/
-            ├── config.py
-            ├── errors.py
+        ├── shared/
+        │   ├── config.py
+        │   ├── errors.py
+        │   ├── render.py
+        │   └── tmux.py
+        └── todo/
+            ├── command.py
+            ├── model.py
+            ├── panel.py
             ├── render.py
-            └── tmux.py
+            └── store.py
 ```

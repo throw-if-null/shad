@@ -25,6 +25,20 @@ Layout variants (controlled by defaults.oc_position):
     │opencode  ├──────────────────────┤
     │          │  git panel           │  ~35% of bundle height
     └──────────┴──────────────────────┘
+
+With defaults.todo_percent set, the window is a 2x2 grid instead (top shown;
+bottom mirrors it vertically; left is rejected by config loading):
+
+    ┌─────────────────────┬───────────┐
+    │  opencode           │ todo      │  100 - panel_percent
+    ├─────────────────────┼───────────┤
+    │  bash               │ git panel │  panel_percent
+    └─────────────────────┴───────────┘
+       100 - todo_percent  todo_percent
+
+The grid addresses panes by id ("%3"), captured from each split, rather than
+by index: a fourth split makes the index of every later pane depend on the
+order of the earlier ones.
 """
 
 from __future__ import annotations
@@ -48,6 +62,10 @@ def _create_session(
     _run(["tmux", "set-option", "-t", session, "allow-rename", "off"])
     _run(["tmux", "set-option", "-t", session, "set-titles", "on"])
     _run(["tmux", "set-option", "-t", session, "set-titles-string", window_title])
+
+    if defaults.todo_percent:
+        _layout_grid(project, defaults, oc_command, session, cwd)
+        return
 
     if pos == "top":
         # OC top, bundle below — horizontal split within bundle
@@ -169,3 +187,57 @@ def _create_session(
 
     # Focus the OC pane
     _run(["tmux", "select-pane", "-t", oc_pane])
+
+
+def _layout_grid(
+    project: Project, defaults: Defaults, oc_command: str, session: str, cwd: str
+) -> None:
+    """The 2x2 layout: harness over bash on the left, todo over git on the right."""
+    target = _target(project)
+    todo_target = f"{project.group}/{project.key}" if project.group else project.key
+
+    first = _run(
+        ["tmux", "display-message", "-p", "-t", f"{session}:0.0", "#{pane_id}"]
+    ).stdout.strip()
+    right = _split(first, "-h", defaults.todo_percent, cwd)
+
+    if defaults.oc_position == "top":
+        main, todo = first, right
+        shell = _split(first, "-v", defaults.panel_percent, cwd)
+        git = _split(right, "-v", defaults.panel_percent, cwd)
+    else:
+        # bottom: the new, lower panes are the harness and the todo pane.
+        shell, git = first, right
+        main = _split(first, "-v", 100 - defaults.panel_percent, cwd)
+        todo = _split(right, "-v", 100 - defaults.panel_percent, cwd)
+
+    _run(["tmux", "send-keys", "-t", main, oc_command + "\n"])
+    _run(["tmux", "send-keys", "-t", git, f"shad git panel {target}\n"])
+    _run(["tmux", "send-keys", "-t", todo, f"shad todo panel --project {todo_target}\n"])
+    _run(["tmux", "send-keys", "-t", shell, f"shad projects {target} status\n"])
+    _run(["tmux", "select-pane", "-t", main])
+
+
+def _split(pane: str, direction: str, percent: int, cwd: str) -> str:
+    """Split *pane* and return the new pane's id."""
+    result = _run(
+        [
+            "tmux",
+            "split-window",
+            "-t",
+            pane,
+            direction,
+            "-p",
+            str(percent),
+            "-c",
+            cwd,
+            "-P",
+            "-F",
+            "#{pane_id}",
+        ]
+    )
+    return result.stdout.strip()
+
+
+def _target(project: Project) -> str:
+    return f"{project.group} {project.key}" if project.group else project.key

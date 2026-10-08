@@ -7,6 +7,10 @@ Schema (shad.toml):
   oc_position   = "top"   # top | bottom | left
   panel_percent = 35      # % of window the git+bash bundle takes
   split_percent = 35      # % of the bundle that the git panel takes (bash gets the rest)
+  todo_percent  = 0       # % of window width the todo column takes; 0 = no todo pane
+
+  [todo]
+  labels = ["chore", "documentation"]   # the label vocabulary `shad todo add --label` accepts
 
   # top-level project (no group)
   [projects.kb]
@@ -26,6 +30,7 @@ Maximum supported depth: group → project  (2 levels).
 from __future__ import annotations
 
 import os
+import re
 import sys
 import tomllib
 from dataclasses import dataclass, field
@@ -83,6 +88,31 @@ def default_config_dir() -> Path:
     return base / APP_NAME
 
 
+def default_data_dir() -> Path:
+    """
+    The per-OS directory shad stores its data in: today, the todo files.
+
+      Linux/BSD   $XDG_DATA_HOME/shad   (default ~/.local/share/shad)
+      macOS       ~/Library/Application Support/shad
+      Windows     %LOCALAPPDATA%\\shad
+
+    Data is kept apart from config because a config directory is often tracked
+    in a dotfiles repository, and todo files should not be dragged into one by
+    default. The XDG rule is the same as default_config_dir(): the variable is
+    honoured only when it is absolute.
+    """
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / APP_NAME
+    if sys.platform == "win32":
+        local = os.environ.get("LOCALAPPDATA")
+        base = Path(local) if local else Path.home() / "AppData" / "Local"
+        return base / APP_NAME
+
+    xdg = os.environ.get("XDG_DATA_HOME")
+    base = Path(xdg) if xdg and Path(xdg).is_absolute() else Path.home() / ".local" / "share"
+    return base / APP_NAME
+
+
 def config_path() -> Path:
     """
     Resolve the config file to use. Precedence, highest first:
@@ -126,6 +156,10 @@ def config_path() -> Path:
 OC_POSITIONS = ("top", "bottom", "left")
 HARNESSES = ("opencode", "claude")
 
+# A todo label is also a header value and a CLI argument, so it is kept to the
+# characters that need no quoting anywhere: lowercase, digits, and hyphens.
+LABEL_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+
 
 @dataclass
 class Defaults:
@@ -133,6 +167,7 @@ class Defaults:
     panel_percent: int = 35
     split_percent: int = 35
     harness: str = "opencode"
+    todo_percent: int = 0  # 0 keeps the three-pane layout
 
 
 @dataclass
@@ -158,6 +193,8 @@ class Config:
     projects: dict[str, Project] = field(default_factory=dict)
     # grouped projects: groups[group_name][project_key] = Project
     groups: dict[str, dict[str, Project]] = field(default_factory=dict)
+    # [todo] labels, in file order; the vocabulary every todo item is checked against
+    todo_labels: list[str] = field(default_factory=list)
 
 
 def _parse_project(
@@ -221,11 +258,25 @@ def load(path: Path | None = None) -> Config:
                 f"invalid value for '{name}' in [defaults]: expected an integer, got {raw_val!r}"
             )
 
+    todo_percent = _int_setting("todo_percent", 0)
+    if not 0 <= todo_percent <= 99:
+        raise ShadError(
+            f"invalid todo_percent {todo_percent}; must be between 0 and 99 (0 = no todo pane)"
+        )
+    if todo_percent and oc_position == "left":
+        # The left layout stacks bash and git beside a full-height harness
+        # column; there is no slot for a fourth pane that lines up with it.
+        raise ShadError(
+            "todo_percent requires oc_position top or bottom; "
+            "the left layout has no slot for the todo pane"
+        )
+
     defaults = Defaults(
         oc_position=oc_position,
         panel_percent=_int_setting("panel_percent", 35),
         split_percent=_int_setting("split_percent", 35),
         harness=harness,
+        todo_percent=todo_percent,
     )
 
     # --- projects ---
@@ -252,9 +303,33 @@ def load(path: Path | None = None) -> Config:
                 )
             groups[key] = group_projects
 
-    cfg = Config(defaults=defaults, projects=projects, groups=groups)
+    cfg = Config(
+        defaults=defaults,
+        projects=projects,
+        groups=groups,
+        todo_labels=_parse_labels(raw.get("todo", {})),
+    )
     _reject_duplicate_paths(cfg)
     return cfg
+
+
+def _parse_labels(todo: object) -> list[str]:
+    """The [todo] labels array, validated: an array of unique label names."""
+    if not isinstance(todo, dict):
+        raise ShadError("[todo] must be a TOML table")
+    labels = todo.get("labels", [])
+    if not isinstance(labels, list) or not all(isinstance(label, str) for label in labels):
+        raise ShadError("[todo] labels must be an array of strings")
+    seen: set[str] = set()
+    for label in labels:
+        if not LABEL_RE.match(label):
+            raise ShadError(
+                f"invalid todo label {label!r}; use lowercase letters, digits and hyphens"
+            )
+        if label in seen:
+            raise ShadError(f"duplicate todo label {label!r}")
+        seen.add(label)
+    return list(labels)
 
 
 def _reject_duplicate_paths(cfg: Config) -> None:

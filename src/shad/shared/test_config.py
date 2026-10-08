@@ -14,6 +14,7 @@ from shad.shared.config import (
     all_projects,
     config_path,
     default_config_dir,
+    default_data_dir,
     load,
     resolve_prefix,
     resolve_target,
@@ -328,6 +329,98 @@ if __name__ == "__main__":
 # ---------------------------------------------------------------------------
 # config path resolution
 # ---------------------------------------------------------------------------
+
+
+class TodoConfigTests(unittest.TestCase):
+    def _load(self, text: str) -> Config:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "shad.toml"
+            path.write_text(textwrap.dedent(text))
+            return load(path)
+
+    def test_defaults_to_no_todo_pane_and_no_labels(self) -> None:
+        cfg = self._load("[projects.kb]\npath = '/tmp/kb'\n")
+        self.assertEqual(cfg.defaults.todo_percent, 0)
+        self.assertEqual(cfg.todo_labels, [])
+
+    def test_reads_todo_percent_and_labels_in_file_order(self) -> None:
+        cfg = self._load("""\
+            [defaults]
+            todo_percent = 30
+
+            [todo]
+            labels = ["poc", "chore"]
+            """)
+        self.assertEqual(cfg.defaults.todo_percent, 30)
+        self.assertEqual(cfg.todo_labels, ["poc", "chore"])
+
+    def test_todo_percent_out_of_range_is_rejected(self) -> None:
+        for value in ("-1", "100"):
+            with self.subTest(value=value), self.assertRaises(ShadError) as ctx:
+                self._load(f"[defaults]\ntodo_percent = {value}\n")
+            self.assertIn("todo_percent", str(ctx.exception))
+
+    def test_todo_percent_with_the_left_layout_is_rejected(self) -> None:
+        with self.assertRaises(ShadError) as ctx:
+            self._load('[defaults]\noc_position = "left"\ntodo_percent = 30\n')
+        self.assertIn("left", str(ctx.exception))
+
+    def test_zero_todo_percent_with_the_left_layout_is_fine(self) -> None:
+        cfg = self._load('[defaults]\noc_position = "left"\ntodo_percent = 0\n')
+        self.assertEqual(cfg.defaults.oc_position, "left")
+
+    def test_labels_must_be_an_array_of_strings(self) -> None:
+        for labels in ('"chore"', "[1]", '["a", 2]'):
+            with self.subTest(labels=labels), self.assertRaises(ShadError):
+                self._load(f"[todo]\nlabels = {labels}\n")
+
+    def test_todo_must_be_a_table(self) -> None:
+        with self.assertRaises(ShadError):
+            self._load("todo = 1\n")
+
+    def test_malformed_and_duplicate_labels_are_rejected(self) -> None:
+        with self.assertRaises(ShadError) as ctx:
+            self._load('[todo]\nlabels = ["Chore"]\n')
+        self.assertIn("Chore", str(ctx.exception))
+        with self.assertRaises(ShadError) as ctx:
+            self._load('[todo]\nlabels = ["a", "a"]\n')
+        self.assertIn("duplicate", str(ctx.exception))
+
+
+class DefaultDataDirTests(unittest.TestCase):
+    """Data is kept apart from config; each platform branch is asserted on."""
+
+    def _dir(self, *, platform: str, env: dict[str, str]) -> Path:
+        with (
+            patch("shad.shared.config.sys.platform", platform),
+            patch.dict("shad.shared.config.os.environ", env, clear=True),
+            patch.object(Path, "home", return_value=Path("/home/u")),
+        ):
+            return default_data_dir()
+
+    def test_linux_uses_xdg_data_home(self) -> None:
+        self.assertEqual(
+            self._dir(platform="linux", env={"XDG_DATA_HOME": "/xdg"}), Path("/xdg/shad")
+        )
+
+    def test_linux_falls_back_to_dot_local_share(self) -> None:
+        self.assertEqual(self._dir(platform="linux", env={}), Path("/home/u/.local/share/shad"))
+
+    def test_a_relative_xdg_data_home_is_ignored(self) -> None:
+        found = self._dir(platform="linux", env={"XDG_DATA_HOME": "rel"})
+        self.assertEqual(found, Path("/home/u/.local/share/shad"))
+
+    def test_config_home_does_not_leak_into_the_data_dir(self) -> None:
+        found = self._dir(platform="linux", env={"XDG_CONFIG_HOME": "/cfg"})
+        self.assertEqual(found, Path("/home/u/.local/share/shad"))
+
+    def test_macos_uses_application_support(self) -> None:
+        found = self._dir(platform="darwin", env={"XDG_DATA_HOME": "/xdg"})
+        self.assertEqual(found, Path("/home/u/Library/Application Support/shad"))
+
+    def test_windows_uses_local_appdata(self) -> None:
+        found = self._dir(platform="win32", env={"LOCALAPPDATA": "/Users/u/AppData/Local"})
+        self.assertEqual(found, Path("/Users/u/AppData/Local/shad"))
 
 
 class DefaultConfigDirTests(unittest.TestCase):
