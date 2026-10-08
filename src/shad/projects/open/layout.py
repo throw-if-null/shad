@@ -192,7 +192,10 @@ def _create_session(
 def _layout_grid(
     project: Project, defaults: Defaults, oc_command: str, session: str, cwd: str
 ) -> None:
-    """The 2x2 layout: harness over bash on the left, todo over git on the right."""
+    """
+    The 2x2 layout: harness and bash on the left, todo and git on the right.
+    The harness and todo panes share the row that oc_position names.
+    """
     target = _target(project)
     todo_target = f"{project.group}/{project.key}" if project.group else project.key
 
