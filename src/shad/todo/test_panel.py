@@ -39,7 +39,7 @@ class PanelTests(unittest.IsolatedAsyncioTestCase):
         path.write_text(path.read_text() + "Some body text.\n")
 
     def _app(self) -> TodoPanel:
-        return TodoPanel(self.dir, VOCAB, name="tin shad")
+        return TodoPanel(self.dir, VOCAB)
 
     @staticmethod
     def _header(app: TodoPanel) -> str:
@@ -56,7 +56,7 @@ class PanelTests(unittest.IsolatedAsyncioTestCase):
             table = app.query_one("#items", DataTable)
             self.assertEqual(table.row_count, 2)
             self.assertEqual(app.current_key(), "active-work")
-            self.assertIn("tin shad", self._header(app))
+            self.assertTrue(self._header(app).startswith("todo"))
             self.assertIn("2 open", self._header(app))
             self.assertIn("0 done", self._header(app))
 
@@ -207,7 +207,7 @@ class PanelTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("no todo created", notify.call_args.args[0])
 
     async def test_empty_directory_shows_a_hint(self) -> None:
-        app = TodoPanel(Path(self._tmp.name) / "empty", VOCAB, name="x")
+        app = TodoPanel(Path(self._tmp.name) / "empty", VOCAB)
         async with app.run_test(size=(60, 25)) as pilot:
             await pilot.pause()
             self.assertIsNone(app.current_key())

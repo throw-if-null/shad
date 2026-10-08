@@ -192,6 +192,8 @@ shad config unset projects.alvr.db
 # The labels `shad todo add --label` accepts. Managed by `shad todo label`.
 # [todo]
 # labels = ["chore", "documentation", "investigation", "poc"]
+# The directory that holds the todo files. Omit to use the per-OS data dir.
+# path = "~/notes/todo"
 
 
 # ── Top-level projects ────────────────────────────────────────────────
@@ -226,6 +228,7 @@ path    = "/home/user/gh/alvr/portal"
 | `[defaults] split_percent` | no | `35` | % of the bundle that the git panel takes (bash gets the rest) |
 | `[defaults] todo_percent` | no | `0` | % of the window width the todo column takes; `0` means no todo pane. Needs `oc_position` `top` or `bottom`; `split_percent` is then ignored |
 | `[todo] labels` | no | `[]` | The labels `shad todo add --label` accepts; managed by `shad todo label` |
+| `[todo] path` | no | `<data dir>/todo` | Directory that holds the todo files. Absolute, or starts with `~`. See [Files](#files) |
 | `path` | **yes** | — | Absolute path to the project root |
 | `session` | no | key or `<group>-<key>` | tmux session name; must be unique across all projects |
 
@@ -283,7 +286,7 @@ shad git panel                    # the repository in the current directory
 shad git panel tin shad           # a configured project
 shad git panel --no-fetch         # skip the fetch on open
 
-# Todo list of the project containing the current directory
+# The todo list: one list, not tied to a project
 shad todo add                     # write the item in $EDITOR from a template
 shad todo add "Fix panel resize" --label chore
 shad todo list                    # --keys prints just the keys
@@ -291,7 +294,7 @@ shad todo status fix in-progress  # keys accept a unique prefix
 shad todo edit fix                # open the item in $EDITOR
 shad todo rm fix
 shad todo label add investigation # the label vocabulary lives in shad.toml
-shad todo panel --project tin/shad  # the fourth pane runs this
+shad todo panel                   # the fourth pane runs this
 
 # Show a tmux cheat sheet popup
 shad cheat
@@ -485,12 +488,13 @@ needs those last-known OIDs to prove a gone-upstream branch was fully pushed.
 
 ## Todo panel
 
-`shad todo` keeps a small todo list per project: one text file per item, meant
-to be edited by hand as much as through the CLI. With `todo_percent` set, the
-panel runs in the fourth pane of every project session.
+`shad todo` keeps one small todo list that is not tied to a project: one text
+file per item, meant to be edited by hand as much as through the CLI. With
+`todo_percent` set, the panel runs in the fourth pane of every project session,
+and every session shows the same list.
 
 ```
- tin shad  ·  2 open  ·  1 done
+ todo  ·  2 open  ·  1 done
  ◐ Fix panel resize            chore
  ○ Write docs                  documentation
  ● Bump textual                chore
@@ -505,13 +509,25 @@ panel runs in the fourth pane of every project session.
 ### Files
 
 ```
-~/.local/share/shad/todo/<group>-<key>/<item key>.md
+<todo dir>/<item key>.md
 ```
 
-The directory follows `$XDG_DATA_HOME` on Linux (`~/Library/Application
-Support/shad` on macOS, `%LOCALAPPDATA%\shad` on Windows). It is kept apart from
-the config directory so a dotfiles repository does not pick the files up.
-Renaming a project in `shad.toml` orphans its directory; `mv` reconnects it.
+The todo dir is `[todo] path` when it is set:
+
+```sh
+shad config set todo.path ~/notes/todo   # the directory must exist; --force skips the check
+shad config get todo.path                # prints the todo dir in use, set or default
+```
+
+Without `[todo] path`, the todo dir is `~/.local/share/shad/todo`. That
+directory follows `$XDG_DATA_HOME` on Linux (`~/Library/Application
+Support/shad/todo` on macOS, `%LOCALAPPDATA%\shad\todo` on Windows). The default
+is kept apart from the config directory so a dotfiles repository does not pick
+the files up.
+
+shad reads only the `.md` files directly in the todo dir, not files in its
+subdirectories. shad does not move existing files when the todo dir changes.
+Move them with `mv`.
 
 Each item is a header block, a blank line, and the body:
 
@@ -543,11 +559,8 @@ and in `shad todo list`, never fatal.
 | `shad todo label add\|rm\|list [name]` | Manage `[todo] labels` in `shad.toml` |
 | `shad todo panel` | The pane |
 
-The project is the one whose directory contains the current directory. The
-shell pane and the harness pane both run there, so no name is needed, and an
-agent in the harness pane can use the same commands. `--project` names another
-project as one word: `kb`, `alvr/db`, or `"alvr db"`. A directory outside every
-configured project is an error.
+Every command acts on the same list from any directory, so an agent in the
+harness pane can use the same commands.
 
 `add` without a title opens a template in `$VISUAL`, `$EDITOR`, or the first
 editor found. The template is the item file format with an empty title. `--label`

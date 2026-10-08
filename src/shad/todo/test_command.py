@@ -11,10 +11,10 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from shad.cli import build_parser
-from shad.shared.config import Config, Defaults, Project, load
+from shad.shared.config import load
 from shad.shared.errors import ShadError
 from shad.todo import store
-from shad.todo.command import cmd_todo, resolve_project
+from shad.todo.command import cmd_todo
 from shad.todo.model import template
 
 CONFIG = """\
@@ -50,7 +50,7 @@ class TodoCommandTests(unittest.TestCase):
         self._tmp = TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.root = Path(self._tmp.name)
-        for name in ("kb", "kb/sub", "alvr/db", "alvr/api", "elsewhere", "data"):
+        for name in ("kb", "alvr/db", "alvr/api", "data"):
             (self.root / name).mkdir(parents=True)
         self.config = self.root / "shad.toml"
         self.config.write_text(CONFIG.format(root=self.root))
@@ -60,18 +60,15 @@ class TodoCommandTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def _run(self, *argv: str, cwd: Path | None = None) -> str:
+    def _run(self, *argv: str) -> str:
         args = build_parser().parse_args(["todo", *argv])
         out = io.StringIO()
-        with (
-            patch("shad.todo.command.Path.cwd", return_value=cwd or self.root / "kb"),
-            contextlib.redirect_stdout(out),
-        ):
+        with contextlib.redirect_stdout(out):
             cmd_todo(self.cfg, args, path=self.config)
         return out.getvalue()
 
-    def _dir(self, name: str = "kb") -> Path:
-        return self.root / "data" / "todo" / name
+    def _dir(self) -> Path:
+        return self.root / "data" / "todo"
 
     @contextlib.contextmanager
     def _editor(
@@ -102,58 +99,28 @@ class TodoCommandTests(unittest.TestCase):
             stdin.isatty.return_value = True
             yield shown
 
-    # -- project resolution ----------------------------------------------
-
-    def test_cwd_inside_a_project_resolves_it(self) -> None:
-        with patch("shad.todo.command.Path.cwd", return_value=self.root / "kb" / "sub"):
-            self.assertEqual(resolve_project(self.cfg, None).key, "kb")
-
-    def test_cwd_outside_every_project_is_an_error(self) -> None:
-        with (
-            patch("shad.todo.command.Path.cwd", return_value=self.root / "elsewhere"),
-            self.assertRaises(ShadError) as ctx,
-        ):
-            resolve_project(self.cfg, None)
-        self.assertIn("--project", str(ctx.exception))
-
-    def test_nested_projects_resolve_to_the_deepest(self) -> None:
-        cfg = Config(
-            defaults=Defaults(),
-            projects={
-                "outer": Project(key="outer", group=None, path=self.root / "kb", session="o"),
-                "inner": Project(
-                    key="inner", group=None, path=self.root / "kb" / "sub", session="i"
-                ),
-            },
-        )
-        with patch("shad.todo.command.Path.cwd", return_value=self.root / "kb" / "sub"):
-            self.assertEqual(resolve_project(cfg, None).key, "inner")
-
-    def test_project_flag_accepts_key_slash_and_space_forms(self) -> None:
-        self.assertEqual(resolve_project(self.cfg, "kb").key, "kb")
-        self.assertEqual(resolve_project(self.cfg, "alvr/db").display_name, "alvr db")
-        self.assertEqual(resolve_project(self.cfg, "alvr api").display_name, "alvr api")
-        self.assertEqual(resolve_project(self.cfg, "al/d").display_name, "alvr db")
-
-    def test_project_flag_naming_a_group_is_an_error(self) -> None:
-        with self.assertRaises(ShadError) as ctx:
-            resolve_project(self.cfg, "alvr")
-        self.assertIn("2 projects", str(ctx.exception))
-
     # -- add / list / status / rm -----------------------------------------
 
-    def test_add_writes_into_the_project_directory(self) -> None:
+    def test_add_writes_into_the_todo_dir(self) -> None:
         out = self._run("add", "Fix panel resize", "--label", "chore")
         self.assertIn("fix-panel-resize", out)
         self.assertTrue((self._dir() / "fix-panel-resize.md").exists())
 
-    def test_add_with_project_flag_targets_that_project(self) -> None:
-        self._run("add", "Elsewhere", "--project", "alvr/db", cwd=self.root / "elsewhere")
-        self.assertTrue((self._dir("alvr-db") / "elsewhere.md").exists())
+    def test_the_project_flag_is_not_accepted(self) -> None:
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            self._run("add", "Elsewhere", "--project", "kb")
 
     def test_add_rejects_an_unknown_label(self) -> None:
         with self.assertRaises(ShadError):
             self._run("add", "x", "--label", "nope")
+
+    def test_add_writes_under_the_configured_todo_path(self) -> None:
+        notes = self.root / "notes"
+        self.config.write_text(f'{CONFIG.format(root=self.root)}path = "{notes}"\n')
+        self.cfg = load(self.config)
+        self._run("add", "Fix panel resize")
+        self.assertTrue((notes / "fix-panel-resize.md").exists())
+        self.assertFalse(self._dir().exists())
 
     def test_add_with_a_title_never_opens_the_editor(self) -> None:
         with patch("shad.todo.command.subprocess.run") as run:
@@ -311,9 +278,18 @@ class TodoCommandTests(unittest.TestCase):
         self._run("add", "Uses it", "--label", "poc")
         with self.assertRaises(ShadError) as ctx:
             self._run("label", "rm", "poc")
-        self.assertIn("kb (1)", str(ctx.exception))
+        self.assertIn("1 item(s)", str(ctx.exception))
         self._run("label", "rm", "poc", "--force")
         self.assertEqual(load(self.config).todo_labels, ["chore"])
+
+    def test_label_rm_counts_items_under_the_configured_todo_path(self) -> None:
+        notes = self.root / "notes"
+        self.config.write_text(f'{CONFIG.format(root=self.root)}path = "{notes}"\n')
+        self.cfg = load(self.config)
+        self._run("add", "Uses it", "--label", "poc")
+        with self.assertRaises(ShadError) as ctx:
+            self._run("label", "rm", "poc")
+        self.assertIn("1 item(s)", str(ctx.exception))
 
     def test_label_rm_of_an_unknown_label_is_an_error(self) -> None:
         with self.assertRaises(ShadError):

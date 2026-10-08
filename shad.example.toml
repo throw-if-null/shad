@@ -21,11 +21,14 @@ split_percent = 35
 # is then ignored.
 todo_percent  = 0
 
-# ── Todo labels ───────────────────────────────────────────────────────────
-# The labels `shad todo add --label` accepts. Managed by `shad todo label`.
+# ── Todo ──────────────────────────────────────────────────────────────────
+# labels: the labels `shad todo add --label` accepts. Managed by `shad todo label`.
+# path:   the directory that holds the todo files. Absolute, or starts with ~.
+#         Omit to use the per-OS data dir (~/.local/share/shad/todo on Linux).
 
 [todo]
 labels = ["chore", "documentation", "investigation", "poc"]
+# path = "~/notes/todo"
 
 # ── Top-level projects ────────────────────────────────────────────────────
 # Access: shad projects kb

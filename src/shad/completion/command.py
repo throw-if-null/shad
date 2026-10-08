@@ -173,20 +173,8 @@ _shad_complete_config() {
     esac
 }
 
-# Project names in the one-word form `shad todo --project` takes: a top-level
-# key, or group/key for a grouped project.
-_shad_project_words() {
-    local entry
-    printf '%s ' "${_shad_top[@]}"
-    for entry in "${_shad_group_pairs[@]}"; do
-        printf '%s/%s ' "${entry%% *}" "${entry##* }"
-    done
-}
-
-# Item keys of the targeted project. `--project` is replayed so the keys come
-# from the project the command will act on, not from the current directory.
 _shad_todo_keys() {
-    "${_shad_cmd[@]}" todo list --keys "${_shad_todo_opts[@]}" 2>/dev/null
+    "${_shad_cmd[@]}" todo list --keys 2>/dev/null
 }
 
 _shad_todo_labels() {
@@ -200,35 +188,26 @@ _shad_complete_todo() {
     fi
 
     local -a rest=("${args[@]:1}")
-    local project_flag
-    project_flag=$(_shad_unused "--project" "${flags[@]}")
 
     case "${args[0]}" in
-    panel)
-        _shad_offer "$cur" "$project_flag"
-        ;;
     add)
         # The title is the one positional; --label may repeat, so it is
         # always offered.
-        _shad_offer "$cur" "--label" "$project_flag"
+        _shad_offer "$cur" "--label"
         ;;
     list)
-        _shad_offer "$cur" "$(_shad_unused "--keys" "${flags[@]}")" "$project_flag"
+        _shad_offer "$cur" "$(_shad_unused "--keys" "${flags[@]}")"
         ;;
     status)
         if ((${#rest[@]} == 0)); then
-            _shad_offer "$cur" "$(_shad_todo_keys)" "$project_flag"
+            _shad_offer "$cur" "$(_shad_todo_keys)"
         elif ((${#rest[@]} == 1)); then
-            _shad_offer "$cur" "__SHAD_TODO_STATUSES__" "$project_flag"
-        else
-            _shad_offer "$cur" "$project_flag"
+            _shad_offer "$cur" "__SHAD_TODO_STATUSES__"
         fi
         ;;
     edit | rm)
         if ((${#rest[@]} == 0)); then
-            _shad_offer "$cur" "$(_shad_todo_keys)" "$project_flag"
-        else
-            _shad_offer "$cur" "$project_flag"
+            _shad_offer "$cur" "$(_shad_todo_keys)"
         fi
         ;;
     label)
@@ -270,7 +249,7 @@ _shad_complete() {
     # position, and replay it to the `shad config keys` call below; otherwise
     # the project names offered come from a different file than the one the
     # command will read.
-    local -a words=() _shad_cmd=("${COMP_WORDS[0]}") _shad_todo_opts=()
+    local -a words=() _shad_cmd=("${COMP_WORDS[0]}")
     local index=0
     while ((index < COMP_CWORD)); do
         if [[ "${COMP_WORDS[index]}" == "--config" ]]; then
@@ -290,18 +269,6 @@ _shad_complete() {
             index=$((index + 1))
             [[ "${COMP_WORDS[index]}" == "=" ]] && index=$((index + 1))
             ((index < COMP_CWORD)) && index=$((index + 1))
-            continue
-        fi
-        if [[ "${COMP_WORDS[index]}" == "--project" ]]; then
-            # As --harness, and the value is replayed to the `shad todo` calls
-            # that list keys, so they describe the project being targeted.
-            words+=("${COMP_WORDS[index]}")
-            index=$((index + 1))
-            [[ "${COMP_WORDS[index]}" == "=" ]] && index=$((index + 1))
-            if ((index < COMP_CWORD)); then
-                _shad_todo_opts+=(--project "${COMP_WORDS[index]}")
-                index=$((index + 1))
-            fi
             continue
         fi
         words+=("${COMP_WORDS[index]}")
@@ -346,21 +313,7 @@ _shad_complete() {
         _shad_complete_config
         return
         ;;
-    projects | git | todo) ;;
-    *)
-        return
-        ;;
-    esac
-
-    local -a _shad_top=() _shad_groups=() _shad_group_pairs=()
-    _shad_load_projects
-
-    if [[ "$command" == "todo" ]]; then
-        if [[ "$prev" == "--project" ]] ||
-            { [[ "$prev" == "=" ]] && ((COMP_CWORD > 1)) && [[ "${COMP_WORDS[COMP_CWORD - 2]}" == "--project" ]]; }; then
-            _shad_offer "$cur" "$(_shad_project_words)"
-            return
-        fi
+    todo)
         if [[ "$prev" == "--label" ]] ||
             { [[ "$prev" == "=" ]] && ((COMP_CWORD > 1)) && [[ "${COMP_WORDS[COMP_CWORD - 2]}" == "--label" ]]; }; then
             _shad_offer "$cur" "$(_shad_todo_labels)"
@@ -368,7 +321,15 @@ _shad_complete() {
         fi
         _shad_complete_todo
         return
-    fi
+        ;;
+    projects | git) ;;
+    *)
+        return
+        ;;
+    esac
+
+    local -a _shad_top=() _shad_groups=() _shad_group_pairs=()
+    _shad_load_projects
 
     local extra=""
     if [[ "$command" == "git" ]]; then

@@ -6,7 +6,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from shad.shared.config import Project
+from shad.shared.config import Config, Defaults
 from shad.shared.errors import ShadError
 from shad.todo import store
 
@@ -17,16 +17,18 @@ class StoreTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.dir = Path(self._tmp.name) / "tin-shad"
+        self.dir = Path(self._tmp.name) / "todo"
 
     # -- paths ------------------------------------------------------------
 
-    def test_project_dir_is_named_group_dash_key_under_the_data_dir(self) -> None:
-        grouped = Project(key="shad", group="tin", path=Path("/x"), session="s")
-        plain = Project(key="kb", group=None, path=Path("/y"), session="kb")
+    def test_todo_dir_defaults_to_todo_under_the_data_dir(self) -> None:
         with patch("shad.todo.store.default_data_dir", return_value=Path("/data")):
-            self.assertEqual(store.project_dir(grouped), Path("/data/todo/tin-shad"))
-            self.assertEqual(store.project_dir(plain), Path("/data/todo/kb"))
+            self.assertEqual(store.todo_dir(Config(defaults=Defaults())), Path("/data/todo"))
+
+    def test_the_configured_todo_path_replaces_the_data_dir(self) -> None:
+        cfg = Config(defaults=Defaults(), todo_path=Path("/notes/todo"))
+        with patch("shad.todo.store.default_data_dir", return_value=Path("/data")):
+            self.assertEqual(store.todo_dir(cfg), Path("/notes/todo"))
 
     # -- add --------------------------------------------------------------
 
@@ -158,14 +160,13 @@ class StoreTests(unittest.TestCase):
 
     # -- label usage ------------------------------------------------------
 
-    def test_label_usage_counts_items_per_project_directory(self) -> None:
-        root = Path(self._tmp.name)
-        store.add(root / "a", "one", ["chore"], VOCAB)
-        store.add(root / "a", "two", ["chore", "poc"], VOCAB)
-        store.add(root / "b", "three", ["poc"], VOCAB)
-        self.assertEqual(store.label_usage(root, "chore"), {"a": 2})
-        self.assertEqual(store.label_usage(root, "poc"), {"a": 1, "b": 1})
-        self.assertEqual(store.label_usage(root / "nope", "poc"), {})
+    def test_label_usage_counts_the_items_that_carry_the_label(self) -> None:
+        store.add(self.dir, "one", ["chore"], VOCAB)
+        store.add(self.dir, "two", ["chore", "poc"], VOCAB)
+        store.add(self.dir, "three", [], VOCAB)
+        self.assertEqual(store.label_usage(self.dir, "chore"), 2)
+        self.assertEqual(store.label_usage(self.dir, "poc"), 1)
+        self.assertEqual(store.label_usage(self.dir / "nope", "poc"), 0)
 
 
 if __name__ == "__main__":

@@ -11,6 +11,7 @@ Schema (shad.toml):
 
   [todo]
   labels = ["chore", "documentation"]   # the label vocabulary `shad todo add --label` accepts
+  path   = "~/notes/todo"               # optional; defaults to <data dir>/todo
 
   # top-level project (no group)
   [projects.kb]
@@ -195,6 +196,8 @@ class Config:
     groups: dict[str, dict[str, Project]] = field(default_factory=dict)
     # [todo] labels, in file order; the vocabulary every todo item is checked against
     todo_labels: list[str] = field(default_factory=list)
+    # [todo] path, expanded; None means the per-OS data dir (see shad.todo.store.todo_dir)
+    todo_path: Path | None = None
 
 
 def _parse_project(
@@ -303,11 +306,13 @@ def load(path: Path | None = None) -> Config:
                 )
             groups[key] = group_projects
 
+    todo = raw.get("todo", {})
     cfg = Config(
         defaults=defaults,
         projects=projects,
         groups=groups,
-        todo_labels=_parse_labels(raw.get("todo", {})),
+        todo_labels=_parse_labels(todo),
+        todo_path=_parse_todo_path(todo),
     )
     _reject_duplicate_paths(cfg)
     return cfg
@@ -330,6 +335,25 @@ def _parse_labels(todo: object) -> list[str]:
             raise ShadError(f"duplicate todo label {label!r}")
         seen.add(label)
     return list(labels)
+
+
+def _parse_todo_path(todo: dict) -> Path | None:
+    """
+    The [todo] path, with `~` expanded, or None when it is not set.
+
+    A relative path is rejected: it would resolve against the current
+    directory, so the pane and a shell in a subdirectory would each read a
+    different list.
+    """
+    value = todo.get("path")
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ShadError("[todo] path must be a non-empty string")
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        raise ShadError(f"[todo] path must be absolute or start with ~; got {value!r}")
+    return path
 
 
 def _reject_duplicate_paths(cfg: Config) -> None:

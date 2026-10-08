@@ -158,7 +158,7 @@ class GridTests(unittest.TestCase):
         calls = self._calls("top")
         sent = self._sent(calls)
         self.assertEqual(sent["opencode\n"], "%0")
-        self.assertEqual(sent["shad todo panel --project tin/shad\n"], "%1")
+        self.assertEqual(sent["shad todo panel\n"], "%1")
         self.assertEqual(sent["shad projects tin shad status\n"], "%2")
         self.assertEqual(sent["shad git panel tin shad\n"], "%3")
 
@@ -174,7 +174,7 @@ class GridTests(unittest.TestCase):
         self.assertEqual(sent["shad projects tin shad status\n"], "%0")
         self.assertEqual(sent["shad git panel tin shad\n"], "%1")
         self.assertEqual(sent["opencode\n"], "%2")
-        self.assertEqual(sent["shad todo panel --project tin/shad\n"], "%3")
+        self.assertEqual(sent["shad todo panel\n"], "%3")
 
         splits = self._splits(calls)
         self.assertEqual(splits[1][2:7], ["-t", "%0", "-v", "-p", "65"])
@@ -195,10 +195,10 @@ class GridTests(unittest.TestCase):
                 focus = next(c[3] for c in calls if c[:2] == ["tmux", "select-pane"])
                 self.assertEqual(focus, sent["opencode\n"])
 
-    def test_ungrouped_project_passes_a_bare_key_to_the_todo_panel(self) -> None:
+    def test_ungrouped_project_passes_a_bare_key_to_the_git_panel(self) -> None:
         project = Project(key="myapp", group=None, path=Path("/tmp/myapp"), session="myapp")
         sent = self._sent(self._calls("top", project))
-        self.assertIn("shad todo panel --project myapp\n", sent)
+        self.assertIn("shad todo panel\n", sent)
         self.assertIn("shad git panel myapp\n", sent)
 
     def test_zero_todo_percent_keeps_the_three_pane_layout(self) -> None:

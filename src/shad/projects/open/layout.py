@@ -197,7 +197,6 @@ def _layout_grid(
     The harness and todo panes share the row that oc_position names.
     """
     target = _target(project)
-    todo_target = f"{project.group}/{project.key}" if project.group else project.key
 
     first = _run(
         ["tmux", "display-message", "-p", "-t", f"{session}:0.0", "#{pane_id}"]
@@ -216,7 +215,7 @@ def _layout_grid(
 
     _run(["tmux", "send-keys", "-t", main, oc_command + "\n"])
     _run(["tmux", "send-keys", "-t", git, f"shad git panel {target}\n"])
-    _run(["tmux", "send-keys", "-t", todo, f"shad todo panel --project {todo_target}\n"])
+    _run(["tmux", "send-keys", "-t", todo, "shad todo panel\n"])
     _run(["tmux", "send-keys", "-t", shell, f"shad projects {target} status\n"])
     _run(["tmux", "select-pane", "-t", main])
 
