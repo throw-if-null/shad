@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import os
 import sqlite3
@@ -9,12 +10,15 @@ import warnings
 from pathlib import Path
 from unittest.mock import patch
 
+from rich.console import Console
+
 from shad.projects.open.sessions import (
     OcSession,
     OpencodeTarget,
     _claude_project_dir,
     _query_claude_sessions,
     _query_sessions,
+    _render_picker,
     _truncate,
     pick_claude_target,
     pick_opencode_target,
@@ -377,6 +381,109 @@ class QueryClaudeSessionsTests(unittest.TestCase):
                 result = _query_claude_sessions(Path("/tmp/project"))
 
         self.assertEqual(result[0].title, "describe this image")
+
+    def _query_one(self, entries: list[dict]) -> OcSession:
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp) / "-tmp-project"
+            directory.mkdir()
+            _write_transcript(directory, "sess-a", entries, mtime=1000)
+            with patch(
+                "shad.projects.open.sessions.CLAUDE_PROJECTS_DIR", Path(tmp)
+            ):
+                [session] = _query_claude_sessions(Path("/tmp/project"))
+        return session
+
+    def test_names_a_session_with_its_last_custom_title(self) -> None:
+        session = self._query_one([
+            _user_entry("Fix the login bug"),
+            {"type": "ai-title", "aiTitle": "Login bug fix"},
+            {"type": "custom-title", "customTitle": "login"},
+            {"type": "ai-title", "aiTitle": "Login bug fix"},
+            {"type": "custom-title", "customTitle": "auth"},
+        ])
+        self.assertEqual(session.name, "auth")
+        self.assertEqual(session.title, "Fix the login bug")
+
+    def test_falls_back_to_the_last_ai_title(self) -> None:
+        session = self._query_one([
+            _user_entry("Fix the login bug"),
+            {"type": "ai-title", "aiTitle": "Login bug"},
+            {"type": "ai-title", "aiTitle": "Login bug fix"},
+        ])
+        self.assertEqual(session.name, "Login bug fix")
+
+    def test_a_session_without_title_entries_has_no_name(self) -> None:
+        session = self._query_one([_user_entry("Fix the login bug")])
+        self.assertIsNone(session.name)
+        self.assertEqual(session.title, "Fix the login bug")
+
+    def test_reads_a_name_written_past_the_prompt_scan(self) -> None:
+        # /rename appends its entry wherever the conversation is, so the name
+        # scan cannot stop where the first-prompt scan does.
+        filler = [{"type": "assistant", "message": {"content": "ok"}}] * 300
+        session = self._query_one(
+            [_user_entry("Fix the login bug"), *filler,
+             {"type": "custom-title", "customTitle": "login"}]
+        )
+        self.assertEqual(session.name, "login")
+
+    def test_a_line_that_is_not_an_object_is_skipped(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp) / "-tmp-project"
+            directory.mkdir()
+            path = _write_transcript(directory, "sess-a", [_user_entry("hi")], mtime=1000)
+            with path.open("a") as handle:
+                handle.write('["ai-title"]\n')
+            os.utime(path, (1000, 1000))
+            with patch("shad.projects.open.sessions.CLAUDE_PROJECTS_DIR", Path(tmp)):
+                [session] = _query_claude_sessions(Path("/tmp/project"))
+        self.assertIsNone(session.name)
+
+    def test_a_prompt_that_quotes_a_title_entry_is_not_a_name(self) -> None:
+        session = self._query_one([
+            _user_entry('why is there a "custom-title" entry in my transcript?'),
+        ])
+        self.assertIsNone(session.name)
+
+
+class RenderPickerTests(unittest.TestCase):
+    @staticmethod
+    def _text(sessions: list[OcSession], width: int = 120) -> str:
+        console = Console(record=True, width=width, file=io.StringIO())
+        console.print(_render_picker(sessions, 0, "portal", "claude"))
+        return console.export_text()
+
+    def test_a_named_session_shows_its_name_and_its_first_prompt(self) -> None:
+        text = self._text([
+            OcSession(id="a", title="I want to finish the docs hub", time_updated=0,
+                      name="docs-hub"),
+        ])
+        row = next(line for line in text.splitlines() if "docs-hub" in line)
+        self.assertIn("I want to finish the docs hub", row)
+        self.assertLess(row.index("docs-hub"), row.index("I want"))
+
+    def test_names_line_up_in_one_column(self) -> None:
+        text = self._text([
+            OcSession(id="a", title="first prompt", time_updated=0, name="docs-hub"),
+            OcSession(id="b", title="second prompt", time_updated=0,
+                      name="A much longer generated session name than fits"),
+        ])
+        rows = [line for line in text.splitlines() if "prompt" in line]
+        self.assertEqual(rows[0].index("first"), rows[1].index("second"))
+
+    def test_an_unnamed_session_shows_only_its_first_prompt(self) -> None:
+        text = self._text([OcSession(id="a", title="Fix the login bug", time_updated=0)])
+        self.assertIn("Fix the login bug", text)
+
+    def test_a_row_wider_than_the_terminal_is_cropped_not_wrapped(self) -> None:
+        text = self._text([
+            OcSession(id="a", title="p" * 60, time_updated=0, name="n" * 40),
+        ], width=80)
+        # A wrapped row would continue on a line of its own, without the name.
+        rows = [line for line in text.splitlines() if "ppp" in line]
+        self.assertEqual(len(rows), 1)
+        self.assertIn("nnn", rows[0])
+        self.assertIn("…", rows[0])
 
 
 # ---------------------------------------------------------------------------

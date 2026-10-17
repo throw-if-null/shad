@@ -40,9 +40,15 @@ DB_PATH = Path.home() / ".local" / "share" / "opencode" / "opencode.db"
 CLAUDE_PROJECTS_DIR = Path.home() / ".claude" / "projects"
 SESSION_LIMIT = 5
 
-# Claude Code writes one transcript per session. Only the opening entries are
-# needed to label it, so the scan stops well before the end of a long file.
+# Claude Code writes one transcript per session. The first prompt is in the
+# opening entries, so that scan stops well before the end of a long file.
 _CLAUDE_TITLE_SCAN_LINES = 200
+
+# The entry types that name a session: a /rename, and the name Claude Code
+# generates. The name scan matches these bytes before it parses a line, because
+# a transcript can be tens of megabytes.
+_CLAUDE_NAME_FIELDS = {"custom-title": "customTitle", "ai-title": "aiTitle"}
+_CLAUDE_NAME_MARKERS = tuple(f'"{kind}"'.encode() for kind in _CLAUDE_NAME_FIELDS)
 
 _CLAUDE_SLUG_RE = re.compile(r"[^A-Za-z0-9]")
 
@@ -56,6 +62,7 @@ _CLAUDE_WRAPPER_RE = re.compile(
 _NEW_SESSION_RE = re.compile(r"^New session\s*-\s*\d{4}-\d{2}-\d{2}T[\d:.]+Z$")
 
 _TITLE_MAX = 52
+_NAME_WIDTH = 26
 
 
 @dataclass
@@ -63,6 +70,7 @@ class OcSession:
     id: str
     title: str
     time_updated: int  # epoch ms
+    name: str | None = None  # Claude Code only; opencode's title is its name
 
     @property
     def updated_str(self) -> str:
@@ -145,6 +153,36 @@ def _claude_session_title(transcript: Path) -> str | None:
     return None
 
 
+def _claude_session_name(transcript: Path) -> str | None:
+    """Return the session's name, or None if it has none.
+
+    The name is the last ``custom-title`` entry (set by /rename), else the last
+    ``ai-title`` entry. Either can be appended anywhere in the transcript, so
+    the whole file is read.
+    """
+    latest: dict[str, str] = {}
+    try:
+        with transcript.open("rb") as handle:
+            for line in handle:
+                if not any(marker in line for marker in _CLAUDE_NAME_MARKERS):
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(entry, dict):
+                    continue
+                kind = entry.get("type")
+                if kind not in _CLAUDE_NAME_FIELDS:
+                    continue
+                value = entry.get(_CLAUDE_NAME_FIELDS[kind])
+                if isinstance(value, str) and value.strip():
+                    latest[kind] = " ".join(value.split())
+    except OSError:
+        return None
+    return latest.get("custom-title") or latest.get("ai-title")
+
+
 def _claude_entry_text(entry: dict) -> str | None:
     """Return the prompt text of a transcript user entry, or None."""
     content = entry.get("message", {}).get("content")
@@ -191,6 +229,7 @@ def _query_claude_sessions(
                 id=transcript.stem,
                 title=title,
                 time_updated=int(transcript.stat().st_mtime * 1000),
+                name=_claude_session_name(transcript),
             )
         )
     return sessions
@@ -217,18 +256,27 @@ def _render_picker(
             row.append("+ New session", style="bold" if is_sel else "dim")
         else:
             date_part = item.updated_str + "  "
-            title_part = _truncate(item.display_title, _TITLE_MAX)
+            label_style = "bold bright_white" if is_sel else "white"
 
             row = Text()
             row.append(pointer, style="bold bright_green" if is_sel else "")
             row.append(date_part, style="dim")
-            row.append(title_part, style="bold bright_white" if is_sel else "white")
+            if item.name:
+                name_part = _truncate(item.name, _NAME_WIDTH).ljust(_NAME_WIDTH)
+                row.append(name_part + "  ", style=label_style)
+                row.append(_truncate(item.display_title, _TITLE_MAX), style="dim")
+            else:
+                row.append(_truncate(item.display_title, _TITLE_MAX), style=label_style)
 
         lines.append_text(row)
         lines.append("\n")
 
     footer = Text("\n ↑↓ / j k  navigate   Enter  select   q  cancel", style="dim")
     lines.append_text(footer)
+    # A row with a name is wider than an 80-column terminal; crop it rather
+    # than wrap it onto the next row.
+    lines.no_wrap = True
+    lines.overflow = "ellipsis"
 
     return Panel(
         lines,
