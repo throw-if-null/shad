@@ -7,7 +7,9 @@ Schema (shad.toml):
   oc_position   = "top"   # top | bottom | left
   panel_percent = 35      # % of window the git+bash bundle takes
   split_percent = 35      # % of the bundle that the git panel takes (bash gets the rest)
-  todo_percent  = 0       # % of window width the todo column takes; 0 = no todo pane
+  git_panel     = true    # false = no git panel pane
+  todo_panel    = true    # false = no todo pane
+  todo_percent  = 25      # % of window width the todo column takes
 
   [todo]
   labels = ["chore", "documentation"]   # the label vocabulary `shad todo add --label` accepts
@@ -168,7 +170,9 @@ class Defaults:
     panel_percent: int = 35
     split_percent: int = 35
     harness: str = "opencode"
-    todo_percent: int = 0  # 0 keeps the three-pane layout
+    git_panel: bool = True
+    todo_panel: bool = True
+    todo_percent: int = 25
 
 
 @dataclass
@@ -261,17 +265,19 @@ def load(path: Path | None = None) -> Config:
                 f"invalid value for '{name}' in [defaults]: expected an integer, got {raw_val!r}"
             )
 
-    todo_percent = _int_setting("todo_percent", 0)
-    if not 0 <= todo_percent <= 99:
+    def _bool_setting(name: str, default: bool) -> bool:
+        raw_val = d.get(name, default)
+        if not isinstance(raw_val, bool):
+            raise ShadError(
+                f"invalid value for '{name}' in [defaults]: expected true or false, got {raw_val!r}"
+            )
+        return raw_val
+
+    todo_percent = _int_setting("todo_percent", 25)
+    if not 1 <= todo_percent <= 99:
         raise ShadError(
-            f"invalid todo_percent {todo_percent}; must be between 0 and 99 (0 = no todo pane)"
-        )
-    if todo_percent and oc_position == "left":
-        # The left layout stacks bash and git beside a full-height harness
-        # column; there is no slot for a fourth pane that lines up with it.
-        raise ShadError(
-            "todo_percent requires oc_position top or bottom; "
-            "the left layout has no slot for the todo pane"
+            f"invalid todo_percent {todo_percent}; must be between 1 and 99 "
+            "(set todo_panel = false to hide the todo pane)"
         )
 
     defaults = Defaults(
@@ -279,6 +285,8 @@ def load(path: Path | None = None) -> Config:
         panel_percent=_int_setting("panel_percent", 35),
         split_percent=_int_setting("split_percent", 35),
         harness=harness,
+        git_panel=_bool_setting("git_panel", True),
+        todo_panel=_bool_setting("todo_panel", True),
         todo_percent=todo_percent,
     )
 

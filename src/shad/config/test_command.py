@@ -65,6 +65,8 @@ class ConfigCommandTests(unittest.TestCase):
         keys = self._run("keys").split()
         self.assertIn("defaults.oc_position", keys)
         self.assertIn("defaults.harness", keys)
+        self.assertIn("defaults.git_panel", keys)
+        self.assertIn("defaults.todo_panel", keys)
         self.assertIn("projects.kb.session", keys)
         self.assertIn("projects.alvr.db.harness", keys)
         self.assertIn("todo.path", keys)
@@ -79,6 +81,13 @@ class ConfigCommandTests(unittest.TestCase):
     def test_get_falls_back_to_effective_default(self) -> None:
         self.path.write_text(f'[projects.kb]\npath = "{self.root}/kb"\n')
         self.assertEqual(self._run("get", key="defaults.oc_position").strip(), "top")
+
+    def test_get_prints_a_panel_switch_in_toml_spelling(self) -> None:
+        self.assertEqual(self._run("get", key="defaults.git_panel").strip(), "true")
+        self.path.write_text(self.path.read_text().replace(
+            "[defaults]\n", "[defaults]\ntodo_panel = false\n"
+        ))
+        self.assertEqual(self._run("get", key="defaults.todo_panel").strip(), "false")
 
     def test_get_falls_back_to_derived_session(self) -> None:
         self.assertEqual(self._run("get", key="projects.alvr.db.session").strip(), "alvr-db")
@@ -151,6 +160,20 @@ class ConfigCommandTests(unittest.TestCase):
     def test_set_rejects_non_integer_percent(self) -> None:
         with self.assertRaises(ShadError):
             self._run("set", key="defaults.panel_percent", value="wide")
+
+    def test_set_rejects_zero_todo_percent(self) -> None:
+        with self.assertRaises(ShadError):
+            self._run("set", key="defaults.todo_percent", value="0")
+
+    def test_set_writes_a_panel_switch_as_a_toml_boolean(self) -> None:
+        self._run("set", key="defaults.git_panel", value="False")
+        self.assertIs(self._raw()["defaults"]["git_panel"], False)
+        self.assertIn("git_panel = false", self.path.read_text())
+
+    def test_set_rejects_a_panel_switch_that_is_not_true_or_false(self) -> None:
+        with self.assertRaises(ShadError) as ctx:
+            self._run("set", key="defaults.todo_panel", value="off")
+        self.assertIn("true or false", str(ctx.exception))
 
     def test_set_rejects_unknown_key_without_force(self) -> None:
         with self.assertRaises(ShadError) as ctx:

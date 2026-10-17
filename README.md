@@ -3,7 +3,7 @@
 A small CLI to attach or create project-specific tmux sessions from the current terminal.
 
 - No new windows, no launchers — works inside your current terminal tab.
-- Session is created with a configurable 3-pane layout on first use; subsequent calls just attach.
+- Session is created with a configurable layout on first use (harness, bash, git panel, todo panel); subsequent calls just attach.
 
 ## Requirements
 
@@ -141,6 +141,9 @@ Keys are dotted TOML paths:
 defaults.oc_position          top | bottom | left
 defaults.panel_percent        integer 1-99
 defaults.split_percent        integer 1-99
+defaults.git_panel            true | false
+defaults.todo_panel           true | false
+defaults.todo_percent         integer 1-99
 defaults.harness              opencode | claude
 projects.<key>.path           directory path
 projects.<key>.session        string
@@ -184,10 +187,14 @@ shad config unset projects.alvr.db
 # When bundle is vertical   (oc_position left):       the panel is on the bottom.
 # split_percent = 35
 
-# How much of the window width the todo column takes (%). 0 = no todo pane.
-# With a value, the window is a 2x2 grid: harness over bash on the left,
-# todo over git on the right. Needs oc_position top or bottom.
-# todo_percent = 0
+# Set to false to leave out the git panel or the todo pane.
+# git_panel = true
+# todo_panel = true
+
+# How much of the window width the todo column takes (%). The todo column runs
+# down the right edge. With oc_position top or bottom, the git panel sits under
+# the todo pane in that column, and split_percent is ignored.
+# todo_percent = 25
 
 # The labels `shad todo add --label` accepts. Managed by `shad todo label`.
 # [todo]
@@ -226,7 +233,9 @@ path    = "/home/user/gh/alvr/portal"
 | `[defaults] oc_position` | no | `"top"` | Side opencode occupies: `top`, `bottom`, or `left` |
 | `[defaults] panel_percent` | no | `35` | % of the window the git+bash bundle takes |
 | `[defaults] split_percent` | no | `35` | % of the bundle that the git panel takes (bash gets the rest) |
-| `[defaults] todo_percent` | no | `0` | % of the window width the todo column takes; `0` means no todo pane. Needs `oc_position` `top` or `bottom`; `split_percent` is then ignored |
+| `[defaults] git_panel` | no | `true` | `false` leaves the git panel out of new sessions |
+| `[defaults] todo_panel` | no | `true` | `false` leaves the todo pane out of new sessions |
+| `[defaults] todo_percent` | no | `25` | % of the window width the todo column takes. With `oc_position` `top` or `bottom` the git panel shares that column, so `split_percent` is ignored |
 | `[todo] labels` | no | `[]` | The labels `shad todo add --label` accepts; managed by `shad todo label` |
 | `[todo] path` | no | `<data dir>/todo` | Directory that holds the todo files. Absolute, or starts with `~`. See [Files](#files) |
 | `path` | **yes** | — | Absolute path to the project root |
@@ -281,7 +290,7 @@ shad git sync --switch            # also check out the default branch
 shad git sync --dry-run           # preview; deletes nothing
 shad git sync --yes               # skip the confirmation prompt
 
-# Read-only repository view (the third pane runs this)
+# Read-only repository view (the git pane runs this)
 shad git panel                    # the repository in the current directory
 shad git panel tin shad           # a configured project
 shad git panel --no-fetch         # skip the fetch on open
@@ -294,7 +303,7 @@ shad todo status fix in-progress  # keys accept a unique prefix
 shad todo edit fix                # open the item in $EDITOR
 shad todo rm fix
 shad todo label add investigation # the label vocabulary lives in shad.toml
-shad todo panel                   # the fourth pane runs this
+shad todo panel                   # the todo pane runs this
 
 # Show a tmux cheat sheet popup
 shad cheat
@@ -437,7 +446,7 @@ Requires git 2.36 or newer.
 ## Git panel
 
 `shad git panel` is a read-only view of one repository. It is what shad runs in
-the third pane of every project session.
+the git pane of every project session, unless `git_panel = false`.
 
 ```
  main  ·  ↓2  ·  shad  ·  git 2.55.0
@@ -489,9 +498,9 @@ needs those last-known OIDs to prove a gone-upstream branch was fully pushed.
 ## Todo panel
 
 `shad todo` keeps one small todo list that is not tied to a project: one text
-file per item, meant to be edited by hand as much as through the CLI. With
-`todo_percent` set, the panel runs in the fourth pane of every project session,
-and every session shows the same list.
+file per item, meant to be edited by hand as much as through the CLI. The
+panel runs in the todo pane of every project session, unless
+`todo_panel = false`, and every session shows the same list.
 
 ```
  todo  ·  2 open  ·  1 done
@@ -633,38 +642,9 @@ tmux source-file ~/.tmux.conf
 
 ## tmux layout
 
-Created once per tmux session on first open, never rebuilt on subsequent attaches. The layout depends on `oc_position`:
+Created once per tmux session on first open, never rebuilt on subsequent attaches. `git_panel` and `todo_panel` choose the panes; `oc_position` chooses where the harness sits.
 
-**`oc_position = "top"` (default)**
-```
-┌─────────────────────────────────┐
-│  opencode                       │  ~65% height
-├─────────────────────┬───────────┤
-│  bash         (~65%)│ git panel │  ~35% height
-└─────────────────────┴───────────┘
-```
-
-**`oc_position = "bottom"`**
-```
-┌─────────────────────┬───────────┐
-│  bash         (~65%)│ git panel │  ~65% height
-├─────────────────────┴───────────┤
-│  opencode                       │  ~35% height
-└─────────────────────────────────┘
-```
-
-**`oc_position = "left"`**
-```
-┌──────────┬──────────────────────┐
-│          │  bash                │  ~65% of bundle height
-│opencode  ├──────────────────────┤
-│          │  git panel           │  ~35% of bundle height
-└──────────┴──────────────────────┘
-```
-
-`panel_percent` controls how much of the window the git+bash bundle takes; `split_percent` controls the panel/bash split within it.
-
-**`todo_percent` set (with `top` or `bottom`)**
+**Defaults: both panels on, `oc_position = "top"`**
 ```
 ┌─────────────────────┬───────────┐
 │  opencode           │ todo      │  100 - panel_percent
@@ -674,11 +654,53 @@ Created once per tmux session on first open, never rebuilt on subsequent attache
    100 - todo_percent  todo_percent
 ```
 
-The window becomes a 2x2 grid: the harness over bash on the left, the todo
-panel over the git panel on the right, with the columns aligned. `bottom`
-mirrors it vertically. `split_percent` is ignored, because the git panel's
-width is the column's. `left` has no slot for a fourth pane that lines up, so
-`left` with `todo_percent` set is a config error.
+The todo column runs down the right edge: the harness over bash on the left,
+the todo panel over the git panel on the right, with the columns aligned.
+`bottom` mirrors it vertically. `split_percent` is ignored, because the git
+panel's width is the column's.
+
+**Both panels on, `oc_position = "left"`**
+```
+┌──────────┬────────────┬─────────┐
+│          │  bash      │         │
+│opencode  ├────────────┤ todo    │
+│          │  git panel │         │  split_percent of the bundle
+└──────────┴────────────┴─────────┘
+```
+
+The bundle takes `panel_percent` of the width left of the todo column.
+
+With `git_panel = false`, the todo pane fills the todo column (`top`, `bottom`)
+and bash fills the bundle (`left`).
+
+**`todo_panel = false`, `oc_position = "top"`**
+```
+┌─────────────────────────────────┐
+│  opencode                       │  ~65% height
+├─────────────────────┬───────────┤
+│  bash         (~65%)│ git panel │  ~35% height
+└─────────────────────┴───────────┘
+```
+
+**`todo_panel = false`, `oc_position = "bottom"`**
+```
+┌─────────────────────┬───────────┐
+│  bash         (~65%)│ git panel │  ~65% height
+├─────────────────────┴───────────┤
+│  opencode                       │  ~35% height
+└─────────────────────────────────┘
+```
+
+**`todo_panel = false`, `oc_position = "left"`**
+```
+┌──────────┬──────────────────────┐
+│          │  bash                │  ~65% of bundle height
+│opencode  ├──────────────────────┤
+│          │  git panel           │  ~35% of bundle height
+└──────────┴──────────────────────┘
+```
+
+`panel_percent` controls how much of the window the git+bash bundle takes; `split_percent` controls the panel/bash split within it. With `git_panel = false` as well, bash takes the whole bundle.
 
 If `shad` is run from **inside** an existing tmux session it uses `switch-client`; outside tmux it uses `attach-session`.
 

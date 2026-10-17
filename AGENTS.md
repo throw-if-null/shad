@@ -2,7 +2,7 @@
 
 ## Project overview
 
-`shad` is a Python CLI tool that manages project-specific tmux sessions. It creates a 3-pane tmux layout (opencode, bash, git panel) per project — or a 2x2 grid with a todo pane when `todo_percent` is set — and handles session lifecycle (open, status, stop). Configuration lives in `~/.config/shad/shad.toml`; todo files live in `[todo] path`, or in the per-OS data directory when it is not set.
+`shad` is a Python CLI tool that manages project-specific tmux sessions. It creates a tmux layout per project — opencode and bash, plus a git panel and a todo pane that are on by default and can each be turned off — and handles session lifecycle (open, status, stop). Configuration lives in `~/.config/shad/shad.toml`; todo files live in `[todo] path`, or in the per-OS data directory when it is not set.
 
 Entry point: `shad.cli:main` (registered as the `shad` console script).
 
@@ -22,7 +22,7 @@ src/shad/
 │   ├── open/                   # "shad projects <name>" — session picker + layout
 │   │   ├── command.py          # open_project() orchestration
 │   │   ├── sessions.py         # OC session picker (SQLite query + TUI)
-│   │   ├── layout.py           # tmux layout creation: 3 panes, or the 2x2 grid with todo
+│   │   ├── layout.py           # tmux layout creation: harness, bash, and the enabled panels
 │   │   └── banner.py           # ASCII art banner
 │   ├── status/command.py       # "shad projects <name> status" — reads git via the git slice
 │   └── stop/command.py         # "shad projects <name> stop"
@@ -56,7 +56,7 @@ Key data flow for the main `open` command:
 1. `cli.py` resolves project name (supports prefix matching)
 2. `sessions.py` queries the opencode SQLite DB for recent sessions, shows a TUI picker
 3. `command.py` resolves the tmux session name, creates or reattaches
-4. `layout.py` builds the 3-pane tmux layout with opencode, bash, and the git panel
+4. `layout.py` builds the tmux layout: opencode, bash, and whichever of the git panel and the todo pane are enabled
 
 ## Conventions
 
@@ -97,7 +97,7 @@ Tests use `unittest.TestCase` with `unittest.mock.patch` for isolating subproces
 - **`run._is_read_only` special cases**: `worktree` and `stash` are both verbs whose `list` subcommand is a read while the rest mutate. A bare `args[0] in _READ_ONLY` would hand `GIT_OPTIONAL_LOCKS=0` to `stash drop`. Add new multi-verb commands the same way.
 - **textual is imported lazily**: `git/command.py::open_panel` imports `shad.git.panel` inside the function, not at module scope. `textual.app` costs roughly 100ms to import and every `shad projects <name>` and `shad git sync` would otherwise pay it. Keep every `textual` import inside `panel.py`.
 - **Panel tests**: `git/test_panel.py` uses stdlib `unittest.IsolatedAsyncioTestCase` with textual's `App.run_test()`, so the suite needs no `pytest-asyncio`. The logic worth testing lives in `snapshot.py`, which is synchronous — keep it that way and keep the panel a thin view, or the testable surface moves into the async layer.
-- **Panel sizing**: the pane is about 70x17 at the default `panel_percent`/`split_percent`. That is why the header is one line rather than a table, the nav column is a fixed 16 (12-char label + 2 padding + 1 border, or the labels wrap), and the stash age is `5m` rather than `5 minutes ago`.
+- **Panel sizing**: the pane is about 17 rows by 50 to 60 columns at the default `panel_percent`/`todo_percent`, because in the default layout the git panel shares the todo column. That is why the header is one line rather than a table, the nav column is a fixed 16 (12-char label + 2 padding + 1 border, or the labels wrap), and the stash age is `5m` rather than `5 minutes ago`.
 - **All git goes through `shad.git.run.git`**: `projects/status/command.py` used to shell out with `subprocess.run(..., cwd=path)`. That path inherits `GIT_DIR`, so `shad projects <name> status` reported whichever repository invoked shad — a git hook, or a tmux pane started by one — instead of the project, and it had no timeout. It now uses `discover.head_branch`, `discover.is_clean`, `refs.latest_tag` and `refs.recent_commits`. `_capture` survives only for the non-git version probes (`python3 --version` and friends); do not route git through it again. `projects/status/test_command.py` asserts no `["git"` literal remains in the module.
 - **The status dirty count changed with that migration**: `is_clean(untracked=True)` counts every untracked file, where `status --short` collapsed an untracked directory into one entry. An untracked directory holding two files now reads as two, which is what the "file(s)" label claims.
 - **git output parsing**: always use plumbing with explicit formats, and decide from exit codes. Git messages are gettext-translated, `fetch.output = compact` rewrites ref names, and `git branch` layout depends on terminal width. A real NUL byte cannot be passed in argv, so the separator is an escape git expands — and the spelling depends on the command family: ref-filter (`for-each-ref`, `branch`, `tag`) takes `%00` (`FMT_SEP`), the pretty-format family (`log`, `show`, `stash list`, `reflog`) takes `%x00` (`LOG_SEP`). Neither accepts the other's, and neither reports the mismatch — `run._check_format_dialect` raises on it instead.
@@ -110,7 +110,8 @@ Tests use `unittest.TestCase` with `unittest.mock.patch` for isolating subproces
 - **The panel's `a` key and `App.suspend()`**: `panel.py::action_add` calls `add_in_editor` inside `self.suspend()`, because the editor and the "Edit again?" prompt use the terminal. In textual 8.2, `suspend()` resumes the app only when its block exits normally. An exception that leaves the block leaves the panel suspended, and it stops reading keys. `action_add` therefore catches `ShadError`, `KeyboardInterrupt` and `EOFError` inside the block. `test_panel.py` replaces `suspend` with a recorder that has the same behavior, and asserts that the app resumed.
 - **Data dir is not config dir**: todo files resolve through `todo/store.py::todo_dir(cfg)`, which returns `[todo] path` when it is set and `shared.config.default_data_dir() / "todo"` otherwise (`$XDG_DATA_HOME/shad/todo` on Linux). The default never goes through `config_path()`: a config directory is often a dotfiles repository, and todo files must not be dragged into one by default. `[todo] path` must be absolute after `~` expansion; `shared.config.load()` rejects a relative path because it would resolve against each pane's cwd. Tests patch `shad.todo.store.default_data_dir`, set `XDG_DATA_HOME`, or set `Config.todo_path`.
 - **`shad todo` has one list, not one per project**: no action reads cwd or takes a project, and the layout sends a bare `shad todo panel` to every project session, so every session shows the same files. `store._item_files` lists only the `.md` files directly in the todo dir; files in a subdirectory are not read.
-- **The todo grid layout addresses panes by id**: with `todo_percent` set, `layout.py::_layout_grid` captures `#{pane_id}` from each `split-window -P -F` and never uses `session:0.N`, because a fourth split makes every later index depend on the order of the earlier ones. `left` with `todo_percent` is rejected in `shared.config.load()`, so the layout never sees it.
+- **The todo layouts address panes by id**: with `todo_panel` on, `layout.py::_layout_with_todo` captures `#{pane_id}` from each `split-window -P -F` and never uses `session:0.N`, because a fourth split makes every later index depend on the order of the earlier ones. The layouts without a todo pane still use `session:0.N`; when `git_panel` is off they skip the git split, which shifts the index of the harness pane under `bottom`.
+- **Panel switches are TOML booleans**: `shared.config.load()` rejects a `git_panel` or `todo_panel` that is not `true` or `false`, because a quoted `"false"` is truthy. `todo_percent` is 1-99; `todo_panel = false` is the only way to turn the todo pane off.
 - **textual is imported lazily, again**: `todo/command.py::open_panel` imports `shad.todo.panel` inside the function. `todo/test_command.py` reads the module source and asserts the import is indented. Keep every `textual` import inside `panel.py`.
 - **A textual `App` subclass must not set `self._name`**: `DOMNode.__init__` owns that attribute and `App.name` reads it. mypy catches the collision only when the value type differs.
 - **Todo panel polling**: the panel calls `store.signature()` once a second and reloads on any change — name, mtime, or size of any item file. `load()` is synchronous because the directory is tens of files; do not move it to a worker. The panel's tests call `app.poll()` directly rather than waiting out the interval.

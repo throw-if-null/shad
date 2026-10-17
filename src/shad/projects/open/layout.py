@@ -1,9 +1,33 @@
 """
 tmux session layout builder for shad.
 
-Owns _create_session(): constructs the 3-pane tmux layout for a project.
+Owns _create_session(): constructs the tmux layout for a project.
 
-Layout variants (controlled by defaults.oc_position):
+defaults.git_panel and defaults.todo_panel (both on by default) choose the
+panes; defaults.oc_position chooses where the harness sits.
+
+With the todo pane on, a todo column of todo_percent of the window width runs
+down the right edge:
+
+  top (bottom mirrors it vertically):
+    ┌─────────────────────┬───────────┐
+    │  opencode           │ todo      │  100 - panel_percent
+    ├─────────────────────┼───────────┤
+    │  bash               │ git panel │  panel_percent
+    └─────────────────────┴───────────┘
+       100 - todo_percent  todo_percent
+
+  left (the bundle takes panel_percent of the width beside the todo column):
+    ┌──────────┬────────────┬─────────┐
+    │          │  bash      │         │
+    │opencode  ├────────────┤ todo    │
+    │          │  git panel │         │  split_percent of the bundle
+    └──────────┴────────────┴─────────┘
+
+With the git panel off, its pane is not split off: with top and bottom the
+todo pane fills the todo column, and with left bash fills the bundle.
+
+With the todo pane off, the git panel sits beside or below bash in the bundle:
 
   top:
     ┌─────────────────────────────────┐
@@ -26,19 +50,11 @@ Layout variants (controlled by defaults.oc_position):
     │          │  git panel           │  ~35% of bundle height
     └──────────┴──────────────────────┘
 
-With defaults.todo_percent set, the window is a 2x2 grid instead (top shown;
-bottom mirrors it vertically; left is rejected by config loading):
+With the git panel off too, bash takes the whole bundle.
 
-    ┌─────────────────────┬───────────┐
-    │  opencode           │ todo      │  100 - panel_percent
-    ├─────────────────────┼───────────┤
-    │  bash               │ git panel │  panel_percent
-    └─────────────────────┴───────────┘
-       100 - todo_percent  todo_percent
-
-The grid addresses panes by id ("%3"), captured from each split, rather than
-by index: a fourth split makes the index of every later pane depend on the
-order of the earlier ones.
+The layouts with a todo pane address panes by id ("%3"), captured from each
+split, rather than by index: a fourth split makes the index of every later
+pane depend on the order of the earlier ones.
 """
 
 from __future__ import annotations
@@ -63,9 +79,11 @@ def _create_session(
     _run(["tmux", "set-option", "-t", session, "set-titles", "on"])
     _run(["tmux", "set-option", "-t", session, "set-titles-string", window_title])
 
-    if defaults.todo_percent:
-        _layout_grid(project, defaults, oc_command, session, cwd)
+    if defaults.todo_panel:
+        _layout_with_todo(project, defaults, oc_command, session, cwd)
         return
+
+    git_pane: str | None = None
 
     if pos == "top":
         # OC top, bundle below — horizontal split within bundle
@@ -83,24 +101,22 @@ def _create_session(
                 cwd,
             ]
         )
-        _run(
-            [
-                "tmux",
-                "split-window",
-                "-t",
-                f"{session}:0.1",
-                "-h",
-                "-p",
-                str(split_percent),
-                "-c",
-                cwd,
-            ]
-        )
-        oc_pane, bash_pane, git_pane = (
-            f"{session}:0.0",
-            f"{session}:0.1",
-            f"{session}:0.2",
-        )
+        if defaults.git_panel:
+            _run(
+                [
+                    "tmux",
+                    "split-window",
+                    "-t",
+                    f"{session}:0.1",
+                    "-h",
+                    "-p",
+                    str(split_percent),
+                    "-c",
+                    cwd,
+                ]
+            )
+            git_pane = f"{session}:0.2"
+        oc_pane, bash_pane = f"{session}:0.0", f"{session}:0.1"
 
     elif pos == "bottom":
         # Bundle on top, OC below.
@@ -120,26 +136,24 @@ def _create_session(
             ]
         )
         # pane 0 = bash (top-left of bundle), pane 1 = OC (bottom)
-        # Now split pane 0 horizontally to add the git panel on the right of the bundle
-        _run(
-            [
-                "tmux",
-                "split-window",
-                "-t",
-                f"{session}:0.0",
-                "-h",
-                "-p",
-                str(split_percent),
-                "-c",
-                cwd,
-            ]
-        )
-        # pane 0 = bash, pane 1 = git, pane 2 = OC
-        bash_pane, git_pane, oc_pane = (
-            f"{session}:0.0",
-            f"{session}:0.1",
-            f"{session}:0.2",
-        )
+        bash_pane, oc_pane = f"{session}:0.0", f"{session}:0.1"
+        if defaults.git_panel:
+            # Split pane 0 horizontally to add the git panel on the right of the bundle
+            _run(
+                [
+                    "tmux",
+                    "split-window",
+                    "-t",
+                    f"{session}:0.0",
+                    "-h",
+                    "-p",
+                    str(split_percent),
+                    "-c",
+                    cwd,
+                ]
+            )
+            # pane 0 = bash, pane 1 = git, pane 2 = OC
+            git_pane, oc_pane = f"{session}:0.1", f"{session}:0.2"
         _run(["tmux", "send-keys", "-t", oc_pane, oc_command + "\n"])
 
     else:  # left
@@ -158,63 +172,72 @@ def _create_session(
                 cwd,
             ]
         )
-        _run(
-            [
-                "tmux",
-                "split-window",
-                "-t",
-                f"{session}:0.1",
-                "-v",
-                "-p",
-                str(split_percent),
-                "-c",
-                cwd,
-            ]
-        )
-        oc_pane, bash_pane, git_pane = (
-            f"{session}:0.0",
-            f"{session}:0.1",
-            f"{session}:0.2",
-        )
+        if defaults.git_panel:
+            _run(
+                [
+                    "tmux",
+                    "split-window",
+                    "-t",
+                    f"{session}:0.1",
+                    "-v",
+                    "-p",
+                    str(split_percent),
+                    "-c",
+                    cwd,
+                ]
+            )
+            git_pane = f"{session}:0.2"
+        oc_pane, bash_pane = f"{session}:0.0", f"{session}:0.1"
 
     # Launch the git panel and shad status
-    if project.group:
-        target = f"{project.group} {project.key}"
-    else:
-        target = project.key
-    _run(["tmux", "send-keys", "-t", git_pane, f"shad git panel {target}\n"])
+    target = _target(project)
+    if git_pane:
+        _run(["tmux", "send-keys", "-t", git_pane, f"shad git panel {target}\n"])
     _run(["tmux", "send-keys", "-t", bash_pane, f"shad projects {target} status\n"])
 
     # Focus the OC pane
     _run(["tmux", "select-pane", "-t", oc_pane])
 
 
-def _layout_grid(
+def _layout_with_todo(
     project: Project, defaults: Defaults, oc_command: str, session: str, cwd: str
 ) -> None:
     """
-    The 2x2 layout: harness and bash on the left, todo and git on the right.
-    The harness and todo panes share the row that oc_position names.
+    The layouts with a todo column on the right edge of the window.
+
+    With top or bottom, the git panel shares the todo column and the todo pane
+    shares the harness's row. With left, the git panel stays in the bundle.
+    Without the git panel, the todo pane takes the full height of its column.
     """
     target = _target(project)
+    pp = defaults.panel_percent
+    git: str | None = None
 
     first = _run(
         ["tmux", "display-message", "-p", "-t", f"{session}:0.0", "#{pane_id}"]
     ).stdout.strip()
-    right = _split(first, "-h", defaults.todo_percent, cwd)
+    todo = _split(first, "-h", defaults.todo_percent, cwd)
 
     if defaults.oc_position == "top":
-        main, todo = first, right
-        shell = _split(first, "-v", defaults.panel_percent, cwd)
-        git = _split(right, "-v", defaults.panel_percent, cwd)
-    else:
-        # bottom: the new, lower panes are the harness and the todo pane.
-        shell, git = first, right
-        main = _split(first, "-v", 100 - defaults.panel_percent, cwd)
-        todo = _split(right, "-v", 100 - defaults.panel_percent, cwd)
+        main = first
+        shell = _split(first, "-v", pp, cwd)
+        if defaults.git_panel:
+            git = _split(todo, "-v", pp, cwd)
+    elif defaults.oc_position == "bottom":
+        # The new, lower panes are the harness and the todo pane.
+        shell = first
+        main = _split(first, "-v", 100 - pp, cwd)
+        if defaults.git_panel:
+            git, todo = todo, _split(todo, "-v", 100 - pp, cwd)
+    else:  # left
+        main = first
+        shell = _split(first, "-h", pp, cwd)
+        if defaults.git_panel:
+            git = _split(shell, "-v", defaults.split_percent, cwd)
 
     _run(["tmux", "send-keys", "-t", main, oc_command + "\n"])
-    _run(["tmux", "send-keys", "-t", git, f"shad git panel {target}\n"])
+    if git:
+        _run(["tmux", "send-keys", "-t", git, f"shad git panel {target}\n"])
     _run(["tmux", "send-keys", "-t", todo, "shad todo panel\n"])
     _run(["tmux", "send-keys", "-t", shell, f"shad projects {target} status\n"])
     _run(["tmux", "select-pane", "-t", main])

@@ -143,12 +143,20 @@ def _print_defaults(cfg: Config, raw: dict) -> None:
     if not isinstance(configured, dict):
         configured = {}
 
-    for name in ("oc_position", "panel_percent", "split_percent", "todo_percent", "harness"):
+    for name in (
+        "oc_position",
+        "panel_percent",
+        "split_percent",
+        "git_panel",
+        "todo_panel",
+        "todo_percent",
+        "harness",
+    ):
         value = getattr(cfg.defaults, name)
         origin = "set" if name in configured else "default"
         table.add_row(
             Text(name, style="dim"),
-            Text(str(value), style="bright_white"),
+            Text(_display(value), style="bright_white"),
             Text(origin, style="dim"),
         )
     console.print(table)
@@ -284,7 +292,12 @@ def _get(path: Path, key: str) -> None:
             print(f"{dotted} = {toml_edit.format_value(leaf)}")
         return
 
-    print(value)
+    print(_display(value))
+
+
+def _display(value: object) -> str:
+    """A scalar as `get` and `show` print it: a bool in its TOML spelling, which `set` accepts."""
+    return toml_edit.format_value(value) if isinstance(value, bool) else str(value)
 
 
 # ── set / unset ───────────────────────────────────────────────────────────

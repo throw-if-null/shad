@@ -4,7 +4,7 @@ Settable config keys for `shad config`.
 The key namespace mirrors the TOML layout:
 
   defaults.<field>                     oc_position, panel_percent, split_percent,
-                                       todo_percent, harness
+                                       git_panel, todo_panel, todo_percent, harness
   projects.<key>.<field>               path, session, harness
   projects.<group>.<key>.<field>       path, session, harness
   todo.<field>                         path
@@ -23,8 +23,8 @@ from shad.shared.config import HARNESSES, OC_POSITIONS
 from shad.shared.errors import ShadError
 
 ENUM = "enum"
+BOOL = "bool"
 PERCENT = "percent"
-PERCENT_OR_OFF = "percent_or_off"  # 0 disables the feature the key sizes
 PATH = "path"
 STRING = "string"
 
@@ -40,10 +40,10 @@ class Field:
     def hint(self) -> str:
         if self.kind == ENUM:
             return " | ".join(self.choices)
+        if self.kind == BOOL:
+            return "true | false"
         if self.kind == PERCENT:
             return "integer 1-99"
-        if self.kind == PERCENT_OR_OFF:
-            return "integer 0-99 (0 = off)"
         if self.kind == PATH:
             return "directory path"
         return "string"
@@ -58,11 +58,9 @@ DEFAULTS_FIELDS: tuple[Field, ...] = (
     ),
     Field("panel_percent", PERCENT, description="% of the window the git+bash bundle takes"),
     Field("split_percent", PERCENT, description="% of the bundle the git panel takes"),
-    Field(
-        "todo_percent",
-        PERCENT_OR_OFF,
-        description="% of the window width the todo column takes; 0 = no todo pane",
-    ),
+    Field("git_panel", BOOL, description="show the git panel"),
+    Field("todo_panel", BOOL, description="show the todo pane"),
+    Field("todo_percent", PERCENT, description="% of the window width the todo column takes"),
     Field("harness", ENUM, HARNESSES, "default harness for projects"),
 )
 
@@ -126,17 +124,23 @@ def coerce(field: Field, raw: str, key: str) -> tuple[object, str]:
             )
         return lowered, format_value(lowered)
 
-    if field.kind in (PERCENT, PERCENT_OR_OFF):
+    if field.kind == BOOL:
+        lowered = value.lower()
+        if lowered not in ("true", "false"):
+            raise ShadError(f"invalid value for '{key}': {raw!r}; must be true or false")
+        flag = lowered == "true"
+        return flag, format_value(flag)
+
+    if field.kind == PERCENT:
         try:
             number = int(value)
         except ValueError:
             raise ShadError(
                 f"invalid value for '{key}': {raw!r}; expected an integer"
             ) from None
-        low = 0 if field.kind == PERCENT_OR_OFF else 1
-        if not low <= number <= 99:
+        if not 1 <= number <= 99:
             raise ShadError(
-                f"invalid value for '{key}': {number}; must be between {low} and 99"
+                f"invalid value for '{key}': {number}; must be between 1 and 99"
             )
         return number, format_value(number)
 
