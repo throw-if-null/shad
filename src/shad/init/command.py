@@ -58,11 +58,16 @@ _DEFAULTS_BLOCK = """\
 # panel_percent = 35
 
 # How much of the bundle the git panel takes (%). Bash gets the rest.
-# split_percent = 35
+# With the todo pane on and oc_position top or bottom, the git panel sits
+# under the todo pane instead, and this is ignored.
+# split_percent = 20
 
-# How much of the window width the todo column takes (%). 0 = no todo pane.
-# Needs oc_position top or bottom; split_percent is then ignored.
-# todo_percent = 0
+# Set to false to leave out the git panel or the todo pane.
+# git_panel = true
+# todo_panel = true
+
+# How much of the window width the todo column takes (%).
+# todo_percent = 20
 
 # The labels `shad todo add --label` accepts. Managed by `shad todo label`.
 # [todo]

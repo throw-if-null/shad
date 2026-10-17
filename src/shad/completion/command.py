@@ -164,6 +164,7 @@ _shad_complete_config() {
             case "${args[1]##*.}" in
             harness) _shad_offer "$cur" "__SHAD_HARNESSES__" ;;
             oc_position) _shad_offer "$cur" "__SHAD_OC_POSITIONS__" ;;
+            git_panel | todo_panel) _shad_offer "$cur" "true false" ;;
             path) _shad_offer_dirs ;;
             esac
         else

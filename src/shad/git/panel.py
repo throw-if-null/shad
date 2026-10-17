@@ -1,13 +1,14 @@
 """
-The git panel — the read-only repository view that occupies shad's third pane.
+The git panel — the read-only repository view that occupies shad's git pane.
 
 Three sections (branches, worktrees, stashes) behind a left nav, over a
 one-line header. Nothing here mutates the repository: the only git write the
 panel performs is the fetch inside snapshot.collect, which touches
 remote-tracking refs and nothing else.
 
-The pane is about 70x17 at shad's default panel_percent/split_percent, so the
-header is one line rather than a table and the nav column is fixed narrow.
+The pane is about 17 rows by 40 to 50 columns at shad's default panel_percent
+and todo_percent, so the header is one line rather than a table and the nav
+column is fixed narrow.
 
 textual is imported by this module only, and shad.git.command imports this
 module lazily, so `shad projects` and `shad git sync` never pay for it.

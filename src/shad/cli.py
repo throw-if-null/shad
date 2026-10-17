@@ -360,7 +360,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Manage the todo list",
         description=(
             "One todo list, not tied to a project: one text file per item,\n"
-            "shown in shad's fourth pane when defaults.todo_percent is set.\n\n"
+            "shown in the todo pane of every project session.\n\n"
             "Actions:\n"
             "  panel    the pane: list, status keys, add, delete, edit\n"
             "  add      create an item; its key is a slug of the title. With no\n"

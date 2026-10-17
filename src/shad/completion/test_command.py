@@ -345,6 +345,12 @@ class CompletionScriptTests(unittest.TestCase):
         self.assertEqual(sorted(self._run("shad config set projects.alvr.db.harness ")),
                          ["claude", "opencode"])
 
+    def test_config_set_offers_true_and_false_for_a_panel_switch(self) -> None:
+        for key in ("defaults.git_panel", "defaults.todo_panel"):
+            with self.subTest(key=key):
+                self.assertEqual(sorted(self._run(f"shad config set {key} ")),
+                                 ["false", "true"])
+
     def test_config_set_completes_a_path_value_as_a_directory(self) -> None:
         self.assertEqual(self._run("shad config set projects.kb.path "), [])
         self.assertEqual(self._compopt(), ["-o", "dirnames"])

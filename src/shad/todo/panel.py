@@ -6,7 +6,7 @@ through store.py; this module only draws and dispatches keys. It polls the
 directory once a second, so an item added from the CLI or edited in another
 pane appears without a keypress.
 
-The pane is about 25 rows by 50 to 60 columns at the default todo_percent, so
+The pane is about 25 rows by 40 to 50 columns at the default todo_percent, so
 the list and the detail are stacked rather than side by side, and the header
 is one line.
 

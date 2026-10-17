@@ -96,7 +96,7 @@ class LoadConfigTests(unittest.TestCase):
         cfg = load(cfg_path)
         self.assertEqual(cfg.defaults.oc_position, "top")
         self.assertEqual(cfg.defaults.panel_percent, 35)
-        self.assertEqual(cfg.defaults.split_percent, 35)
+        self.assertEqual(cfg.defaults.split_percent, 20)
 
     def test_defaults_section_fully_parsed(self) -> None:
         cfg_path = _write_toml(self.tmp_path, """
@@ -338,10 +338,25 @@ class TodoConfigTests(unittest.TestCase):
             path.write_text(textwrap.dedent(text))
             return load(path)
 
-    def test_defaults_to_no_todo_pane_and_no_labels(self) -> None:
+    def test_defaults_to_both_panels_and_no_labels(self) -> None:
         cfg = self._load("[projects.kb]\npath = '/tmp/kb'\n")
-        self.assertEqual(cfg.defaults.todo_percent, 0)
+        self.assertTrue(cfg.defaults.todo_panel)
+        self.assertTrue(cfg.defaults.git_panel)
+        self.assertEqual(cfg.defaults.todo_percent, 20)
         self.assertEqual(cfg.todo_labels, [])
+
+    def test_each_panel_can_be_turned_off(self) -> None:
+        cfg = self._load("[defaults]\ntodo_panel = false\ngit_panel = false\n")
+        self.assertFalse(cfg.defaults.todo_panel)
+        self.assertFalse(cfg.defaults.git_panel)
+
+    def test_a_panel_switch_must_be_a_boolean(self) -> None:
+        # A quoted "false" is a non-empty string, so a truthiness check
+        # would read it as on.
+        for value in ('"false"', "0"):
+            with self.subTest(value=value), self.assertRaises(ShadError) as ctx:
+                self._load(f"[defaults]\ngit_panel = {value}\n")
+            self.assertIn("git_panel", str(ctx.exception))
 
     def test_reads_todo_percent_and_labels_in_file_order(self) -> None:
         cfg = self._load("""\
@@ -360,14 +375,15 @@ class TodoConfigTests(unittest.TestCase):
                 self._load(f"[defaults]\ntodo_percent = {value}\n")
             self.assertIn("todo_percent", str(ctx.exception))
 
-    def test_todo_percent_with_the_left_layout_is_rejected(self) -> None:
+    def test_zero_todo_percent_is_rejected_and_names_the_switch(self) -> None:
         with self.assertRaises(ShadError) as ctx:
-            self._load('[defaults]\noc_position = "left"\ntodo_percent = 30\n')
-        self.assertIn("left", str(ctx.exception))
+            self._load("[defaults]\ntodo_percent = 0\n")
+        self.assertIn("todo_panel = false", str(ctx.exception))
 
-    def test_zero_todo_percent_with_the_left_layout_is_fine(self) -> None:
-        cfg = self._load('[defaults]\noc_position = "left"\ntodo_percent = 0\n')
+    def test_the_left_layout_accepts_the_todo_pane(self) -> None:
+        cfg = self._load('[defaults]\noc_position = "left"\ntodo_percent = 30\n')
         self.assertEqual(cfg.defaults.oc_position, "left")
+        self.assertTrue(cfg.defaults.todo_panel)
 
     def test_labels_must_be_an_array_of_strings(self) -> None:
         for labels in ('"chore"', "[1]", '["a", 2]'):
