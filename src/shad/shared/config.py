@@ -6,10 +6,10 @@ Schema (shad.toml):
   [defaults]
   oc_position   = "top"   # top | bottom | left
   panel_percent = 35      # % of window the git+bash bundle takes
-  split_percent = 35      # % of the bundle that the git panel takes (bash gets the rest)
+  split_percent = 20      # % of the bundle that the git panel takes (bash gets the rest)
   git_panel     = true    # false = no git panel pane
   todo_panel    = true    # false = no todo pane
-  todo_percent  = 25      # % of window width the todo column takes
+  todo_percent  = 20      # % of window width the todo column takes
 
   [todo]
   labels = ["chore", "documentation"]   # the label vocabulary `shad todo add --label` accepts
@@ -168,11 +168,11 @@ LABEL_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 class Defaults:
     oc_position: str = "top"
     panel_percent: int = 35
-    split_percent: int = 35
+    split_percent: int = 20
     harness: str = "opencode"
     git_panel: bool = True
     todo_panel: bool = True
-    todo_percent: int = 25
+    todo_percent: int = 20
 
 
 @dataclass
@@ -273,7 +273,7 @@ def load(path: Path | None = None) -> Config:
             )
         return raw_val
 
-    todo_percent = _int_setting("todo_percent", 25)
+    todo_percent = _int_setting("todo_percent", 20)
     if not 1 <= todo_percent <= 99:
         raise ShadError(
             f"invalid todo_percent {todo_percent}; must be between 1 and 99 "
@@ -283,7 +283,7 @@ def load(path: Path | None = None) -> Config:
     defaults = Defaults(
         oc_position=oc_position,
         panel_percent=_int_setting("panel_percent", 35),
-        split_percent=_int_setting("split_percent", 35),
+        split_percent=_int_setting("split_percent", 20),
         harness=harness,
         git_panel=_bool_setting("git_panel", True),
         todo_panel=_bool_setting("todo_panel", True),

@@ -185,7 +185,7 @@ shad config unset projects.alvr.db
 # How much of the bundle the git panel takes (%). Bash gets the rest.
 # When bundle is horizontal (oc_position top/bottom): the panel is on the right.
 # When bundle is vertical   (oc_position left):       the panel is on the bottom.
-# split_percent = 35
+# split_percent = 20
 
 # Set to false to leave out the git panel or the todo pane.
 # git_panel = true
@@ -194,7 +194,7 @@ shad config unset projects.alvr.db
 # How much of the window width the todo column takes (%). The todo column runs
 # down the right edge. With oc_position top or bottom, the git panel sits under
 # the todo pane in that column, and split_percent is ignored.
-# todo_percent = 25
+# todo_percent = 20
 
 # The labels `shad todo add --label` accepts. Managed by `shad todo label`.
 # [todo]
@@ -232,10 +232,10 @@ path    = "/home/user/gh/alvr/portal"
 |---|---|---|---|
 | `[defaults] oc_position` | no | `"top"` | Side opencode occupies: `top`, `bottom`, or `left` |
 | `[defaults] panel_percent` | no | `35` | % of the window the git+bash bundle takes |
-| `[defaults] split_percent` | no | `35` | % of the bundle that the git panel takes (bash gets the rest) |
+| `[defaults] split_percent` | no | `20` | % of the bundle that the git panel takes (bash gets the rest) |
 | `[defaults] git_panel` | no | `true` | `false` leaves the git panel out of new sessions |
 | `[defaults] todo_panel` | no | `true` | `false` leaves the todo pane out of new sessions |
-| `[defaults] todo_percent` | no | `25` | % of the window width the todo column takes. With `oc_position` `top` or `bottom` the git panel shares that column, so `split_percent` is ignored |
+| `[defaults] todo_percent` | no | `20` | % of the window width the todo column takes. With `oc_position` `top` or `bottom` the git panel shares that column, so `split_percent` is ignored |
 | `[todo] labels` | no | `[]` | The labels `shad todo add --label` accepts; managed by `shad todo label` |
 | `[todo] path` | no | `<data dir>/todo` | Directory that holds the todo files. Absolute, or starts with `~`. See [Files](#files) |
 | `path` | **yes** | — | Absolute path to the project root |
@@ -678,25 +678,25 @@ and bash fills the bundle (`left`).
 ┌─────────────────────────────────┐
 │  opencode                       │  ~65% height
 ├─────────────────────┬───────────┤
-│  bash         (~65%)│ git panel │  ~35% height
+│  bash         (~80%)│ git panel │  ~35% height
 └─────────────────────┴───────────┘
 ```
 
 **`todo_panel = false`, `oc_position = "bottom"`**
 ```
 ┌─────────────────────┬───────────┐
-│  bash         (~65%)│ git panel │  ~65% height
+│  bash         (~80%)│ git panel │  ~35% height
 ├─────────────────────┴───────────┤
-│  opencode                       │  ~35% height
+│  opencode                       │  ~65% height
 └─────────────────────────────────┘
 ```
 
 **`todo_panel = false`, `oc_position = "left"`**
 ```
 ┌──────────┬──────────────────────┐
-│          │  bash                │  ~65% of bundle height
+│          │  bash                │  ~80% of bundle height
 │opencode  ├──────────────────────┤
-│          │  git panel           │  ~35% of bundle height
+│          │  git panel           │  ~20% of bundle height
 └──────────┴──────────────────────┘
 ```
 

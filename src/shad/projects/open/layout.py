@@ -33,21 +33,21 @@ With the todo pane off, the git panel sits beside or below bash in the bundle:
     ┌─────────────────────────────────┐
     │  opencode          (top pane)   │  ~65% height
     ├─────────────────────┬───────────┤
-    │  bash         (~65%)│ git panel │  ~35% height
+    │  bash         (~80%)│ git panel │  ~35% height
     └─────────────────────┴───────────┘
 
   bottom:
     ┌─────────────────────┬───────────┐
-    │  bash         (~65%)│ git panel │  ~65% height
+    │  bash         (~80%)│ git panel │  ~35% height
     ├─────────────────────┴───────────┤
-    │  opencode                       │  ~35% height
+    │  opencode                       │  ~65% height
     └─────────────────────────────────┘
 
   left:
     ┌──────────┬──────────────────────┐
-    │          │  bash                │  ~65% of bundle height
+    │          │  bash                │  ~80% of bundle height
     │opencode  ├──────────────────────┤
-    │          │  git panel           │  ~35% of bundle height
+    │          │  git panel           │  ~20% of bundle height
     └──────────┴──────────────────────┘
 
 With the git panel off too, bash takes the whole bundle.

@@ -96,7 +96,7 @@ class LoadConfigTests(unittest.TestCase):
         cfg = load(cfg_path)
         self.assertEqual(cfg.defaults.oc_position, "top")
         self.assertEqual(cfg.defaults.panel_percent, 35)
-        self.assertEqual(cfg.defaults.split_percent, 35)
+        self.assertEqual(cfg.defaults.split_percent, 20)
 
     def test_defaults_section_fully_parsed(self) -> None:
         cfg_path = _write_toml(self.tmp_path, """
@@ -342,7 +342,7 @@ class TodoConfigTests(unittest.TestCase):
         cfg = self._load("[projects.kb]\npath = '/tmp/kb'\n")
         self.assertTrue(cfg.defaults.todo_panel)
         self.assertTrue(cfg.defaults.git_panel)
-        self.assertEqual(cfg.defaults.todo_percent, 25)
+        self.assertEqual(cfg.defaults.todo_percent, 20)
         self.assertEqual(cfg.todo_labels, [])
 
     def test_each_panel_can_be_turned_off(self) -> None:

@@ -6,7 +6,7 @@ one-line header. Nothing here mutates the repository: the only git write the
 panel performs is the fetch inside snapshot.collect, which touches
 remote-tracking refs and nothing else.
 
-The pane is about 17 rows by 50 to 60 columns at shad's default panel_percent
+The pane is about 17 rows by 40 to 50 columns at shad's default panel_percent
 and todo_percent, so the header is one line rather than a table and the nav
 column is fixed narrow.
 
