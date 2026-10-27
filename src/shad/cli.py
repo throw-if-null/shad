@@ -14,6 +14,7 @@ shad config <action> [args]              # inspect or edit shad.toml
 shad git sync [<group>] [<name>]         # git maintenance across projects
 shad git panel [<group>] [<name>]        # read-only repository view
 shad todo <action> [args]                # the todo list
+shad sessions save|restore|show          # the running shad sessions, as a snapshot
 
 Config file: --config PATH, else $SHAD_CONFIG, else the per-OS default
 (~/.config/shad/shad.toml on Linux). `shad config path` prints the resolved one.
@@ -42,6 +43,7 @@ from shad.projects.open.banner import print_banner
 from shad.projects.open.command import open_project
 from shad.projects.status.command import print_status
 from shad.projects.stop.command import stop_project
+from shad.sessions.command import cmd_sessions
 from shad.shared.config import HARNESSES, Config, Project, load, resolve_prefix
 from shad.shared.errors import ShadError
 from shad.todo.command import cmd_todo
@@ -431,6 +433,45 @@ def build_parser() -> argparse.ArgumentParser:
     )
     label_sub.add_parser("list", help="Print the labels, one per line")
 
+    p_sessions = sub.add_parser(
+        "sessions",
+        help="Save the running shad sessions, and bring them back",
+        description=(
+            "Save which shad sessions are running, and recreate them later,\n"
+            "for example after a reboot.\n\n"
+            "Actions:\n"
+            "  save      record every running shad tmux session and the\n"
+            "            conversation its harness pane holds\n"
+            "  restore   create each saved session that is not running, with\n"
+            "            the harness resuming its conversation, then attach\n"
+            "  show      print what is saved\n\n"
+            "The snapshot is taken from tmux when `save` runs. Nothing keeps\n"
+            "it current afterwards.\n\n"
+            "Supported harness: claude. A session running opencode is skipped\n"
+            "by save, with the reason.\n\n"
+            "restore attaches to the session that was attached when the\n"
+            "snapshot was saved, else the first one. --no-attach creates the\n"
+            "sessions and returns, for use from a script.\n\n"
+            "Examples:\n"
+            "  shad sessions save\n"
+            "  shad sessions restore\n"
+            "  shad sessions restore --no-attach\n"
+            "  shad sessions show"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    sessions_sub = p_sessions.add_subparsers(dest="sessions_action", metavar="<action>")
+    sessions_sub.add_parser("save", help="Record the running shad sessions")
+    p_sessions_restore = sessions_sub.add_parser(
+        "restore", help="Create the saved sessions that are not running, then attach"
+    )
+    p_sessions_restore.add_argument(
+        "--no-attach",
+        action="store_true",
+        help="Create the sessions without attaching to one",
+    )
+    sessions_sub.add_parser("show", help="Print the saved sessions")
+
     p_completion = sub.add_parser(
         "completion",
         help="Print the bash completion script",
@@ -594,6 +635,10 @@ def main() -> None:
             cmd_git(cfg, args)
         elif args.command == "todo":
             cmd_todo(cfg, args, path=override)
+        elif args.command == "sessions":
+            code = cmd_sessions(cfg, args)
+            if code is not None:
+                sys.exit(code)
 
     except ShadError as exc:
         err_console.print(Text(f"✗ {exc}", style="bold red"))

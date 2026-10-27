@@ -7,7 +7,9 @@ Provides interactive arrow-key pickers for each supported AI harness:
 
 Both pickers resolve a concrete session id before returning, because the caller
 derives the tmux session name from it. A picker that returned a constant key
-would map every resumed conversation onto one tmux session.
+would map every resumed conversation onto one tmux session. A new Claude Code
+conversation gets an id shad chooses, passed with --session-id, so that name
+identifies the conversation too.
 
 Public API
 ----------
@@ -25,6 +27,7 @@ import sqlite3
 import termios
 import time
 import tty
+import uuid
 import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -120,7 +123,7 @@ def _query_sessions(project_path: Path, limit: int = SESSION_LIMIT) -> list[OcSe
         return []
 
 
-def _claude_project_dir(project_path: Path) -> Path:
+def claude_project_dir(project_path: Path) -> Path:
     """Return the Claude Code transcript directory for *project_path*.
 
     Claude Code derives the directory name from the working directory by
@@ -204,7 +207,7 @@ def _query_claude_sessions(
     project_path: Path, limit: int = SESSION_LIMIT
 ) -> list[OcSession]:
     """Return up to *limit* most-recent Claude Code sessions for *project_path*."""
-    directory = _claude_project_dir(project_path)
+    directory = claude_project_dir(project_path)
     try:
         transcripts = sorted(
             directory.glob("*.jsonl"),
@@ -444,9 +447,18 @@ def pick_claude_target(
 
 
 def _fresh_claude_target(base_cmd: str) -> OpencodeTarget:
+    """
+    A new conversation under an id shad chooses.
+
+    Claude Code takes the id through --session-id. The tmux session name is
+    derived from the same id, so `shad sessions save` can map the session
+    back to its conversation even when Claude Code's own process record is
+    unavailable; a start time in its place would identify nothing.
+    """
+    session_id = str(uuid.uuid4())
     return OpencodeTarget(
-        command=base_cmd,
-        session_key=f"fresh-{int(time.time())}",
+        command=f"{base_cmd} --session-id {session_id}",
+        session_key=session_id,
         fresh=True,
         session_prefix="cc",
     )

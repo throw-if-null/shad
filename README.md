@@ -305,6 +305,12 @@ shad todo rm fix
 shad todo label add investigation # the label vocabulary lives in shad.toml
 shad todo panel                   # the todo pane runs this
 
+# Save the running shad sessions, and bring them back after a reboot
+shad sessions save
+shad sessions restore             # resumes each saved conversation, then attaches
+shad sessions restore --no-attach # for a script
+shad sessions show
+
 # Show a tmux cheat sheet popup
 shad cheat
 
@@ -605,6 +611,46 @@ The panel polls the directory once a second, so an item added from the CLI, or
 a file saved in another pane, appears without a keypress. Nothing in the panel
 touches a file other than the one item a key acts on.
 
+## Session snapshots
+
+`shad sessions` records which shad sessions are running and recreates them
+later, for example after a reboot.
+
+| Command | Description |
+|---|---|
+| `shad sessions save` | Record every running shad tmux session and the conversation its harness pane holds |
+| `shad sessions restore` | Create each saved session that is not running, resuming its conversation, then attach |
+| `shad sessions restore --no-attach` | Create the sessions and return, for a script |
+| `shad sessions show` | Print the saved sessions |
+
+`save` reads tmux at that moment. Nothing keeps the snapshot current: a
+session opened or stopped later is not in it until the next `save`. Run it
+before a reboot.
+
+For each session, `save` records the project, the harness, and the
+conversation id. For Claude Code, the id comes from the record Claude Code
+keeps for each running process in `~/.claude/sessions/<pid>.json`, so a
+conversation switched with `/clear` or `/resume` is saved as it is now, not
+as it was opened. When that record is missing, the id in the tmux session
+name is used. A session whose id cannot be found is saved without one and
+restores as a new conversation; `save` says so.
+
+`restore` creates each saved session with the usual layout and runs
+`claude --resume <id>` in the harness pane. The session picker is not shown.
+A conversation that is already running, under any tmux session name, is left
+alone, so a second harness process is never started on it. A saved conversation with
+no transcript, and a saved session without an id, start a new conversation;
+the table says why. A project that is no longer in the config is skipped.
+Afterwards `restore` attaches to the session that was attached when the
+snapshot was saved, else the first one; reach the others with the tmux
+session switcher.
+
+Supported harness: Claude Code. A session running OpenCode is skipped by
+`save`, with the reason.
+
+The snapshot is `sessions.json` in the data dir, `$XDG_DATA_HOME/shad`
+(`~/.local/share/shad` on Linux), beside the todo files.
+
 ## Shell completion
 
 `shad` supports tab completion for bash.
@@ -781,6 +827,13 @@ shad/
         │   │   └── command.py
         │   └── stop/
         │       └── command.py
+        ├── sessions/
+        │   ├── command.py
+        │   ├── harness.py
+        │   ├── live.py
+        │   ├── model.py
+        │   ├── restore.py
+        │   └── store.py
         ├── shared/
         │   ├── config.py
         │   ├── errors.py

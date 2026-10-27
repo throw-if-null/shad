@@ -7,9 +7,11 @@ from unittest.mock import patch
 from shad.projects.open.sessions import OpencodeTarget
 from shad.shared.tmux import (
     _attach,
+    attached_sessions,
     list_project_sessions,
     project_session_name,
     session_exists,
+    split_session_name,
     tmux_server_running,
 )
 
@@ -69,6 +71,37 @@ class TmuxHelpersTests(unittest.TestCase):
         with patch("shad.shared.tmux._run", return_value=result):
             sessions = list_project_sessions("tin-shad")
         self.assertEqual(sessions, ["tin-shad", "tin-shad--oc-abc"])
+
+    def test_list_project_sessions_matches_claude_sessions(self) -> None:
+        result = _completed(stdout="tin-shad--cc-uuid-a\ntin-shad--xx-uuid-b\n")
+        with patch("shad.shared.tmux._run", return_value=result):
+            sessions = list_project_sessions("tin-shad")
+        self.assertEqual(sessions, ["tin-shad--cc-uuid-a"])
+
+    def test_split_session_name_inverts_project_session_name(self) -> None:
+        for prefix in ("oc", "cc"):
+            with self.subTest(prefix=prefix):
+                target = OpencodeTarget(command="x", session_key="abc-1", session_prefix=prefix)
+                name = project_session_name("tin-shad", target)
+                self.assertEqual(split_session_name("tin-shad", name), (prefix, "abc-1"))
+
+    def test_split_session_name_returns_none_for_the_base_session(self) -> None:
+        self.assertIsNone(split_session_name("tin-shad", "tin-shad"))
+
+    def test_split_session_name_rejects_a_foreign_name(self) -> None:
+        with self.assertRaises(ValueError):
+            split_session_name("tin-shad", "tin-shad-extra--cc-abc")
+
+
+class AttachedSessionsTests(unittest.TestCase):
+    def test_returns_the_sessions_with_a_client(self) -> None:
+        result = _completed(stdout="kb\t1\ntin-shad--cc-a\t0\nother\t2\n")
+        with patch("shad.shared.tmux._run", return_value=result):
+            self.assertEqual(attached_sessions(), {"kb", "other"})
+
+    def test_returns_empty_when_tmux_is_not_running(self) -> None:
+        with patch("shad.shared.tmux._run", return_value=_completed(returncode=1)):
+            self.assertEqual(attached_sessions(), set())
 
 
 # ---------------------------------------------------------------------------

@@ -447,6 +447,19 @@ class CompletionScriptTests(unittest.TestCase):
         self.assertEqual(self._run("shad nonsense "), [])
 
 
+class CompletionScriptSessionsTests(CompletionScriptTests):
+    def test_sessions_offers_its_actions(self) -> None:
+        self.assertEqual(self._run("shad sessions "), ["save", "restore", "show"])
+
+    def test_sessions_save_and_show_offer_nothing(self) -> None:
+        self.assertEqual(self._run("shad sessions save "), [])
+        self.assertEqual(self._run("shad sessions show "), [])
+
+    def test_sessions_restore_offers_its_flag_once(self) -> None:
+        self.assertEqual(self._run("shad sessions restore "), ["--no-attach"])
+        self.assertEqual(self._run("shad sessions restore --no-attach "), [])
+
+
 class CompletionScriptLintTests(unittest.TestCase):
     def _write(self) -> Path:
         self._tmp = TemporaryDirectory()

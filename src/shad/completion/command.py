@@ -293,7 +293,7 @@ _shad_complete() {
         local top_flags="--version --help"
         ((${#_shad_cmd[@]} == 1)) && top_flags="--config $top_flags"
         _shad_offer "$cur" \
-            "projects git config completion init cheat todo" \
+            "projects git config completion init cheat todo sessions" \
             "$(_shad_unused "$top_flags" "${flags[@]}")"
         return
     fi
@@ -321,6 +321,14 @@ _shad_complete() {
             return
         fi
         _shad_complete_todo
+        return
+        ;;
+    sessions)
+        if ((${#args[@]} == 0)); then
+            _shad_offer "$cur" "save restore show"
+        elif [[ "${args[0]}" == "restore" ]]; then
+            _shad_offer "$cur" "$(_shad_unused "--no-attach" "${flags[@]}")"
+        fi
         return
         ;;
     projects | git) ;;
