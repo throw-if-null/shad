@@ -2,7 +2,7 @@
 Low-level tmux primitives for shad.
 
 This module owns only stateless subprocess wrappers and session-name helpers.
-Higher-level orchestration (open, stop) lives in the respective project slices.
+Higher-level orchestration lives in the slices that call it.
 """
 
 from __future__ import annotations
@@ -95,6 +95,36 @@ def attached_sessions() -> set[str]:
         if name and count.isdigit() and int(count) > 0:
             attached.add(name)
     return attached
+
+
+def pane_commands() -> dict[str, set[str]]:
+    """The foreground command of every pane, grouped by tmux session name."""
+    result = _run(
+        ["tmux", "list-panes", "-a", "-F", "#S\t#{pane_current_command}"], check=False
+    )
+    if result.returncode != 0:
+        return {}
+    commands: dict[str, set[str]] = {}
+    for line in result.stdout.splitlines():
+        name, _, command = line.strip().rpartition("\t")
+        if name:
+            commands.setdefault(name, set()).add(command)
+    return commands
+
+
+def current_session() -> str | None:
+    """The tmux session this process runs in, or None outside tmux."""
+    if os.environ.get("TMUX") is None:
+        return None
+    result = _run(["tmux", "display-message", "-p", "#S"], check=False)
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def kill_session(session: str) -> None:
+    """Kill exactly *session*; the `=` stops tmux from matching a prefix."""
+    _run(["tmux", "kill-session", "-t", f"={session}"])
 
 
 def _attach(session: str) -> int:

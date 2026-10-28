@@ -20,24 +20,20 @@ pick_claude_target(project_path, base_claude_cmd) -> OpencodeTarget | None
 from __future__ import annotations
 
 import json
-import os
 import re
 import shutil
 import sqlite3
-import termios
 import time
-import tty
 import uuid
 import warnings
-from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from io import StringIO
 from pathlib import Path
 
-from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
+
+from shad.shared.picker import NoTerminal, pick_one, render_bytes
 
 DB_PATH = Path.home() / ".local" / "share" / "opencode" / "opencode.db"
 CLAUDE_PROJECTS_DIR = Path.home() / ".claude" / "projects"
@@ -132,7 +128,7 @@ def claude_project_dir(project_path: Path) -> Path:
     return CLAUDE_PROJECTS_DIR / _CLAUDE_SLUG_RE.sub("-", str(project_path))
 
 
-def _claude_session_title(transcript: Path) -> str | None:
+def claude_session_title(transcript: Path) -> str | None:
     """Return the first real user prompt in *transcript*, or None if it has none.
 
     Entries flagged ``isMeta`` and the command wrappers Claude Code records for
@@ -224,7 +220,7 @@ def _query_claude_sessions(
     for transcript in transcripts:
         if len(sessions) == limit:
             break
-        title = _claude_session_title(transcript)
+        title = claude_session_title(transcript)
         if title is None:
             continue
         sessions.append(
@@ -289,90 +285,6 @@ def _render_picker(
     )
 
 
-def _read_key(fd: int) -> str:
-    """Read a single keypress (including escape sequences) from file descriptor."""
-    ch = os.read(fd, 1)
-    if ch == b"\x1b":
-        # try to read escape sequence
-        try:
-            rest = os.read(fd, 2)
-            return (ch + rest).decode("utf-8", errors="replace")
-        except OSError:
-            return "\x1b"
-    return ch.decode("utf-8", errors="replace")
-
-
-def _render_panel(
-    sessions: list[OcSession],
-    selected: int,
-    project_name: str,
-    width: int,
-    harness: str,
-) -> bytes:
-    """Render picker panel to ANSI bytes."""
-    buf = StringIO()
-    Console(file=buf, force_terminal=True, width=width, highlight=False).print(
-        _render_picker(sessions, selected, project_name, harness)
-    )
-    return buf.getvalue().encode()
-
-
-def _generic_picker(render_fn: Callable[[int], bytes], total: int) -> int | None:
-    """
-    Core arrow-key picker backed by raw tty I/O and cursor save/restore.
-    Returns the selected index (0-based) or None if cancelled.
-    """
-    selected = 0
-
-    try:
-        tty_fd = os.open("/dev/tty", os.O_RDWR)
-    except OSError:
-        return None
-
-    old_settings = termios.tcgetattr(tty_fd)
-    SAVE = b"\033[s"
-    RESTORE = b"\033[u"
-    CLEAR = b"\033[J"
-
-    def draw(first: bool = False) -> None:
-        content = render_fn(selected)
-        if first:
-            os.write(tty_fd, SAVE + content)
-        else:
-            os.write(tty_fd, RESTORE + CLEAR + content)
-
-    def cleanup() -> None:
-        os.write(tty_fd, RESTORE + CLEAR)
-        termios.tcsetattr(tty_fd, termios.TCSADRAIN, old_settings)
-        os.close(tty_fd)
-
-    try:
-        tty.setraw(tty_fd)
-        draw(first=True)
-        while True:
-            key = _read_key(tty_fd)
-            if key in ("\x1b[A", "k"):
-                selected = (selected - 1) % total
-                draw()
-            elif key in ("\x1b[B", "j"):
-                selected = (selected + 1) % total
-                draw()
-            elif key in ("\r", "\n"):
-                cleanup()
-                return selected
-            elif key in ("q", "Q", "\x1b"):
-                cleanup()
-                return None
-    except (OSError, termios.error) as exc:
-        warnings.warn(f"shad: picker failed: {exc}", stacklevel=2)
-        try:
-            termios.tcsetattr(tty_fd, termios.TCSADRAIN, old_settings)
-            os.close(tty_fd)
-        except OSError:
-            pass
-        return None
-
-
 def _run_picker(
     sessions: list[OcSession], project_name: str, harness: str = "opencode"
 ) -> int | None:
@@ -385,9 +297,14 @@ def _run_picker(
     term_width = shutil.get_terminal_size().columns
 
     def render(selected: int) -> bytes:
-        return _render_panel(sessions, selected, project_name, term_width, harness)
+        return render_bytes(
+            _render_picker(sessions, selected, project_name, harness), term_width
+        )
 
-    return _generic_picker(render, len(items))
+    try:
+        return pick_one(render, len(items))
+    except NoTerminal:
+        return None
 
 
 # ── Public API ─────────────────────────────────────────────────────────────

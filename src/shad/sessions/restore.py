@@ -105,7 +105,11 @@ def _holding(running: Sequence[Running], entry: Entry) -> Running | None:
     if entry.session_id is None:
         return None
     for live in running:
-        if live.entry.harness == entry.harness and live.entry.session_id == entry.session_id:
+        if (
+            live.harness == entry.harness
+            and live.conversation is not None
+            and live.conversation.id == entry.session_id
+        ):
             return live
     return None
 

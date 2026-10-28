@@ -14,12 +14,12 @@ shad config <action> [args]              # inspect or edit shad.toml
 shad git sync [<group>] [<name>]         # git maintenance across projects
 shad git panel [<group>] [<name>]        # read-only repository view
 shad todo <action> [args]                # the todo list
-shad sessions save|restore|show          # the running shad sessions, as a snapshot
+shad sessions save|restore|stop|show     # the running shad sessions, as a snapshot
 
 Config file: --config PATH, else $SHAD_CONFIG, else the per-OS default
 (~/.config/shad/shad.toml on Linux). `shad config path` prints the resolved one.
 
-Actions: status, stop
+Actions: status
 
 Resolution uses exact-match first, then unique prefix match per level.
 """
@@ -42,7 +42,6 @@ from shad.init.command import cmd_init
 from shad.projects.open.banner import print_banner
 from shad.projects.open.command import open_project
 from shad.projects.status.command import print_status
-from shad.projects.stop.command import stop_project
 from shad.sessions.command import cmd_sessions
 from shad.shared.config import HARNESSES, Config, Project, load, resolve_prefix
 from shad.shared.errors import ShadError
@@ -52,7 +51,7 @@ from shad.todo.model import STATUSES
 console = Console()
 err_console = Console(stderr=True)
 
-ACTIONS = ("status", "stop")
+ACTIONS = ("status",)
 
 
 # ---------------------------------------------------------------------------
@@ -94,9 +93,9 @@ def _list_group(cfg: Config, group_name: str) -> None:
 def _run_action(
     cfg: Config, project: Project, action: str | None, harness: str | None
 ) -> None:
-    """Dispatch open / status / stop for a resolved project.
+    """Dispatch open / status for a resolved project.
 
-    *harness* applies to open only; status and stop ignore it.
+    *harness* applies to open only; status ignores it.
     """
     if action is None:
         print_banner()
@@ -106,10 +105,8 @@ def _run_action(
         sys.exit(code)
     elif action == "status":
         print_status(project)
-    elif action == "stop":
-        stop_project(project)
     else:
-        raise ShadError(f"unknown action '{action}'; available: status, stop")
+        raise ShadError(f"unknown action '{action}'; available: status")
 
 
 def cmd_projects(cfg: Config, args: argparse.Namespace) -> None:
@@ -177,7 +174,7 @@ def cmd_projects(cfg: Config, args: argparse.Namespace) -> None:
     # --- too many tokens ---
     raise ShadError(
         f"too many arguments ({len(parts)}); "
-        "usage: shad projects [<group>] [<name>] [status|stop]"
+        "usage: shad projects [<group>] [<name>] [status]"
     )
 
 
@@ -210,14 +207,12 @@ def build_parser() -> argparse.ArgumentParser:
             "List all projects, or target a specific project with an optional action.\n\n"
             "Actions:\n"
             "  (none)   open the project's tmux session (create if needed)\n"
-            "  status   print a summary table for the project\n"
-            "  stop     kill the project's tmux session\n\n"
+            "  status   print a summary table for the project\n\n"
             "Examples:\n"
             "  shad projects                     list all projects\n"
             "  shad projects myapp               open myapp\n"
             "  shad projects tin shad            open grouped project\n"
             "  shad projects tin shad status     show status\n"
-            "  shad projects tin shad stop       kill session\n"
             "  shad projects myapp --harness claude   open with claude once\n\n"
             "Prefix matching is supported at each level."
         ),
@@ -227,14 +222,14 @@ def build_parser() -> argparse.ArgumentParser:
         "name",
         nargs="*",
         metavar="NAME",
-        help="[group] [project] [action]  — action is one of: status, stop",
+        help="[group] [project] [action]  — the action is status",
     )
     p_projects.add_argument(
         "--harness",
         choices=HARNESSES,
         help=(
             "Open with this harness instead of the project's configured one. "
-            "Applies to open only; status and stop ignore it."
+            "Applies to open only; status ignores it."
         ),
     )
 
@@ -435,33 +430,51 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_sessions = sub.add_parser(
         "sessions",
-        help="Save the running shad sessions, and bring them back",
+        help="Save the running shad sessions, bring them back, or stop them",
         description=(
-            "Save which shad sessions are running, and recreate them later,\n"
-            "for example after a reboot.\n\n"
+            "Save which shad sessions are running and recreate them later,\n"
+            "for example after a reboot; or pick running sessions to stop.\n\n"
             "Actions:\n"
-            "  save      record every running shad tmux session and the\n"
-            "            conversation its harness pane holds\n"
+            "  save      pick the running sessions to record, with the\n"
+            "            conversation each harness pane holds\n"
             "  restore   create each saved session that is not running, with\n"
             "            the harness resuming its conversation, then attach\n"
+            "  stop      pick running sessions and kill them\n"
             "  show      print what is saved\n\n"
-            "The snapshot is taken from tmux when `save` runs. Nothing keeps\n"
-            "it current afterwards.\n\n"
-            "Supported harness: claude. A session running opencode is skipped\n"
-            "by save, with the reason.\n\n"
+            "save and stop show the same picker: one row per running session\n"
+            "with the conversation's name and first prompt, whether it is\n"
+            "attached, and whether its harness is busy, idle, or gone. Space\n"
+            "toggles a row, a toggles all, Enter accepts, q cancels. In save\n"
+            "the rows already in the snapshot start checked, or every row when\n"
+            "there is no snapshot yet; the snapshot becomes exactly the\n"
+            "selection. In stop nothing starts checked, and the session the\n"
+            "command runs in is not listed.\n\n"
+            "The snapshot is taken when save runs. Nothing keeps it current\n"
+            "afterwards, and stop does not change it.\n\n"
+            "Supported harness: claude. A session running opencode can be\n"
+            "stopped but not saved; save lists it with the reason.\n\n"
             "restore attaches to the session that was attached when the\n"
             "snapshot was saved, else the first one. --no-attach creates the\n"
             "sessions and returns, for use from a script.\n\n"
             "Examples:\n"
             "  shad sessions save\n"
+            "  shad sessions save --all          every running session, no picker\n"
             "  shad sessions restore\n"
             "  shad sessions restore --no-attach\n"
+            "  shad sessions stop\n"
             "  shad sessions show"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     sessions_sub = p_sessions.add_subparsers(dest="sessions_action", metavar="<action>")
-    sessions_sub.add_parser("save", help="Record the running shad sessions")
+    p_sessions_save = sessions_sub.add_parser(
+        "save", help="Pick the running shad sessions to record"
+    )
+    p_sessions_save.add_argument(
+        "--all",
+        action="store_true",
+        help="Record every running session without the picker; works without a terminal",
+    )
     p_sessions_restore = sessions_sub.add_parser(
         "restore", help="Create the saved sessions that are not running, then attach"
     )
@@ -470,6 +483,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Create the sessions without attaching to one",
     )
+    sessions_sub.add_parser("stop", help="Pick running shad sessions and kill them")
     sessions_sub.add_parser("show", help="Print the saved sessions")
 
     p_completion = sub.add_parser(

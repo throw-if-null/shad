@@ -1,79 +1,111 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from shad.sessions.live import collect
+from shad.sessions.harness import _Record
+from shad.sessions.live import collect, duplicates
 from shad.sessions.model import Entry
-from shad.shared.config import Config, Defaults, Project
+from shad.sessions.testing import CFG, KB, SHAD, UUID_A, UUID_B, running
 
-_UUID_A = "11111111-1111-4111-8111-111111111111"
-_UUID_B = "22222222-2222-4222-8222-222222222222"
 
-_KB = Project(key="kb", group=None, path=Path("/p/kb"), session="kb", harness="claude")
-_SHAD = Project(key="shad", group="tin", path=Path("/p/shad"), session="tin-shad", harness="claude")
-_CFG = Config(defaults=Defaults(), projects={"kb": _KB}, groups={"tin": {"shad": _SHAD}})
+def _record(session_id: str, **extra: object) -> _Record:
+    fields: dict = {"name": None, "status": None, "status_since": None, "started": 0, **extra}
+    return _Record(session_id=session_id, **fields)
 
 
 class CollectTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        patcher = patch("shad.projects.open.sessions.CLAUDE_PROJECTS_DIR", Path(self._tmp.name))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def _collect(
         self,
-        running: dict[str, list[str]],
-        attached: set[str] = frozenset(),  # type: ignore[assignment]
-        records: dict[str, str] | None = None,
+        sessions: dict[str, list[str]],
+        *,
+        attached: set[str] | None = None,
+        commands: dict[str, set[str]] | None = None,
+        records: dict[str, _Record] | None = None,
     ):
         with (
-            patch("shad.sessions.live.list_project_sessions", side_effect=lambda b: running.get(b, [])),
-            patch("shad.sessions.live.attached_sessions", return_value=set(attached)),
             patch(
-                "shad.sessions.harness._claude_process_session",
+                "shad.sessions.live.list_project_sessions",
+                side_effect=lambda base: sessions.get(base, []),
+            ),
+            patch("shad.sessions.live.attached_sessions", return_value=attached or set()),
+            patch("shad.sessions.live.pane_commands", return_value=commands or {}),
+            patch(
+                "shad.sessions.harness._claude_process_record",
                 side_effect=lambda name: (records or {}).get(name),
             ),
         ):
-            return collect(_CFG)
+            return collect(CFG)
 
-    def test_records_every_running_session_in_config_order(self) -> None:
-        running = {"tin-shad": [f"tin-shad--cc-{_UUID_A}"], "kb": ["kb--cc-fresh-9"]}
-        collected = self._collect(
-            running, attached={f"tin-shad--cc-{_UUID_A}"}, records={"kb--cc-fresh-9": _UUID_B}
+    def test_lists_every_running_session_in_config_order(self) -> None:
+        sessions = {"tin-shad": [f"tin-shad--cc-{UUID_A}"], "kb": ["kb--cc-fresh-9"]}
+        found = self._collect(
+            sessions,
+            attached={f"tin-shad--cc-{UUID_A}"},
+            commands={"kb--cc-fresh-9": {"claude", "bash"}, f"tin-shad--cc-{UUID_A}": {"bash"}},
+            records={"kb--cc-fresh-9": _record(UUID_B, name="Netbird", status="idle", status_since=7)},
         )
 
         self.assertEqual(
-            collected.entries,
+            found,
             [
-                Entry(group=None, key="kb", harness="claude", session_id=_UUID_B, attached=False),
-                Entry(group="tin", key="shad", harness="claude", session_id=_UUID_A, attached=True),
+                running(
+                    "kb--cc-fresh-9", KB, session_id=UUID_B, name="Netbird", status="idle",
+                    status_since=7,
+                ),
+                running(f"tin-shad--cc-{UUID_A}", SHAD, attached=True, harness_running=False),
             ],
         )
-        self.assertEqual(collected.skipped, [])
+
+    def test_entry_carries_what_the_snapshot_stores(self) -> None:
+        live = running("kb--cc-x", KB, session_id=UUID_A, name="N", title="T", attached=True)
         self.assertEqual(
-            [running.session for running in collected.running],
-            ["kb--cc-fresh-9", f"tin-shad--cc-{_UUID_A}"],
+            live.entry,
+            Entry(
+                group=None, key="kb", harness="claude", session_id=UUID_A, attached=True,
+                name="N", title="T",
+            ),
         )
 
-    def test_a_session_without_a_findable_id_is_kept_without_one(self) -> None:
-        collected = self._collect({"kb": ["kb--cc-fresh-9"]})
-        self.assertEqual(
-            collected.entries,
-            [Entry(group=None, key="kb", harness="claude", session_id=None, attached=False)],
-        )
+    def test_a_session_without_a_findable_conversation_has_none(self) -> None:
+        (found,) = self._collect({"kb": ["kb--cc-fresh-9"]})
+        self.assertIsNone(found.conversation)
+        self.assertIsNone(found.entry.session_id)
+        self.assertIsNone(found.unsupported)
 
-    def test_a_bare_base_session_uses_the_configured_harness(self) -> None:
-        collected = self._collect({"kb": ["kb"]}, attached={"kb"})
-        self.assertEqual(
-            collected.entries,
-            [Entry(group=None, key="kb", harness="claude", session_id=None, attached=True)],
-        )
+    def test_a_bare_base_session_still_asks_the_harness(self) -> None:
+        (found,) = self._collect({"kb": ["kb"]}, records={"kb": _record(UUID_A)})
+        self.assertEqual(found.harness, "claude")
+        assert found.conversation is not None
+        self.assertEqual(found.conversation.id, UUID_A)
 
-    def test_an_opencode_session_is_skipped_with_the_reason(self) -> None:
-        collected = self._collect({"kb": ["kb--oc-ses_1"]})
-        self.assertEqual(collected.entries, [])
-        self.assertEqual(len(collected.skipped), 1)
-        self.assertEqual(collected.skipped[0].session, "kb--oc-ses_1")
-        self.assertEqual(collected.skipped[0].project, _KB)
-        self.assertIn("opencode harness is not supported", collected.skipped[0].reason)
+    def test_an_opencode_session_is_listed_but_unsupported(self) -> None:
+        (found,) = self._collect({"kb": ["kb--oc-ses_1"]}, commands={"kb--oc-ses_1": {"opencode"}})
+        self.assertEqual(found.harness, "opencode")
+        self.assertIsNone(found.conversation)
+        self.assertTrue(found.harness_running)
+        self.assertEqual(found.unsupported, "the opencode harness is not supported")
 
     def test_nothing_running_is_empty(self) -> None:
-        collected = self._collect({})
-        self.assertEqual((collected.entries, collected.skipped), ([], []))
+        self.assertEqual(self._collect({}), [])
+
+
+class DuplicatesTests(unittest.TestCase):
+    def test_names_every_session_whose_conversation_is_held_twice(self) -> None:
+        rows = [
+            running("kb--cc-a", session_id=UUID_A),
+            running("kb--cc-fresh-1", session_id=UUID_A),
+            running("kb--cc-b", session_id=UUID_B),
+            running("kb--cc-fresh-2", session_id=None),
+            running("kb--cc-fresh-3", session_id=None),
+        ]
+        self.assertEqual(duplicates(rows), {"kb--cc-a", "kb--cc-fresh-1"})

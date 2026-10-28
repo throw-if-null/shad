@@ -2,7 +2,7 @@
 
 ## Project overview
 
-`shad` is a Python CLI tool that manages project-specific tmux sessions. It creates a tmux layout per project — opencode and bash, plus a git panel and a todo pane that are on by default and can each be turned off — and handles session lifecycle (open, status, stop). Configuration lives in `~/.config/shad/shad.toml`; todo files live in `[todo] path`, or in the per-OS data directory when it is not set.
+`shad` is a Python CLI tool that manages project-specific tmux sessions. It creates a tmux layout per project — opencode and bash, plus a git panel and a todo pane that are on by default and can each be turned off — and handles session lifecycle: open and status per project, and save, restore and stop across projects. Configuration lives in `~/.config/shad/shad.toml`; todo files live in `[todo] path`, or in the per-OS data directory when it is not set.
 
 Entry point: `shad.cli:main` (registered as the `shad` console script).
 
@@ -17,6 +17,7 @@ src/shad/
 │   ├── config.py               # TOML config loading, Project/Defaults, target resolution, data dir
 │   ├── errors.py               # ShadError exception
 │   ├── render.py               # make_table() and relative_age() — shared presentation
+│   ├── picker.py               # the arrow-key pickers: pure key loops, and the /dev/tty wrapper
 │   └── tmux.py                 # low-level tmux subprocess wrappers
 ├── projects/
 │   ├── open/                   # "shad projects <name>" — session picker + layout
@@ -24,8 +25,7 @@ src/shad/
 │   │   ├── sessions.py         # OC session picker (SQLite query + TUI)
 │   │   ├── layout.py           # tmux layout creation: harness, bash, and the enabled panels
 │   │   └── banner.py           # ASCII art banner
-│   ├── status/command.py       # "shad projects <name> status" — reads git via the git slice
-│   └── stop/command.py         # "shad projects <name> stop"
+│   └── status/command.py       # "shad projects <name> status" — reads git via the git slice
 ├── config/                     # "shad config" — inspect and edit shad.toml
 │   ├── command.py              # action dispatch (show/path/keys/get/set/unset/edit/validate)
 │   ├── schema.py               # settable key namespace and value validation
@@ -47,13 +47,14 @@ src/shad/
 │   ├── render.py               # rich styling shared by `list` and the panel
 │   ├── panel.py                # the textual app "shad todo panel" runs
 │   └── command.py              # actions, label vocabulary
-├── sessions/                   # "shad sessions save|restore|show": the running sessions, as a snapshot
+├── sessions/                   # "shad sessions save|restore|stop|show"
 │   ├── model.py                # Entry and Snapshot, and the JSON format; no I/O
 │   ├── harness.py              # what each harness provides; Claude Code implemented, OpenCode not
 │   ├── store.py                # the snapshot file in the data dir
-│   ├── live.py                 # tmux and the harness records -> entries (the save side)
+│   ├── live.py                 # tmux and the harness records -> one Running per live session
 │   ├── restore.py              # entries -> steps; decides, never creates
-│   └── command.py              # save, restore, show: rendering and the one tmux write
+│   ├── render.py               # the rows, the state column, and the multi-select picker
+│   └── command.py              # save, restore, stop, show: the pickers and the tmux writes
 ├── init/command.py             # "shad init" interactive wizard
 ├── cheat/command.py            # "shad cheat" tmux cheat sheet
 └── completion/command.py       # "shad completion bash"
@@ -94,8 +95,10 @@ Tests use `unittest.TestCase` with `unittest.mock.patch` for isolating subproces
 - **Picker returns**: `pick_opencode_target()` and `pick_claude_target()` return `None` for cancel, `OpencodeTarget(fresh=True)` for "New session", or `OpencodeTarget(session_key=...)` for an existing session. The `fresh` flag signals that any existing tmux session with the same name should be killed and recreated.
 - **A picker must resolve a real session id**: the tmux session name is derived from `session_key`, so a picker that returns a constant key maps every resumed conversation onto one tmux session, and a second `shad projects <name>` attaches a second client to it. tmux mirrors one session across its clients, so both terminals then drive the same harness process. This is why `pick_claude_target()` reads `~/.claude/projects/<slug>/*.jsonl` itself and runs `claude --resume <id>` instead of handing the choice to `claude --resume`. A new Claude Code conversation gets a uuid shad chooses, passed as `claude --session-id <uuid>`, so its tmux name identifies the conversation too; the `fresh-<epoch>` key survives only for opencode, which has no such flag. Claude Code derives `<slug>` from the project path by replacing every character outside `[A-Za-z0-9]` with a hyphen. Each row shows the session's name, then its first prompt. The prompt is the first user entry that is neither `isMeta` nor a command wrapper; a transcript with no such entry is an empty session and is not offered. The name is the last `custom-title` entry (`/rename`), else the last `ai-title`. Claude Code appends both anywhere in the transcript, so `_claude_session_name` reads the whole file, and it matches the entry type as bytes before it parses a line, because a transcript can be tens of megabytes.
 - **Inside vs outside tmux**: `_attach()` uses `switch-client` when already inside tmux, `attach-session` otherwise.
-- **`shad sessions save` reads Claude Code's process record, not the tmux name**: Claude Code 2.1 writes `~/.claude/sessions/<pid>.json` for each running process, with the current `sessionId` and a `tmux` field of the form `<session>:@<window>.%<pane>`. `/clear` and `/resume` move a process to another conversation while the tmux name keeps the id the pane was opened with, so the record is the truth and the name is the fallback (only when its key is a uuid). A record whose pid is dead is ignored: a killed process leaves its file behind. The file is undocumented; `harness.py::_claude_process_session` is the one place that reads it.
-- **Harness support in `shad sessions` is a registry**: `sessions/harness.py::SUPPORTED` maps a harness name to an object with `live_session_id`, `can_resume`, `resume_command`, `fresh_command` and `new_session_id`. Only Claude Code is registered. `save` skips a session of an unregistered harness with the reason, and `restore` skips its entries. To add OpenCode, implement the same methods (the live id of a fresh session would come from the opencode SQLite DB, by project path and creation time) and register it; nothing else in the slice names a harness.
+- **`shad sessions` reads Claude Code's process record, not the tmux name**: Claude Code 2.1 writes `~/.claude/sessions/<pid>.json` for each running process, with the current `sessionId`, the session's `name`, a `status` of busy or idle with `statusUpdatedAt`, and a `tmux` field of the form `<session>:@<window>.%<pane>`. `/clear` and `/resume` move a process to another conversation while the tmux name keeps the id the pane was opened with, so the record is the truth and the name is the fallback (only when its key is a uuid). A record whose pid is dead is ignored: a killed process leaves its file behind. The file is undocumented; `harness.py::_claude_process_record` is the one place that reads it. The first prompt comes from the transcript through `claude_session_title`, which reads only its first lines.
+- **Harness support in `shad sessions` is a registry**: `sessions/harness.py::SUPPORTED` maps a harness name to an object with `live_conversation`, `can_resume`, `resume_command`, `fresh_command` and `new_session_id`. `live_conversation` returns a `Conversation` (id, and optional name, title, status, status age). Only Claude Code is registered. `save` lists a session of an unregistered harness with the reason and does not write it, `restore` skips its entries, and `stop` kills it like any other, because killing needs no harness. To add OpenCode, implement the same methods (the live id of a fresh session would come from the opencode SQLite DB, by project path and creation time) and register it; nothing else in the slice names a harness.
+- **The picker core is `shared/picker.py`**: `select_one` and `select_many` are pure loops over an iterator of keys with a draw callback, so their tests feed a scripted key sequence. `pick_one` and `pick_many` wrap them in /dev/tty raw mode. They raise `NoTerminal` instead of returning None when there is no terminal, so a caller can tell that apart from a cancel: the session picker in `projects/open` treats it as a cancel, `sessions save` turns it into an error that points at `--all`.
+- **`sessions stop` and the live state**: the session the command runs in is left out of the list, through `shared.tmux.current_session()` (`$TMUX`, then `display-message -p '#S'`), because killing it detaches the client mid-command. Whether a harness is still running is read from `pane_current_command` across every pane of the session, matched against the harness name, because the index of the harness pane depends on `oc_position`. `kill_session` passes `=<name>` so tmux never matches a prefix: `tin-shad` is a prefix of `tin-shad--cc-<uuid>`.
 - **`sessions/restore.py` decides, `command.py` creates**: `plan()` classifies every entry as resume, new, running or skipped and runs no tmux write; the one write is `_create_session` in `command.py`, for the steps that create. Keep it that way for the same reason `git/plan.py` is kept pure. A saved id with no transcript is kept: the harness starts the new conversation under it, so the tmux name is stable across restores.
 - **"Running" is decided by conversation id, not by tmux name**: `plan()` takes what `live.collect` found and treats an entry as running when any live session holds its id. The name restore would create often does not exist while the conversation is live: the live session was opened as `fresh-<epoch>`, or its id was superseded by `/clear` or `/resume`. A `session_exists` check on the computed name alone would start a second `claude --resume` process on a live conversation. `session_exists` is the second check, for a name that exists without a readable record.
 - **`shad git sync` layering**: the slice is a DAG — `run` and `model` are leaves, `refs` reads, `discover` resolves, `plan` decides, `apply` mutates, `command` orchestrates. `plan.py` is the safety boundary: it runs no git mutations, it only classifies. Keep it that way — a deletion rule that can also delete is much harder to test.

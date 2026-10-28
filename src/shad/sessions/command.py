@@ -1,38 +1,41 @@
 """
-`shad sessions` — save the running shad sessions, and bring them back.
+`shad sessions` — save the running shad sessions, bring them back, stop them.
 
 Actions:
-  save      record every running shad tmux session and its conversation id
+  save      pick the running sessions to record, with their conversations
   restore   create each saved session that is not running, then attach
+  stop      pick running sessions and kill them
   show      print what is saved
 
-The snapshot is read from tmux when `save` runs and is exact for that moment.
-Nothing keeps it current afterwards: a session opened or stopped later is not
-in it until the next `save`.
+save and stop show the same picker over the live sessions. The snapshot is
+exactly what save's picker accepted, and nothing keeps it current afterwards:
+a session opened or stopped later is not in it until the next save.
 """
 
 from __future__ import annotations
 
 import argparse
+import shutil
 import time
+from collections.abc import Iterable, Sequence
 
 from rich.console import Console
 from rich.text import Text
 
 from shad.projects.open.layout import _create_session
-from shad.sessions import live, restore, store
-from shad.sessions.model import Entry, Snapshot
+from shad.sessions import live, render, restore, store
+from shad.sessions.live import Running
+from shad.sessions.model import Snapshot
 from shad.sessions.restore import Step
 from shad.shared.config import Config
 from shad.shared.errors import ShadError
-from shad.shared.render import make_table, relative_age
-from shad.shared.tmux import _attach
+from shad.shared.picker import NoTerminal, pick_many
+from shad.shared.render import relative_age
+from shad.shared.tmux import _attach, current_session, kill_session
 
 console = Console()
 
-ACTIONS = ("save", "restore", "show")
-
-_ID_WIDTH = 8
+ACTIONS = ("save", "restore", "stop", "show")
 
 
 def cmd_sessions(cfg: Config, args: argparse.Namespace) -> int | None:
@@ -44,41 +47,79 @@ def cmd_sessions(cfg: Config, args: argparse.Namespace) -> int | None:
         raise ShadError(f"unknown sessions action '{action}'; available: {', '.join(ACTIONS)}")
 
     if action == "save":
-        _save(cfg)
+        _save(cfg, everything=getattr(args, "all", False))
     elif action == "restore":
         return _restore(cfg, attach=not getattr(args, "no_attach", False))
+    elif action == "stop":
+        _stop(cfg)
     else:
         _show()
     return None
 
 
-def _save(cfg: Config) -> None:
-    collected = live.collect(cfg)
-    for skipped in collected.skipped:
-        console.print(
-            Text("  ✗ ", style="bold red")
-            + Text(skipped.session, style="bright_white")
-            + Text(f"  {skipped.reason}", style="dim")
-        )
-    if not collected.entries:
-        if collected.skipped:
+# ── save ──────────────────────────────────────────────────────────────────
+
+
+def _save(cfg: Config, *, everything: bool) -> None:
+    running = live.collect(cfg)
+    for skipped in running:
+        if skipped.unsupported:
+            console.print(
+                Text("  ✗ ", style="bold red")
+                + Text(skipped.session, style="bright_white")
+                + Text(f"  {skipped.unsupported}", style="dim")
+            )
+    savable = [item for item in running if item.unsupported is None]
+    if not savable:
+        if running:
             raise ShadError("no session could be saved; the saved sessions are unchanged")
         raise ShadError("no shad sessions are running; the saved sessions are unchanged")
 
-    snapshot = Snapshot(saved_at=int(time.time()), entries=tuple(collected.entries))
+    if everything:
+        chosen = savable
+    else:
+        picked = _pick(
+            savable,
+            _previously_saved(savable),
+            title="save sessions",
+            accept="save",
+            hint="use `shad sessions save --all` to save every running session",
+        )
+        if picked is None:
+            console.print(Text("  cancelled; the saved sessions are unchanged", style="dim"))
+            return
+        chosen = [savable[index] for index in sorted(picked)]
+
+    snapshot = Snapshot(saved_at=int(time.time()), entries=tuple(item.entry for item in chosen))
     path = store.snapshot_path()
     store.write(path, snapshot)
+    _print_rows("saved", chosen, note_missing_id=True)
+    console.print(Text(f"  {_count(len(chosen))} saved to {path}", style="dim"))
 
-    table = make_table("saved")
-    for entry in snapshot.entries:
-        table.add_row(*_entry_cells(entry), _save_note(entry))
-    console.print(table)
-    console.print(Text(f"  {_count(snapshot.entries)} saved to {path}", style="dim"))
+
+def _previously_saved(savable: Sequence[Running]) -> set[int]:
+    """
+    The rows to check before the picker opens: the sessions whose
+    conversation the snapshot already holds, or every row when there is no
+    snapshot yet.
+    """
+    path = store.snapshot_path()
+    if not path.exists():
+        return set(range(len(savable)))
+    saved = {entry.session_id for entry in store.read(path).entries if entry.session_id}
+    return {
+        index
+        for index, item in enumerate(savable)
+        if item.conversation is not None and item.conversation.id in saved
+    }
+
+
+# ── restore ───────────────────────────────────────────────────────────────
 
 
 def _restore(cfg: Config, *, attach: bool) -> int | None:
     snapshot = store.read(store.snapshot_path())
-    steps = restore.plan(cfg, snapshot, live.collect(cfg).running)
+    steps = restore.plan(cfg, snapshot, live.collect(cfg))
     for step in steps:
         if step.creates:
             assert step.project is not None
@@ -86,10 +127,9 @@ def _restore(cfg: Config, *, attach: bool) -> int | None:
             assert step.session is not None
             _create_session(step.project, cfg.defaults, step.command, step.session)
 
-    table = make_table("restored")
-    for step in steps:
-        table.add_row(*_entry_cells(step.entry), _outcome(step))
-    console.print(table)
+    console.print(
+        render.table("restored", [(step.entry, _outcome(step)) for step in steps], console.width)
+    )
 
     if not attach:
         return None
@@ -97,43 +137,6 @@ def _restore(cfg: Config, *, attach: bool) -> int | None:
     if target is None:
         return None
     return _attach(target)
-
-
-def _show() -> None:
-    snapshot = store.read(store.snapshot_path())
-    table = make_table("sessions")
-    for entry in snapshot.entries:
-        table.add_row(
-            *_entry_cells(entry),
-            Text("attached" if entry.attached else "", style="dim"),
-        )
-    if not snapshot.entries:
-        table.add_row(Text("no sessions", style="dim"), "", "", "")
-    console.print(table)
-    console.print(
-        Text(
-            f"  {_count(snapshot.entries)}, saved {relative_age(snapshot.saved_at)} ago",
-            style="dim",
-        )
-    )
-
-
-# ── rendering ─────────────────────────────────────────────────────────────
-
-
-def _entry_cells(entry: Entry) -> tuple[Text, Text, Text]:
-    session_id = entry.session_id[:_ID_WIDTH] if entry.session_id else "—"
-    return (
-        Text(entry.display_name, style="bright_white"),
-        Text(entry.harness, style="dim"),
-        Text(session_id, style="yellow" if entry.session_id else "dim"),
-    )
-
-
-def _save_note(entry: Entry) -> Text:
-    if entry.session_id is None:
-        return Text("no conversation id; restores as a new conversation", style="yellow")
-    return Text("attached" if entry.attached else "", style="dim")
 
 
 def _outcome(step: Step) -> Text:
@@ -146,5 +149,75 @@ def _outcome(step: Step) -> Text:
     return Text(f"skipped; {step.reason}", style="red")
 
 
-def _count(entries: tuple[Entry, ...]) -> str:
-    return f"{len(entries)} session" if len(entries) == 1 else f"{len(entries)} sessions"
+# ── stop ──────────────────────────────────────────────────────────────────
+
+
+def _stop(cfg: Config) -> None:
+    running = live.collect(cfg)
+    current = current_session()
+    rows = [item for item in running if item.session != current]
+    if not rows:
+        message = "no shad sessions are running"
+        if len(rows) < len(running):
+            message += " besides this one"
+        console.print(Text(f"  {message}", style="dim"))
+        return
+
+    picked = _pick(rows, (), title="stop sessions", accept="stop", hint="stop needs a terminal")
+    if not picked:
+        console.print(Text("  nothing stopped", style="dim"))
+        return
+    stopped = [rows[index] for index in sorted(picked)]
+    for item in stopped:
+        kill_session(item.session)
+    _print_rows("stopped", stopped)
+
+
+# ── show ──────────────────────────────────────────────────────────────────
+
+
+def _show() -> None:
+    snapshot = store.read(store.snapshot_path())
+    rows = [
+        (entry, Text("attached" if entry.attached else "", style="dim"))
+        for entry in snapshot.entries
+    ]
+    console.print(render.table("sessions", rows, console.width))
+    console.print(
+        Text(
+            f"  {_count(len(snapshot.entries))}, saved {relative_age(snapshot.saved_at)} ago",
+            style="dim",
+        )
+    )
+
+
+# ── shared ────────────────────────────────────────────────────────────────
+
+
+def _pick(
+    rows: Sequence[Running], checked: Iterable[int], *, title: str, accept: str, hint: str
+) -> frozenset[int] | None:
+    width = shutil.get_terminal_size().columns
+
+    def draw(cursor: int, chosen: frozenset[int]) -> bytes:
+        return render.picker(rows, cursor, chosen, title=title, accept=accept, width=width)
+
+    try:
+        return pick_many(draw, len(rows), checked)
+    except NoTerminal:
+        raise ShadError(f"no terminal to pick in; {hint}") from None
+
+
+def _print_rows(title: str, rows: Sequence[Running], *, note_missing_id: bool = False) -> None:
+    duplicate = live.duplicates(rows)
+    cells = []
+    for item in rows:
+        state = render.state(item, duplicate=item.session in duplicate)
+        if note_missing_id and item.conversation is None:
+            state.append("  no conversation id; restores as a new conversation", style="yellow")
+        cells.append((item.entry, state))
+    console.print(render.table(title, cells, console.width))
+
+
+def _count(count: int) -> str:
+    return f"{count} session" if count == 1 else f"{count} sessions"

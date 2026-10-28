@@ -7,7 +7,10 @@ from shad.sessions.model import FORMAT, Entry, Snapshot, parse, serialize
 from shad.shared.errors import ShadError
 
 _ENTRIES = (
-    Entry(group="tin", key="shad", harness="claude", session_id="uuid-a", attached=True),
+    Entry(
+        group="tin", key="shad", harness="claude", session_id="uuid-a", attached=True,
+        name="Releaser", title="first prompt",
+    ),
     Entry(group=None, key="kb", harness="claude", session_id=None, attached=False),
 )
 
@@ -29,6 +32,8 @@ class RoundTripTests(unittest.TestCase):
                 "harness": "claude",
                 "session_id": "uuid-a",
                 "attached": True,
+                "name": "Releaser",
+                "title": "first prompt",
             },
         )
 
@@ -73,6 +78,17 @@ class ParseRejectionTests(unittest.TestCase):
             "sessions": [{"key": "kb", "harness": "claude", "session_id": 7}],
         }
         self._rejects(json.dumps(raw), "invalid session_id")
+
+    def test_rejects_a_non_string_name_or_title(self) -> None:
+        base = {"key": "kb", "harness": "claude"}
+        for field in ("name", "title"):
+            raw = {"format": FORMAT, "saved_at": 1, "sessions": [{**base, field: 1}]}
+            self._rejects(json.dumps(raw), f"invalid {field}")
+
+    def test_name_and_title_are_optional(self) -> None:
+        raw = {"format": FORMAT, "saved_at": 1, "sessions": [{"key": "kb", "harness": "claude"}]}
+        entry = parse(json.dumps(raw)).entries[0]
+        self.assertEqual((entry.name, entry.title), (None, None))
 
     def test_attached_defaults_to_false(self) -> None:
         raw = {"format": FORMAT, "saved_at": 1, "sessions": [{"key": "kb", "harness": "claude"}]}

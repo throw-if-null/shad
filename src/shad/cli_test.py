@@ -123,7 +123,7 @@ class ProjectsListTests(unittest.TestCase):
             defaults=Defaults(),
             groups={"tin": {"shad": _make_project("shad", group="tin")}},
         )
-        args = _make_args(["tin", "stop"])
+        args = _make_args(["tin", "status"])
 
         with self.assertRaises(ShadError) as ctx:
             cmd_projects(cfg, args)
@@ -139,16 +139,6 @@ class ProjectsListTests(unittest.TestCase):
             cmd_projects(cfg, args)
 
         mock_status.assert_called_once_with(project)
-
-    def test_two_tokens_stop_action_calls_stop_project(self) -> None:
-        project = _make_project("shad", group="tin")
-        cfg = Config(defaults=Defaults(), groups={"tin": {"shad": project}})
-        args = _make_args(["tin", "shad", "stop"])
-
-        with patch("shad.cli.stop_project") as mock_stop:
-            cmd_projects(cfg, args)
-
-        mock_stop.assert_called_once_with(project)
 
     def test_group_token_resolves_to_top_level_project_raises_helpful_error(
         self,

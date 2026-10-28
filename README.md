@@ -278,10 +278,6 @@ shad projects alvr db --harness opencode
 shad projects kb status
 shad projects alvr db status
 
-# Kill a project's tmux sessions
-shad projects kb stop
-shad projects alvr db stop
-
 # Git maintenance across projects
 shad git sync                     # every configured project
 shad git sync tin                 # every project in the tin group
@@ -305,10 +301,12 @@ shad todo rm fix
 shad todo label add investigation # the label vocabulary lives in shad.toml
 shad todo panel                   # the todo pane runs this
 
-# Save the running shad sessions, and bring them back after a reboot
-shad sessions save
+# Save the running shad sessions, bring them back after a reboot, or stop some
+shad sessions save                # pick which running sessions to record
+shad sessions save --all          # record every running session, no picker
 shad sessions restore             # resumes each saved conversation, then attaches
 shad sessions restore --no-attach # for a script
+shad sessions stop                # pick running sessions to kill
 shad sessions show
 
 # Show a tmux cheat sheet popup
@@ -611,42 +609,86 @@ The panel polls the directory once a second, so an item added from the CLI, or
 a file saved in another pane, appears without a keypress. Nothing in the panel
 touches a file other than the one item a key acts on.
 
-## Session snapshots
+## Sessions
 
 `shad sessions` records which shad sessions are running and recreates them
-later, for example after a reboot.
+later, for example after a reboot. It also stops running sessions you pick.
 
 | Command | Description |
 |---|---|
-| `shad sessions save` | Record every running shad tmux session and the conversation its harness pane holds |
+| `shad sessions save` | Pick the running sessions to record, with the conversation each holds |
+| `shad sessions save --all` | Record every running session, without the picker |
 | `shad sessions restore` | Create each saved session that is not running, resuming its conversation, then attach |
 | `shad sessions restore --no-attach` | Create the sessions and return, for a script |
+| `shad sessions stop` | Pick running sessions and kill them |
 | `shad sessions show` | Print the saved sessions |
 
-`save` reads tmux at that moment. Nothing keeps the snapshot current: a
-session opened or stopped later is not in it until the next `save`. Run it
-before a reboot.
+### The picker
 
-For each session, `save` records the project, the harness, and the
-conversation id. For Claude Code, the id comes from the record Claude Code
-keeps for each running process in `~/.claude/sessions/<pid>.json`, so a
-conversation switched with `/clear` or `/resume` is saved as it is now, not
-as it was opened. When that record is missing, the id in the tmux session
-name is used. A session whose id cannot be found is saved without one and
-restores as a new conversation; `save` says so.
+`save` and `stop` show the same picker: one row per running shad session.
+
+| Column | Content |
+|---|---|
+| project | The configured project |
+| harness | `claude` or `opencode` |
+| id | The first eight characters of the conversation id |
+| name | The conversation's name: from `/rename`, or the one Claude Code gave it |
+| first prompt | The first thing typed in it |
+| state | `attached` or `detached`; then `busy`, or `idle` and for how long, or `harness exited` when the harness is gone and a shell is left in its pane; `duplicate` when another live session holds the same conversation |
+
+| Key | Action |
+|---|---|
+| `↑` `↓` or `k` `j` | Move the cursor |
+| `space` | Toggle the row |
+| `a` | Check every row, or clear them all when every row is checked |
+| `Enter` | Accept: save the checked rows, or stop them |
+| `q` or `Esc` | Cancel; nothing is written or killed |
+
+### save
+
+The snapshot becomes exactly the checked rows. A row whose conversation is
+already in the snapshot starts checked; with no snapshot yet, every row starts
+checked. Accepting with nothing checked writes an empty snapshot, which is how
+to restore nothing without deleting the file. A saved session that is no longer
+running is dropped on the next `save`. `show` is always what `restore` will do.
+
+`save --all` records every running session without the picker. It is the form
+for a script, and the only one that works without a terminal.
+
+For Claude Code, the conversation comes from the record Claude Code keeps for
+each running process in `~/.claude/sessions/<pid>.json`: its id, its name, and
+whether it is busy or idle. The record follows `/clear` and `/resume`, so a
+switched conversation is saved as it is now, not as it was opened. When the
+record is missing, the id in the tmux session name is used. A session whose
+conversation cannot be found is saved without one and restores as a new
+conversation; the saved table says so.
+
+`save` reads tmux at that moment. Nothing keeps the snapshot current, and
+`stop` does not change it. Run `save` before a reboot.
+
+### restore
 
 `restore` creates each saved session with the usual layout and runs
 `claude --resume <id>` in the harness pane. The session picker is not shown.
 A conversation that is already running, under any tmux session name, is left
-alone, so a second harness process is never started on it. A saved conversation with
-no transcript, and a saved session without an id, start a new conversation;
-the table says why. A project that is no longer in the config is skipped.
-Afterwards `restore` attaches to the session that was attached when the
-snapshot was saved, else the first one; reach the others with the tmux
-session switcher.
+alone, so a second harness process is never started on it. A saved
+conversation with no transcript, and a saved session without an id, start a
+new conversation; the table says why. A project that is no longer in the
+config is skipped. Afterwards `restore` attaches to the session that was
+attached when the snapshot was saved, else the first one; reach the others
+with the tmux session switcher.
 
-Supported harness: Claude Code. A session running OpenCode is skipped by
-`save`, with the reason.
+### stop
+
+Nothing starts checked. `Enter` kills the checked tmux sessions, panes and
+all: an editor open in the bash pane dies with the session. The conversation
+is kept by its harness, so the picker in `shad projects <name>` offers it
+again. The session the command runs in is not listed, because killing it would
+detach you mid-command.
+
+Supported harness for `save` and `restore`: Claude Code. A session running
+OpenCode is listed by `save` with the reason it cannot be saved, and is not
+written. `stop` kills it like any other.
 
 The snapshot is `sessions.json` in the data dir, `$XDG_DATA_HOME/shad`
 (`~/.local/share/shad` on Linux), beside the todo files.
@@ -750,7 +792,7 @@ and bash fills the bundle (`left`).
 
 If `shad` is run from **inside** an existing tmux session it uses `switch-client`; outside tmux it uses `attach-session`.
 
-`shad projects <name> status` lists all tmux sessions that belong to the configured project session name, including scoped sessions created for specific OpenCode session ids. `shad projects <name> stop` stops all of them.
+`shad projects <name> status` lists every tmux session that belongs to the configured project session name, including the scoped sessions named after the conversation they were opened with. `shad sessions stop` picks sessions to kill.
 
 ### Navigating panes
 
@@ -823,20 +865,20 @@ shad/
         │   │   ├── command.py
         │   │   ├── layout.py
         │   │   └── sessions.py
-        │   ├── status/
-        │   │   └── command.py
-        │   └── stop/
+        │   └── status/
         │       └── command.py
         ├── sessions/
         │   ├── command.py
         │   ├── harness.py
         │   ├── live.py
         │   ├── model.py
+        │   ├── render.py
         │   ├── restore.py
         │   └── store.py
         ├── shared/
         │   ├── config.py
         │   ├── errors.py
+        │   ├── picker.py
         │   ├── render.py
         │   └── tmux.py
         └── todo/

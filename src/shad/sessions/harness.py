@@ -2,9 +2,9 @@
 What `shad sessions` needs from each harness.
 
 Three things differ per harness: how the conversation a running pane holds is
-identified, whether a saved id can still be resumed, and the command lines
-that resume or start one. Everything else in the slice is harness-neutral and
-reaches a harness only through `for_harness()`.
+identified and described, whether a saved id can still be resumed, and the
+command lines that resume or start one. Everything else in the slice is
+harness-neutral and reaches a harness only through `for_harness()`.
 
 Claude Code is supported. OpenCode is not: a tmux session that runs it is
 skipped by `save`, with the reason, and an entry naming it is skipped by
@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from shad.projects.open.sessions import claude_project_dir
+from shad.projects.open.sessions import claude_project_dir, claude_session_title
 from shad.shared.tmux import SESSION_PREFIXES
 
 CLAUDE_SESSIONS_DIR = Path.home() / ".claude" / "sessions"
@@ -39,15 +39,25 @@ class RunningSession:
     project_path: Path
 
 
+@dataclass(frozen=True)
+class Conversation:
+    """What a harness knows about one conversation. Only the id is required."""
+
+    id: str
+    name: str | None = None  # what the harness calls it
+    title: str | None = None  # its first prompt
+    status: str | None = None  # "busy" or "idle"; None when unknown
+    status_since: int | None = None  # unix seconds the status was entered
+
+
 class Harness(Protocol):
     name: str
 
-    def live_session_id(self, running: RunningSession) -> str | None:
+    def live_conversation(self, running: RunningSession) -> Conversation | None:
         """
-        The id of the conversation *running* holds now, or None when it
-        cannot be determined. The tmux name's key is the id the session was
-        opened with; the harness may have moved to another conversation
-        since.
+        The conversation *running* holds now, or None when it cannot be
+        determined. The tmux name's key is the id the session was opened
+        with; the harness may have moved to another conversation since.
         """
 
     def can_resume(self, project_path: Path, session_id: str) -> bool:
@@ -69,13 +79,24 @@ class Harness(Protocol):
 class Claude:
     name = "claude"
 
-    def live_session_id(self, running: RunningSession) -> str | None:
-        found = _claude_process_session(running.tmux_session)
-        if found:
-            return found
+    def live_conversation(self, running: RunningSession) -> Conversation | None:
+        record = _claude_process_record(running.tmux_session)
+        if record is not None:
+            return Conversation(
+                id=record.session_id,
+                name=record.name,
+                title=self._title(running.project_path, record.session_id),
+                status=record.status,
+                status_since=record.status_since,
+            )
         if running.key and _UUID_RE.match(running.key):
-            return running.key
+            return Conversation(
+                id=running.key, title=self._title(running.project_path, running.key)
+            )
         return None
+
+    def _title(self, project_path: Path, session_id: str) -> str | None:
+        return claude_session_title(claude_project_dir(project_path) / f"{session_id}.jsonl")
 
     def can_resume(self, project_path: Path, session_id: str) -> bool:
         return (claude_project_dir(project_path) / f"{session_id}.jsonl").is_file()
@@ -92,12 +113,22 @@ class Claude:
         return str(uuid.uuid4())
 
 
-def _claude_process_session(tmux_session: str) -> str | None:
+@dataclass(frozen=True)
+class _Record:
+    session_id: str
+    started: int
+    name: str | None
+    status: str | None
+    status_since: int | None
+
+
+def _claude_process_record(tmux_session: str) -> _Record | None:
     """
-    The conversation id Claude Code records for its process in *tmux_session*.
+    What Claude Code records about its process in *tmux_session*.
 
     Claude Code 2.1 writes ~/.claude/sessions/<pid>.json for every running
-    process, with the current `sessionId` and a `tmux` field of the form
+    process, with the current `sessionId`, the session's `name`, a `status`
+    of busy or idle with `statusUpdatedAt`, and a `tmux` field of the form
     "<session>:@<window>.%<pane>". The record follows /clear and /resume,
     where the tmux session name keeps the id the pane was opened with.
 
@@ -107,32 +138,53 @@ def _claude_process_session(tmux_session: str) -> str | None:
     session stopped and reopened under the same name is the only way that
     happens.
     """
-    best: tuple[int, str] | None = None
+    best: _Record | None = None
     try:
         files = list(CLAUDE_SESSIONS_DIR.glob("*.json"))
     except OSError:
         return None
     for path in files:
         try:
-            record = json.loads(path.read_text(encoding="utf-8"))
+            data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
-        if not isinstance(record, dict):
+        if not isinstance(data, dict):
             continue
-        tmux = record.get("tmux")
+        tmux = data.get("tmux")
         if not isinstance(tmux, str) or tmux.split(":", 1)[0] != tmux_session:
             continue
-        pid = record.get("pid")
-        session_id = record.get("sessionId")
+        pid = data.get("pid")
+        session_id = data.get("sessionId")
         if not isinstance(pid, int) or not isinstance(session_id, str) or not session_id:
             continue
         if not _alive(pid):
             continue
-        started = record.get("startedAt")
-        started = started if isinstance(started, int) else 0
-        if best is None or started > best[0]:
-            best = (started, session_id)
-    return best[1] if best else None
+        record = _Record(
+            session_id=session_id,
+            started=_int(data.get("startedAt")) or 0,
+            name=_text(data.get("name")),
+            status=_text(data.get("status")),
+            status_since=_seconds(data.get("statusUpdatedAt")) or _seconds(data.get("updatedAt")),
+        )
+        if best is None or record.started > best.started:
+            best = record
+    return best
+
+
+def _text(value: object) -> str | None:
+    if isinstance(value, str) and value.strip():
+        return " ".join(value.split())
+    return None
+
+
+def _int(value: object) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _seconds(millis: object) -> int | None:
+    """Claude Code's timestamps are unix milliseconds."""
+    value = _int(millis)
+    return value // 1000 if value else None
 
 
 def _alive(pid: int) -> bool:

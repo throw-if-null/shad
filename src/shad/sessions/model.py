@@ -1,9 +1,10 @@
 """
 The snapshot `shad sessions save` writes and `shad sessions restore` reads.
 
-One entry per shad tmux session: the project it belongs to, the harness its
-first pane runs, and that harness's conversation id when one was found. An
-entry without an id restores the project session with a new conversation.
+One entry per saved shad tmux session: the project it belongs to, the
+harness it runs, that harness's conversation id when one was found, and the
+conversation's name and first prompt as they were at save time, for display.
+An entry without an id restores the project session with a new conversation.
 
 The file is JSON: the stdlib has no TOML writer, and nothing edits it by
 hand. This module does no I/O.
@@ -26,6 +27,8 @@ class Entry:
     harness: str
     session_id: str | None
     attached: bool
+    name: str | None = None
+    title: str | None = None
 
     @property
     def display_name(self) -> str:
@@ -84,6 +87,12 @@ def parse(text: str) -> Snapshot:
             raise ShadError(f"saved session {index} has an invalid session_id")
         if not isinstance(attached, bool):
             raise ShadError(f"saved session {index} has an invalid attached flag")
+        name = raw.get("name")
+        title = raw.get("title")
+        if name is not None and not isinstance(name, str):
+            raise ShadError(f"saved session {index} has an invalid name")
+        if title is not None and not isinstance(title, str):
+            raise ShadError(f"saved session {index} has an invalid title")
         entries.append(
             Entry(
                 group=group,
@@ -91,6 +100,8 @@ def parse(text: str) -> Snapshot:
                 harness=harness,
                 session_id=session_id,
                 attached=attached,
+                name=name,
+                title=title,
             )
         )
     return Snapshot(saved_at=saved_at, entries=tuple(entries))
