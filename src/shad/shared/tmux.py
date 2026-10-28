@@ -2,7 +2,7 @@
 Low-level tmux primitives for shad.
 
 This module owns only stateless subprocess wrappers and session-name helpers.
-Higher-level orchestration (open, stop) lives in the respective project slices.
+Higher-level orchestration lives in the slices that call it.
 """
 
 from __future__ import annotations
@@ -12,6 +12,12 @@ import re
 import subprocess
 
 _SESSION_KEY_RE = re.compile(r"[^A-Za-z0-9_-]+")
+
+# The segment each harness puts in its scoped tmux session names,
+# "<base>--<prefix>-<session key>". The pickers in projects/open/sessions.py
+# set it per target, and shad.sessions maps a live name back to its harness
+# through this table.
+SESSION_PREFIXES = {"opencode": "oc", "claude": "cc"}
 
 
 def _run(args: list[str], *, check: bool = True) -> subprocess.CompletedProcess:
@@ -37,6 +43,21 @@ def project_session_name(base_session: str, target: object) -> str:
     return f"{base_session}--{prefix}-{sanitised}"
 
 
+def split_session_name(base_session: str, session: str) -> tuple[str, str] | None:
+    """
+    The (prefix, key) a scoped session name carries, or None for the bare
+    base session. The inverse of project_session_name() for the names that
+    list_project_sessions() returns; any other name raises ValueError.
+    """
+    if session == base_session:
+        return None
+    for prefix in SESSION_PREFIXES.values():
+        head = f"{base_session}--{prefix}-"
+        if session.startswith(head):
+            return prefix, session[len(head):]
+    raise ValueError(f"{session!r} is not a session of {base_session!r}")
+
+
 def tmux_server_running() -> bool:
     """Return True if a tmux server is currently running."""
     result = _run(["tmux", "list-sessions"], check=False)
@@ -55,15 +76,55 @@ def list_project_sessions(base_session: str) -> list[str]:
     if result.returncode != 0:
         return []
 
-    oc_prefix = f"{base_session}--oc-"
-    cc_prefix = f"{base_session}--cc-"
+    scoped = tuple(f"{base_session}--{prefix}-" for prefix in SESSION_PREFIXES.values())
     return [
         line.strip()
         for line in result.stdout.splitlines()
-        if line.strip() == base_session
-        or line.strip().startswith(oc_prefix)
-        or line.strip().startswith(cc_prefix)
+        if line.strip() == base_session or line.strip().startswith(scoped)
     ]
+
+
+def attached_sessions() -> set[str]:
+    """The tmux sessions that have at least one client attached."""
+    result = _run(["tmux", "list-sessions", "-F", "#S\t#{session_attached}"], check=False)
+    if result.returncode != 0:
+        return set()
+    attached: set[str] = set()
+    for line in result.stdout.splitlines():
+        name, _, count = line.strip().rpartition("\t")
+        if name and count.isdigit() and int(count) > 0:
+            attached.add(name)
+    return attached
+
+
+def pane_commands() -> dict[str, set[str]]:
+    """The foreground command of every pane, grouped by tmux session name."""
+    result = _run(
+        ["tmux", "list-panes", "-a", "-F", "#S\t#{pane_current_command}"], check=False
+    )
+    if result.returncode != 0:
+        return {}
+    commands: dict[str, set[str]] = {}
+    for line in result.stdout.splitlines():
+        name, _, command = line.strip().rpartition("\t")
+        if name:
+            commands.setdefault(name, set()).add(command)
+    return commands
+
+
+def current_session() -> str | None:
+    """The tmux session this process runs in, or None outside tmux."""
+    if os.environ.get("TMUX") is None:
+        return None
+    result = _run(["tmux", "display-message", "-p", "#S"], check=False)
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def kill_session(session: str) -> None:
+    """Kill exactly *session*; the `=` stops tmux from matching a prefix."""
+    _run(["tmux", "kill-session", "-t", f"={session}"])
 
 
 def _attach(session: str) -> int:

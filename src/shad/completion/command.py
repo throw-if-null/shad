@@ -114,8 +114,8 @@ _shad_is_top() {
     return 1
 }
 
-# True when $1 resolves to a top-level project, so `status` and `stop` are
-# valid next words. An exact match wins over a group that shares the prefix,
+# True when $1 resolves to a top-level project, so `status` is a valid next
+# word. An exact match wins over a group that shares the prefix,
 # which is why a token can be both a project and a group stem at once.
 _shad_resolves_to_project() {
     local token="$1" key
@@ -293,7 +293,7 @@ _shad_complete() {
         local top_flags="--version --help"
         ((${#_shad_cmd[@]} == 1)) && top_flags="--config $top_flags"
         _shad_offer "$cur" \
-            "projects git config completion init cheat todo" \
+            "projects git config completion init cheat todo sessions" \
             "$(_shad_unused "$top_flags" "${flags[@]}")"
         return
     fi
@@ -323,6 +323,16 @@ _shad_complete() {
         _shad_complete_todo
         return
         ;;
+    sessions)
+        if ((${#args[@]} == 0)); then
+            _shad_offer "$cur" "save restore stop show"
+        elif [[ "${args[0]}" == "save" ]]; then
+            _shad_offer "$cur" "$(_shad_unused "--all" "${flags[@]}")"
+        elif [[ "${args[0]}" == "restore" ]]; then
+            _shad_offer "$cur" "$(_shad_unused "--no-attach" "${flags[@]}")"
+        fi
+        return
+        ;;
     projects | git) ;;
     *)
         return
@@ -348,7 +358,7 @@ _shad_complete() {
         # An action ends a `projects` line; nothing may follow it.
         for word in "${args[@]}"; do
             case "$word" in
-            status | stop) return ;;
+            status) return ;;
             esac
         done
         # Two names is the longest valid `projects` line; past that the
@@ -369,13 +379,13 @@ _shad_complete() {
         local candidates
         candidates=$(_shad_subprojects "${args[0]}")
         if [[ "$command" == "projects" ]] && _shad_resolves_to_project "${args[0]}"; then
-            candidates="$candidates status stop"
+            candidates="$candidates status"
         fi
         _shad_offer "$cur" "$candidates" "$flag_words"
         ;;
     2)
         if [[ "$command" == "projects" ]]; then
-            _shad_offer "$cur" "status stop" "$flag_words"
+            _shad_offer "$cur" "status" "$flag_words"
         else
             _shad_offer "$cur" "$flag_words"
         fi

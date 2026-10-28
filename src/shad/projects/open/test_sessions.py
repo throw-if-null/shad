@@ -6,6 +6,7 @@ import os
 import sqlite3
 import tempfile
 import unittest
+import uuid
 import warnings
 from pathlib import Path
 from unittest.mock import patch
@@ -15,11 +16,11 @@ from rich.console import Console
 from shad.projects.open.sessions import (
     OcSession,
     OpencodeTarget,
-    _claude_project_dir,
     _query_claude_sessions,
     _query_sessions,
     _render_picker,
     _truncate,
+    claude_project_dir,
     pick_claude_target,
     pick_opencode_target,
 )
@@ -237,7 +238,7 @@ class QuerySessionsTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# _claude_project_dir / _query_claude_sessions
+# claude_project_dir / _query_claude_sessions
 # ---------------------------------------------------------------------------
 
 
@@ -262,14 +263,14 @@ class ClaudeProjectDirTests(unittest.TestCase):
         with patch(
             "shad.projects.open.sessions.CLAUDE_PROJECTS_DIR", Path("/projects")
         ):
-            result = _claude_project_dir(Path("/var/home/me/src/tin/shad"))
+            result = claude_project_dir(Path("/var/home/me/src/tin/shad"))
         self.assertEqual(result.name, "-var-home-me-src-tin-shad")
 
     def test_dots_become_hyphens(self) -> None:
         with patch(
             "shad.projects.open.sessions.CLAUDE_PROJECTS_DIR", Path("/projects")
         ):
-            result = _claude_project_dir(Path("/home/me/.local/share/chezmoi"))
+            result = claude_project_dir(Path("/home/me/.local/share/chezmoi"))
         self.assertEqual(result.name, "-home-me--local-share-chezmoi")
 
 
@@ -499,11 +500,11 @@ class PickClaudeTargetTests(unittest.TestCase):
             target = pick_claude_target(Path("/tmp/project"), "claude")
 
         assert target is not None
-        self.assertEqual(target.command, "claude")
         self.assertTrue(target.fresh)
         self.assertEqual(target.session_prefix, "cc")
         assert target.session_key is not None
-        self.assertTrue(target.session_key.startswith("fresh-"))
+        uuid.UUID(target.session_key)  # the key is the conversation id shad chose
+        self.assertEqual(target.command, f"claude --session-id {target.session_key}")
 
     def test_resumed_sessions_get_distinct_session_keys(self) -> None:
         sessions = [
@@ -553,9 +554,21 @@ class PickClaudeTargetTests(unittest.TestCase):
             target = pick_claude_target(Path("/tmp/project"), "claude")
 
         assert target is not None
-        self.assertEqual(target.command, "claude")
         self.assertTrue(target.fresh)
         self.assertEqual(target.session_prefix, "cc")
+        assert target.session_key is not None
+        uuid.UUID(target.session_key)
+        self.assertEqual(target.command, f"claude --session-id {target.session_key}")
+
+    def test_fresh_targets_get_distinct_session_keys(self) -> None:
+        with patch(
+            "shad.projects.open.sessions._query_claude_sessions", return_value=[]
+        ):
+            first = pick_claude_target(Path("/tmp/project"), "claude")
+            second = pick_claude_target(Path("/tmp/project"), "claude")
+
+        assert first is not None and second is not None
+        self.assertNotEqual(first.session_key, second.session_key)
 
     def test_returns_none_when_picker_cancelled(self) -> None:
         sessions = [OcSession(id="uuid-a", title="First", time_updated=0)]

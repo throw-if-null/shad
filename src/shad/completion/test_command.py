@@ -240,18 +240,18 @@ class CompletionScriptTests(unittest.TestCase):
 
     def test_projects_offers_actions_for_a_top_level_project(self) -> None:
         self.assertEqual(
-            sorted(self._run("shad projects kb ")), ["--harness", "status", "stop"]
+            sorted(self._run("shad projects kb ")), ["--harness", "status"]
         )
 
     def test_projects_offers_actions_for_a_prefix_of_a_project(self) -> None:
         self.assertEqual(
-            sorted(self._run("shad projects k ")), ["--harness", "status", "stop"]
+            sorted(self._run("shad projects k ")), ["--harness", "status"]
         )
 
     def test_projects_offers_actions_for_a_grouped_project(self) -> None:
         self.assertEqual(
             sorted(self._run("shad projects alvr db ")),
-            ["--harness", "status", "stop"],
+            ["--harness", "status"],
         )
 
     def test_project_that_is_also_a_group_prefix_offers_both_continuations(self) -> None:
@@ -259,12 +259,12 @@ class CompletionScriptTests(unittest.TestCase):
         # the grouped one. Both resolve, so both are completable.
         self.assertEqual(
             sorted(self._run("shad projects al ")),
-            ["--harness", "api", "db", "status", "stop"],
+            ["--harness", "api", "db", "status"],
         )
 
     def test_projects_stops_completing_after_an_action(self) -> None:
         self.assertEqual(self._run("shad projects kb status "), [])
-        self.assertEqual(self._run("shad projects alvr db stop "), [])
+        self.assertEqual(self._run("shad projects alvr db status "), [])
 
     def test_projects_offers_nothing_beyond_a_grouped_project(self) -> None:
         self.assertEqual(self._run("shad projects alvr db extra "), [])
@@ -315,7 +315,6 @@ class CompletionScriptTests(unittest.TestCase):
     def test_git_sync_offers_no_project_actions(self) -> None:
         offered = self._run("shad git sync kb ")
         self.assertNotIn("status", offered)
-        self.assertNotIn("stop", offered)
 
     # -- config -----------------------------------------------------------
 
@@ -445,6 +444,23 @@ class CompletionScriptTests(unittest.TestCase):
 
     def test_unknown_subcommand_offers_nothing(self) -> None:
         self.assertEqual(self._run("shad nonsense "), [])
+
+
+class CompletionScriptSessionsTests(CompletionScriptTests):
+    def test_sessions_offers_its_actions(self) -> None:
+        self.assertEqual(self._run("shad sessions "), ["save", "restore", "stop", "show"])
+
+    def test_sessions_save_offers_its_flag_once(self) -> None:
+        self.assertEqual(self._run("shad sessions save "), ["--all"])
+        self.assertEqual(self._run("shad sessions save --all "), [])
+
+    def test_sessions_stop_and_show_offer_nothing(self) -> None:
+        self.assertEqual(self._run("shad sessions stop "), [])
+        self.assertEqual(self._run("shad sessions show "), [])
+
+    def test_sessions_restore_offers_its_flag_once(self) -> None:
+        self.assertEqual(self._run("shad sessions restore "), ["--no-attach"])
+        self.assertEqual(self._run("shad sessions restore --no-attach "), [])
 
 
 class CompletionScriptLintTests(unittest.TestCase):
