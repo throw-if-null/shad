@@ -197,10 +197,12 @@ def _show() -> None:
 def _pick(
     rows: Sequence[Running], checked: Iterable[int], *, title: str, accept: str, hint: str
 ) -> frozenset[int] | None:
-    width = shutil.get_terminal_size().columns
+    width, height = shutil.get_terminal_size()
 
     def draw(cursor: int, chosen: frozenset[int]) -> bytes:
-        return render.picker(rows, cursor, chosen, title=title, accept=accept, width=width)
+        return render.picker(
+            rows, cursor, chosen, title=title, accept=accept, width=width, height=height
+        )
 
     try:
         return pick_many(draw, len(rows), checked)

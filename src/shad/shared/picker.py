@@ -1,16 +1,25 @@
 """
 The arrow-key pickers shad draws in the terminal: one row, or a set of rows.
 
-Both run on /dev/tty in raw mode and redraw a renderable at the cursor
-position they started from, so they work inside a tmux pane and leave
-nothing behind when they close. The key loops, `select_one` and
-`select_many`, take an iterator of keys and a draw callback, so tests drive
-them with a scripted key sequence and no terminal.
+Both run on /dev/tty in cbreak mode and redraw a renderable in place, so
+they work inside a tmux pane and leave nothing behind when they close. The
+key loops, `select_one` and `select_many`, take an iterator of keys and a
+draw callback, so tests drive them with a scripted key sequence and no
+terminal.
+
+cbreak, not raw: raw mode also turns off output processing, so a newline is
+a bare line feed with no carriage return, and a panel line that fills the
+pane then costs two rows. Each redraw moves the cursor up over the previous
+frame and clears from there, instead of saving and restoring the cursor
+position: a saved position is a screen row, and it points into the old
+frame once the frame has scrolled the screen. The frame must therefore be
+shorter than the terminal; `render` callers window their rows to make it so.
 """
 
 from __future__ import annotations
 
 import os
+import select
 import termios
 import tty
 import warnings
@@ -27,9 +36,8 @@ CANCEL = ("q", "Q", "\x1b")
 TOGGLE = (" ",)
 TOGGLE_ALL = ("a",)
 
-_SAVE = b"\033[s"
-_RESTORE = b"\033[u"
 _CLEAR = b"\033[J"
+_ESCAPE_SETTLE = 0.05  # seconds a lone Escape waits for the rest of a sequence
 
 
 class NoTerminal(Exception):
@@ -144,7 +152,7 @@ def pick_many(
 
 
 class _Terminal:
-    """/dev/tty in raw mode, with the picker drawn under a saved cursor position."""
+    """/dev/tty in cbreak mode, with the picker redrawn over its previous frame."""
 
     def __enter__(self) -> Self:
         try:
@@ -153,37 +161,46 @@ class _Terminal:
             raise NoTerminal(str(exc)) from None
         try:
             self.old = termios.tcgetattr(self.fd)
-            tty.setraw(self.fd)
+            tty.setcbreak(self.fd)
         except termios.error:
             os.close(self.fd)
             raise
-        self.drawn = False
+        self.lines = 0  # rows the current frame occupies
         return self
 
     def __exit__(self, *exc: object) -> None:
         try:
-            if self.drawn:
-                os.write(self.fd, _RESTORE + _CLEAR)
+            os.write(self.fd, erase(self.lines))
         finally:
             termios.tcsetattr(self.fd, termios.TCSADRAIN, self.old)
             os.close(self.fd)
 
     def draw(self, content: bytes) -> None:
-        if self.drawn:
-            os.write(self.fd, _RESTORE + _CLEAR + content)
-        else:
-            os.write(self.fd, _SAVE + content)
-            self.drawn = True
+        os.write(self.fd, erase(self.lines) + content)
+        self.lines = content.count(b"\n")
 
     def keys(self) -> Iterator[str]:
         while True:
             yield _read_key(self.fd)
 
 
+def erase(lines: int) -> bytes:
+    """The bytes that clear a frame of *lines* rows ending above the cursor."""
+    if lines <= 0:
+        return b""
+    return b"\r" + f"\033[{lines}A".encode() + _CLEAR
+
+
 def _read_key(fd: int) -> str:
-    """One keypress, with an escape sequence read as one key."""
+    """
+    One keypress, with an escape sequence read as one key. A lone Escape is
+    told apart from the start of a sequence by a short wait for more bytes.
+    """
     ch = os.read(fd, 1)
     if ch == b"\x1b":
+        ready, _, _ = select.select([fd], [], [], _ESCAPE_SETTLE)
+        if not ready:
+            return "\x1b"
         try:
             rest = os.read(fd, 2)
             return (ch + rest).decode("utf-8", errors="replace")

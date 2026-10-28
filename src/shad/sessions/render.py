@@ -29,6 +29,10 @@ ID_WIDTH = 8
 NAME_WIDTH = 24
 TITLE_WIDTH = 40
 _MIN_TEXT = 6  # a name or title column narrower than this is dropped
+# The picker panel's rows besides the session rows: two borders, the blank
+# line and the footer, and the terminal row the cursor rests on below it.
+_CHROME = 5
+_INDICATORS = 2  # the "more above" and "more below" lines of a windowed list
 
 
 @dataclass(frozen=True)
@@ -154,6 +158,20 @@ def table(title: str, rows: Sequence[tuple[Entry, Text]], width: int) -> Table:
     return result
 
 
+def window(total: int, cursor: int, height: int | None) -> tuple[int, int]:
+    """
+    The [start, stop) rows a picker of *total* rows shows in a terminal of
+    *height* lines, keeping *cursor* in view. Every row when they fit, or
+    with *height* unknown. The frame must stay shorter than the terminal,
+    because the picker redraws by moving the cursor up over it.
+    """
+    if height is None or total <= height - _CHROME:
+        return 0, total
+    visible = max(1, height - _CHROME - _INDICATORS)
+    start = min(max(0, cursor - visible // 2), total - visible)
+    return start, start + visible
+
+
 def picker(
     rows: Sequence[Running],
     cursor: int,
@@ -162,9 +180,11 @@ def picker(
     title: str,
     accept: str,
     width: int,
+    height: int | None = None,
 ) -> bytes:
     """The multi-select picker over *rows*, as terminal bytes."""
     duplicate = duplicates(rows)
+    start, stop = window(len(rows), cursor, height)
     entries = [live.entry for live in rows]
     states = [state(live, duplicate=live.session in duplicate) for live in rows]
     # The panel costs two borders and two padding cells; the grid has no
@@ -181,7 +201,8 @@ def picker(
     grid = Table(box=None, show_header=False, pad_edge=False, padding=(0, 1))
     for col_width in (1, 3, *cols.widths, state_width):
         grid.add_column(width=col_width, no_wrap=True, overflow="ellipsis")
-    for index, live in enumerate(rows):
+    for index in range(start, stop):
+        live = rows[index]
         selected = index == cursor
         pointer = Text("❯", style="bold bright_green") if selected else Text(" ")
         box = Text("[x]", style="bold green") if index in checked else Text("[ ]", style="dim")
@@ -189,6 +210,11 @@ def picker(
         if selected:
             row[0].stylize("bold")
         grid.add_row(pointer, box, *row, states[index])
+    parts: list[Text | Table] = [grid]
+    if (start, stop) != (0, len(rows)):
+        above = f"  ↑ {start} more" if start else ""
+        below = f"  ↓ {len(rows) - stop} more" if stop < len(rows) else ""
+        parts = [Text(above, style="dim"), grid, Text(below, style="dim")]
     footer = Text(
         f"\n↑↓ / j k  move   space  toggle   a  all   Enter  {accept}   q  cancel",
         style="dim",
@@ -196,7 +222,7 @@ def picker(
     footer.no_wrap = True
     footer.overflow = "ellipsis"
     panel = Panel(
-        Group(grid, footer),
+        Group(*parts, footer),
         title=f"[bold cyan]{title}[/bold cyan]",
         title_align="left",
         border_style="cyan",

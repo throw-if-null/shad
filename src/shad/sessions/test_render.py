@@ -14,6 +14,7 @@ from shad.sessions.render import (
     picker,
     state,
     table,
+    window,
 )
 from shad.sessions.testing import KB, SHAD, UUID_A, UUID_B, running
 
@@ -154,6 +155,41 @@ class PickerTests(unittest.TestCase):
         body = "\n".join(_lines(picker(_rows(), 0, frozenset(), title="t", accept="a", width=66)))
         self.assertNotIn("Alpha", body)
         self.assertIn(UUID_A[:8], body)
+
+
+class WindowTests(unittest.TestCase):
+    def test_everything_when_it_fits_or_the_height_is_unknown(self) -> None:
+        self.assertEqual(window(8, 3, None), (0, 8))
+        self.assertEqual(window(8, 3, 13), (0, 8))
+
+    def test_a_tall_list_is_cut_to_the_terminal_with_the_cursor_in_view(self) -> None:
+        # 15 lines: 5 for the panel chrome and the prompt, 2 for indicators, 8 rows.
+        self.assertEqual(window(20, 0, 15), (0, 8))
+        self.assertEqual(window(20, 10, 15), (6, 14))
+        self.assertEqual(window(20, 19, 15), (12, 20))
+
+    def test_a_tiny_terminal_still_shows_the_cursor_row(self) -> None:
+        self.assertEqual(window(20, 7, 6), (7, 8))
+
+
+class WindowedPickerTests(unittest.TestCase):
+    def test_shows_the_window_and_how_many_rows_are_hidden(self) -> None:
+        rows = [running(f"kb--cc-{i}", KB, session_id=f"{i:08d}-0000-4000-8000-000000000000", name=f"Row {i}") for i in range(20)]
+        lines = _lines(picker(rows, 10, frozenset(), title="t", accept="a", width=100, height=15))
+        body = "\n".join(lines)
+        self.assertIn("↑ 6 more", body)
+        self.assertIn("↓ 6 more", body)
+        self.assertIn("Row 10", body)
+        self.assertNotIn("Row 5 ", body)
+        self.assertNotIn("Row 14", body)
+        self.assertLessEqual(len(lines), 14)
+
+    def test_the_frame_stays_shorter_than_the_terminal(self) -> None:
+        rows = [running(f"kb--cc-{i}", KB, session_id=f"{i:08d}-0000-4000-8000-000000000000") for i in range(40)]
+        for height in (8, 12, 20):
+            with self.subTest(height=height):
+                raw = picker(rows, 20, frozenset(), title="t", accept="a", width=100, height=height)
+                self.assertLess(raw.count(b"\n"), height)
 
 
 class TableTests(unittest.TestCase):

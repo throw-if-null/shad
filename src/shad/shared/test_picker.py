@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from collections.abc import Iterator
 
-from shad.shared.picker import select_many, select_one
+from shad.shared.picker import erase, select_many, select_one
 
 ESC_UP, ESC_DOWN, ENTER, ESC = "\x1b[A", "\x1b[B", "\r", "\x1b"
 
@@ -74,3 +74,13 @@ class SelectManyTests(unittest.TestCase):
     def test_rejects_an_empty_list(self) -> None:
         with self.assertRaises(ValueError):
             select_many(_keys(ENTER), 0, [], lambda c, s: None)
+
+
+class EraseTests(unittest.TestCase):
+    def test_moves_up_over_the_frame_and_clears_from_there(self) -> None:
+        self.assertEqual(erase(12), b"\r\x1b[12A\x1b[J")
+
+    def test_nothing_to_erase_writes_nothing(self) -> None:
+        """CSI 0 A would move up one row on most terminals."""
+        self.assertEqual(erase(0), b"")
+        self.assertEqual(erase(-1), b"")
