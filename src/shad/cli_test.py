@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from shad.cli import _run_action, build_parser, cmd_projects, main
+from shad.cli import _run_action, build_parser, cmd_projects, cmd_sessions, main
 from shad.shared.config import Config, Defaults, Project
 from shad.shared.errors import ShadError
 
@@ -275,6 +275,32 @@ class ProjectsHarnessOverrideTests(unittest.TestCase):
 
         with self.assertRaises(SystemExit), patch("sys.stderr"):
             parser.parse_args(["projects", "shad", "--harness", "nope"])
+
+
+class SessionsCommandTests(unittest.TestCase):
+    def _cfg(self) -> Config:
+        return Config(defaults=Defaults(), projects={"kb": _make_project("kb")})
+
+    def test_each_action_dispatches_to_its_slice(self) -> None:
+        for action, target in (
+            ("save", "save_sessions"),
+            ("restore", "restore_sessions"),
+            ("stop", "stop_sessions"),
+            ("show", "show_sessions"),
+        ):
+            with self.subTest(action=action), patch(f"shad.cli.{target}") as mock:
+                args = argparse.Namespace(sessions_action=action)
+                cmd_sessions(self._cfg(), args)
+                mock.assert_called_once_with(self._cfg(), args)
+
+    def test_restore_exit_code_is_returned(self) -> None:
+        with patch("shad.cli.restore_sessions", return_value=3):
+            code = cmd_sessions(self._cfg(), argparse.Namespace(sessions_action="restore"))
+        self.assertEqual(code, 3)
+
+    def test_missing_action_raises_shad_error(self) -> None:
+        with self.assertRaises(ShadError):
+            cmd_sessions(self._cfg(), argparse.Namespace(sessions_action=None))
 
 
 class MainErrorHandlingTests(unittest.TestCase):

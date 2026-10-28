@@ -172,6 +172,20 @@ def window(total: int, cursor: int, height: int | None) -> tuple[int, int]:
     return start, start + visible
 
 
+def running_table(
+    title: str, rows: Sequence[Running], width: int, *, note_missing_id: bool = False
+) -> Table:
+    """The result table for live rows: the cells and each row's state."""
+    duplicate = duplicates(rows)
+    cells_and_state = []
+    for live in rows:
+        text = state(live, duplicate=live.session in duplicate)
+        if note_missing_id and live.conversation is None:
+            text.append("  no conversation id; restores as a new conversation", style="yellow")
+        cells_and_state.append((live.entry, text))
+    return table(title, cells_and_state, width)
+
+
 def picker(
     rows: Sequence[Running],
     cursor: int,

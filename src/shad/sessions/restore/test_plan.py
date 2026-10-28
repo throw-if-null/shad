@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from shad.sessions.live import Running
 from shad.sessions.model import Entry, Snapshot
-from shad.sessions.restore import Step, attach_target, plan
+from shad.sessions.restore.plan import Step, attach_target, plan
 from shad.sessions.testing import CFG, KB, SHAD, UUID_A, UUID_B, running
 
 
@@ -32,7 +32,7 @@ class PlanTests(unittest.TestCase):
         self.existing: set[str] = set()
         for patcher in (
             patch("shad.projects.open.sessions.CLAUDE_PROJECTS_DIR", self.projects),
-            patch("shad.sessions.restore.session_exists", side_effect=self.existing.__contains__),
+            patch("shad.sessions.restore.plan.session_exists", side_effect=self.existing.__contains__),
         ):
             patcher.start()
             self.addCleanup(patcher.stop)

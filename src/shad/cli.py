@@ -42,7 +42,10 @@ from shad.init.command import cmd_init
 from shad.projects.open.banner import print_banner
 from shad.projects.open.command import open_project
 from shad.projects.status.command import print_status
-from shad.sessions.command import cmd_sessions
+from shad.sessions.restore.command import restore_sessions
+from shad.sessions.save.command import save_sessions
+from shad.sessions.show.command import show_sessions
+from shad.sessions.stop.command import stop_sessions
 from shad.shared.config import HARNESSES, Config, Project, load, resolve_prefix
 from shad.shared.errors import ShadError
 from shad.todo.command import cmd_todo
@@ -52,6 +55,7 @@ console = Console()
 err_console = Console(stderr=True)
 
 ACTIONS = ("status",)
+SESSIONS_ACTIONS = ("save", "restore", "stop", "show")
 
 
 # ---------------------------------------------------------------------------
@@ -176,6 +180,31 @@ def cmd_projects(cfg: Config, args: argparse.Namespace) -> None:
         f"too many arguments ({len(parts)}); "
         "usage: shad projects [<group>] [<name>] [status]"
     )
+
+
+# ---------------------------------------------------------------------------
+# sessions command
+# ---------------------------------------------------------------------------
+
+
+def cmd_sessions(cfg: Config, args: argparse.Namespace) -> int | None:
+    """Dispatch save / restore / stop / show. Returns restore's attach exit code."""
+    action = getattr(args, "sessions_action", None)
+    if action is None:
+        raise ShadError(f"no sessions action given; available: {', '.join(SESSIONS_ACTIONS)}")
+    if action == "save":
+        save_sessions(cfg, args)
+    elif action == "restore":
+        return restore_sessions(cfg, args)
+    elif action == "stop":
+        stop_sessions(cfg, args)
+    elif action == "show":
+        show_sessions(cfg, args)
+    else:
+        raise ShadError(
+            f"unknown sessions action '{action}'; available: {', '.join(SESSIONS_ACTIONS)}"
+        )
+    return None
 
 
 # ---------------------------------------------------------------------------

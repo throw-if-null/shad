@@ -2,7 +2,7 @@
 What `shad sessions restore` would do for each saved entry.
 
 This module decides and never creates: the one tmux write, the layout for
-each step marked "resume" or "new", is applied by command.py.
+each step marked "resume" or "new", is applied by restore/command.py.
 """
 
 from __future__ import annotations

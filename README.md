@@ -868,13 +868,21 @@ shad/
         │   └── status/
         │       └── command.py
         ├── sessions/
-        │   ├── command.py
         │   ├── harness.py
         │   ├── live.py
         │   ├── model.py
+        │   ├── pick.py
         │   ├── render.py
-        │   ├── restore.py
-        │   └── store.py
+        │   ├── store.py
+        │   ├── restore/
+        │   │   ├── command.py
+        │   │   └── plan.py
+        │   ├── save/
+        │   │   └── command.py
+        │   ├── show/
+        │   │   └── command.py
+        │   └── stop/
+        │       └── command.py
         ├── shared/
         │   ├── config.py
         │   ├── errors.py
