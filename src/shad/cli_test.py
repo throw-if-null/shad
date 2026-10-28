@@ -5,7 +5,14 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from shad.cli import _run_action, build_parser, cmd_projects, cmd_sessions, main
+from shad.cli import (
+    _run_action,
+    build_parser,
+    cmd_projects,
+    cmd_sessions,
+    cmd_todo,
+    main,
+)
 from shad.shared.config import Config, Defaults, Project
 from shad.shared.errors import ShadError
 
@@ -301,6 +308,34 @@ class SessionsCommandTests(unittest.TestCase):
     def test_missing_action_raises_shad_error(self) -> None:
         with self.assertRaises(ShadError):
             cmd_sessions(self._cfg(), argparse.Namespace(sessions_action=None))
+
+
+class TodoCommandTests(unittest.TestCase):
+    def test_each_action_dispatches_to_its_slice(self) -> None:
+        cfg = Config(defaults=Defaults())
+        for action, target in (
+            ("panel", "open_todo_panel"),
+            ("add", "add_todo"),
+            ("list", "list_todos"),
+            ("status", "set_todo_status"),
+            ("edit", "edit_todo"),
+            ("rm", "remove_todo"),
+        ):
+            with self.subTest(action=action), patch(f"shad.cli.{target}") as mock:
+                args = argparse.Namespace(todo_action=action)
+                cmd_todo(cfg, args)
+                mock.assert_called_once_with(cfg, args)
+
+    def test_label_gets_the_config_path(self) -> None:
+        cfg = Config(defaults=Defaults())
+        args = argparse.Namespace(todo_action="label")
+        with patch("shad.cli.manage_labels") as mock:
+            cmd_todo(cfg, args, path=Path("/x/shad.toml"))
+        mock.assert_called_once_with(cfg, args, Path("/x/shad.toml"))
+
+    def test_missing_action_raises_shad_error(self) -> None:
+        with self.assertRaises(ShadError):
+            cmd_todo(Config(defaults=Defaults()), argparse.Namespace(todo_action=None))
 
 
 class MainErrorHandlingTests(unittest.TestCase):

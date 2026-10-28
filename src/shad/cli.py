@@ -46,16 +46,30 @@ from shad.sessions.restore.command import restore_sessions
 from shad.sessions.save.command import save_sessions
 from shad.sessions.show.command import show_sessions
 from shad.sessions.stop.command import stop_sessions
-from shad.shared.config import HARNESSES, Config, Project, load, resolve_prefix
+from shad.shared.config import (
+    HARNESSES,
+    Config,
+    Project,
+    config_path,
+    load,
+    resolve_prefix,
+)
 from shad.shared.errors import ShadError
-from shad.todo.command import cmd_todo
+from shad.todo.add.command import add_todo
+from shad.todo.edit.command import edit_todo
+from shad.todo.label.command import manage_labels
+from shad.todo.list.command import list_todos
 from shad.todo.model import STATUSES
+from shad.todo.panel.command import open_todo_panel
+from shad.todo.rm.command import remove_todo
+from shad.todo.status.command import set_todo_status
 
 console = Console()
 err_console = Console(stderr=True)
 
 ACTIONS = ("status",)
 SESSIONS_ACTIONS = ("save", "restore", "stop", "show")
+TODO_ACTIONS = ("panel", "add", "list", "status", "edit", "rm", "label")
 
 
 # ---------------------------------------------------------------------------
@@ -205,6 +219,34 @@ def cmd_sessions(cfg: Config, args: argparse.Namespace) -> int | None:
             f"unknown sessions action '{action}'; available: {', '.join(SESSIONS_ACTIONS)}"
         )
     return None
+
+
+# ---------------------------------------------------------------------------
+# todo command
+# ---------------------------------------------------------------------------
+
+
+def cmd_todo(cfg: Config, args: argparse.Namespace, path: Path | None = None) -> None:
+    """Dispatch the todo actions. *path* is the config file `label` writes to."""
+    action = getattr(args, "todo_action", None)
+    if action is None:
+        raise ShadError(f"no todo action given; available: {', '.join(TODO_ACTIONS)}")
+    if action == "panel":
+        open_todo_panel(cfg, args)
+    elif action == "add":
+        add_todo(cfg, args)
+    elif action == "list":
+        list_todos(cfg, args)
+    elif action == "status":
+        set_todo_status(cfg, args)
+    elif action == "edit":
+        edit_todo(cfg, args)
+    elif action == "rm":
+        remove_todo(cfg, args)
+    elif action == "label":
+        manage_labels(cfg, args, path or config_path())
+    else:
+        raise ShadError(f"unknown todo action '{action}'; available: {', '.join(TODO_ACTIONS)}")
 
 
 # ---------------------------------------------------------------------------
