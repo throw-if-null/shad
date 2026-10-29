@@ -525,8 +525,10 @@ def build_parser() -> argparse.ArgumentParser:
             "Supported harness: claude. A session running opencode can be\n"
             "stopped but not saved; save lists it with the reason.\n\n"
             "restore attaches to the session that was attached when the\n"
-            "snapshot was saved, else the first one. --no-attach creates the\n"
-            "sessions and returns, for use from a script.\n\n"
+            "snapshot was saved, else the first one. In kitty, each other\n"
+            "session that was attached at save gets a tab of its own; this\n"
+            "needs allow_remote_control yes in kitty.conf. --no-attach\n"
+            "creates the sessions and returns, for use from a script.\n\n"
             "Examples:\n"
             "  shad sessions save\n"
             "  shad sessions save --all          every running session, no picker\n"
@@ -552,7 +554,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_sessions_restore.add_argument(
         "--no-attach",
         action="store_true",
-        help="Create the sessions without attaching to one",
+        help="Create the sessions without attaching to one or opening tabs",
     )
     sessions_sub.add_parser("stop", help="Pick running shad sessions and kill them")
     sessions_sub.add_parser("show", help="Print the saved sessions")

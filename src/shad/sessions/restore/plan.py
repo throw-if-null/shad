@@ -130,3 +130,21 @@ def attach_target(steps: list[Step]) -> str | None:
         if step.entry.attached:
             return step.session
     return present[0].session if present else None
+
+
+def tab_targets(steps: list[Step], attach: str, attached_now: set[str]) -> list[Step]:
+    """
+    The steps whose session gets a terminal tab of its own, in saved order:
+    attached when the snapshot was saved, other than *attach*, which the
+    current terminal takes. A session in *attached_now* already has a
+    client, and a second one would mirror it, so it gets no tab.
+    """
+    return [
+        step
+        for step in steps
+        if step.session
+        and step.outcome != "skipped"
+        and step.entry.attached
+        and step.session != attach
+        and step.session not in attached_now
+    ]

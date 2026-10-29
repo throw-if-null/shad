@@ -127,6 +127,11 @@ def kill_session(session: str) -> None:
     _run(["tmux", "kill-session", "-t", f"={session}"])
 
 
+def attach_command(session: str) -> list[str]:
+    """The command a new terminal runs to attach exactly *session*."""
+    return ["tmux", "attach-session", "-t", f"={session}"]
+
+
 def _attach(session: str) -> int:
     """Attach or switch to the named tmux session. Returns the exit code."""
     inside_tmux = os.environ.get("TMUX") is not None

@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from shad.sessions.live import Running
 from shad.sessions.model import Entry, Snapshot
-from shad.sessions.restore.plan import Step, attach_target, plan
+from shad.sessions.restore.plan import Step, attach_target, plan, tab_targets
 from shad.sessions.testing import CFG, KB, SHAD, UUID_A, UUID_B, running
 
 
@@ -133,3 +133,28 @@ class AttachTargetTests(unittest.TestCase):
     def test_none_when_nothing_exists(self) -> None:
         self.assertIsNone(attach_target([self._step(None, "skipped")]))
         self.assertIsNone(attach_target([]))
+
+
+class TabTargetsTests(unittest.TestCase):
+    def _step(self, session: str | None, outcome: str, attached: bool = False) -> Step:
+        return Step(_entry("kb", None, attached=attached), outcome, session=session)  # type: ignore[arg-type]
+
+    def test_the_other_sessions_attached_at_save_in_saved_order(self) -> None:
+        steps = [
+            self._step("kb--cc-a", "resume", attached=True),
+            self._step("kb--cc-b", "new", attached=True),
+            self._step("kb--cc-c", "running", attached=True),
+        ]
+        self.assertEqual(
+            [step.session for step in tab_targets(steps, "kb--cc-a", set())],
+            ["kb--cc-b", "kb--cc-c"],
+        )
+
+    def test_leaves_out_what_was_detached_skipped_or_is_attached_now(self) -> None:
+        steps = [
+            self._step("kb--cc-a", "resume", attached=True),
+            self._step("kb--cc-b", "resume"),
+            self._step(None, "skipped", attached=True),
+            self._step("kb--cc-d", "running", attached=True),
+        ]
+        self.assertEqual(tab_targets(steps, "kb--cc-a", {"kb--cc-d"}), [])

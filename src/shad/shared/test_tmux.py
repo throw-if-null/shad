@@ -7,6 +7,7 @@ from unittest.mock import patch
 from shad.projects.open.sessions import OpencodeTarget
 from shad.shared.tmux import (
     _attach,
+    attach_command,
     attached_sessions,
     list_project_sessions,
     project_session_name,
@@ -175,3 +176,10 @@ class AttachTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AttachCommandTests(unittest.TestCase):
+    def test_names_the_session_exactly(self) -> None:
+        self.assertEqual(
+            attach_command("tin-shad"), ["tmux", "attach-session", "-t", "=tin-shad"]
+        )

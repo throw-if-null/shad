@@ -674,9 +674,29 @@ A conversation that is already running, under any tmux session name, is left
 alone, so a second harness process is never started on it. A saved
 conversation with no transcript, and a saved session without an id, start a
 new conversation; the table says why. A project that is no longer in the
-config is skipped. Afterwards `restore` attaches to the session that was
-attached when the snapshot was saved, else the first one; reach the others
-with the tmux session switcher.
+config is skipped. Afterwards `restore` attaches the terminal it runs in to
+the session that was attached when the snapshot was saved, else the first
+one.
+
+In kitty, every other session that was attached at save gets a tab of its
+own, opened behind the current tab and attached to that session, with the
+project directory as the tab's working directory. A session that was detached
+at save stays detached. A session that already has a client gets no tab,
+because a second client would mirror the first. When a tab cannot be opened,
+`restore` prints the `tmux attach-session` command for each session without
+one. `--no-attach` opens no tabs.
+
+The tabs need this line in `kitty.conf`:
+
+```
+allow_remote_control yes
+```
+
+If `restore` reports that kitty did not answer, restart kitty so that it reads
+the line. Through the tty, kitty's remote control does not reach past tmux, so
+run `restore` from a shell outside tmux. To run it from a tmux pane too, add
+`listen_on unix:@kitty` to `kitty.conf`: `kitten` then reads the socket from
+`KITTY_LISTEN_ON`, which kitty sets in the shells it starts.
 
 ### stop
 
