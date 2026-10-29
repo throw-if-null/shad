@@ -22,7 +22,7 @@ from textual.widgets import DataTable, Static
 from shad.shared.errors import ShadError
 from shad.todo import store
 from shad.todo.model import Item
-from shad.todo.panel import TodoPanel
+from shad.todo.panel.app import TodoPanel
 
 VOCAB = ["chore", "poc"]
 
@@ -139,8 +139,8 @@ class PanelTests(unittest.IsolatedAsyncioTestCase):
             path.write_text(path.read_text().replace("status: in-progress", "status: done"))
 
         with (
-            patch("shad.todo.panel.resolve_editor", return_value="fake-editor --wait"),
-            patch("shad.todo.panel.subprocess.run", side_effect=fake_editor) as run,
+            patch("shad.todo.panel.app.resolve_editor", return_value="fake-editor --wait"),
+            patch("shad.todo.panel.app.subprocess.run", side_effect=fake_editor) as run,
             patch.object(TodoPanel, "suspend", return_value=contextlib.nullcontext()) as suspend,
         ):
             async with app.run_test(size=(60, 25)) as pilot:
@@ -170,7 +170,7 @@ class PanelTests(unittest.IsolatedAsyncioTestCase):
             return store.add(directory, "Zulu new", [], vocabulary)
 
         with (
-            patch("shad.todo.panel.add_in_editor", side_effect=fake_add),
+            patch("shad.todo.panel.app.add_in_editor", side_effect=fake_add),
             patch.object(TodoPanel, "suspend", side_effect=functools.partial(self._suspend_recorder, exits)),
         ):
             async with app.run_test(size=(60, 25)) as pilot:
@@ -189,7 +189,7 @@ class PanelTests(unittest.IsolatedAsyncioTestCase):
                 app = self._app()
                 exits: list[str] = []
                 with (
-                    patch("shad.todo.panel.add_in_editor", side_effect=failure),
+                    patch("shad.todo.panel.app.add_in_editor", side_effect=failure),
                     patch.object(
                         TodoPanel,
                         "suspend",

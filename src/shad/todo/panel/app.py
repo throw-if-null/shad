@@ -10,8 +10,8 @@ The pane is about 25 rows by 40 to 50 columns at the default todo_percent, so
 the list and the detail are stacked rather than side by side, and the header
 is one line.
 
-textual is imported by this module only, and shad.todo.command imports this
-module lazily, so `shad todo add` never pays for it.
+textual is imported by this module only, and shad.todo.panel.command imports
+this module lazily, so `shad todo add` never pays for it.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ from shad.config.command import resolve_editor
 from shad.shared.errors import ShadError
 from shad.shared.render import relative_age
 from shad.todo import store
-from shad.todo.command import add_in_editor
+from shad.todo.add.command import add_in_editor
 from shad.todo.model import Item, Status, problems
 from shad.todo.render import labels_text, status_glyph, status_word, title_text
 

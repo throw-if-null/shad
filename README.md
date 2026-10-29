@@ -890,9 +890,22 @@ shad/
         │   ├── render.py
         │   └── tmux.py
         └── todo/
-            ├── command.py
             ├── model.py
-            ├── panel.py
             ├── render.py
-            └── store.py
+            ├── store.py
+            ├── add/
+            │   └── command.py
+            ├── edit/
+            │   └── command.py
+            ├── label/
+            │   └── command.py
+            ├── list/
+            │   └── command.py
+            ├── panel/
+            │   ├── app.py
+            │   └── command.py
+            ├── rm/
+            │   └── command.py
+            └── status/
+                └── command.py
 ```
