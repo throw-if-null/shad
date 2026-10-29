@@ -18,6 +18,7 @@ src/shad/
 │   ├── errors.py               # ShadError exception
 │   ├── render.py               # make_table() and relative_age() — shared presentation
 │   ├── picker.py               # the arrow-key pickers: pure key loops, and the /dev/tty wrapper
+│   ├── terminal.py             # the terminal shad runs in; opens kitty tabs through kitten @
 │   └── tmux.py                 # low-level tmux subprocess wrappers
 ├── projects/
 │   ├── open/                   # "shad projects <name>" — session picker + layout
@@ -64,7 +65,7 @@ src/shad/
 │   ├── save/command.py         # "shad sessions save": the picker, then the snapshot write
 │   ├── restore/
 │   │   ├── plan.py             # entries -> steps; decides, never creates
-│   │   └── command.py          # applies the steps, prints, attaches
+│   │   └── command.py          # applies the steps, prints, opens the tabs, attaches
 │   ├── stop/command.py         # "shad sessions stop": the picker, then kill-session
 │   └── show/command.py         # "shad sessions show"
 ├── init/command.py             # "shad init" interactive wizard
@@ -115,6 +116,7 @@ Tests use `unittest.TestCase` with `unittest.mock.patch` for isolating subproces
 - **`sessions stop` and the live state**: the session the command runs in is left out of the list, through `shared.tmux.current_session()` (`$TMUX`, then `display-message -p '#S'`), because killing it detaches the client mid-command. Whether a harness is still running is read from `pane_current_command` across every pane of the session, matched against the harness name, because the index of the harness pane depends on `oc_position`. `kill_session` passes `=<name>` so tmux never matches a prefix: `tin-shad` is a prefix of `tin-shad--cc-<uuid>`.
 - **`sessions/restore/plan.py` decides, `restore/command.py` creates**: `plan()` classifies every entry as resume, new, running or skipped and runs no tmux write; the one write is `_create_session` in `restore/command.py`, for the steps that create. Keep it that way for the same reason `git/plan.py` is kept pure. A saved id with no transcript is kept: the harness starts the new conversation under it, so the tmux name is stable across restores.
 - **"Running" is decided by conversation id, not by tmux name**: `plan()` takes what `live.collect` found and treats an entry as running when any live session holds its id. The name restore would create often does not exist while the conversation is live: the live session was opened as `fresh-<epoch>`, or its id was superseded by `/clear` or `/resume`. A `session_exists` check on the computed name alone would start a second `claude --resume` process on a live conversation. `session_exists` is the second check, for a name that exists without a readable record.
+- **`restore` opens kitty tabs through `shared/terminal.py`**: `plan.tab_targets` picks every session that was attached at save except the one the current terminal takes, and leaves out any that has a client now, because tmux mirrors one session across its clients. `terminal.current()` is `KITTY_WINDOW_ID` plus `kitten` on PATH; `open_tab` runs `kitten @ launch --type=tab --keep-focus`. Without a socket (`listen_on` in kitty.conf), `kitten @` writes a DCS sequence to the tty and waits for the reply; inside tmux the reply never comes, and kitten ignores SIGTERM, so `open_tab` passes a timeout and lets `subprocess.run` kill it. `_open_tabs` stops at the first failure, or every tab would wait out the timeout, and prints the `tmux attach-session` command for each session without a tab.
 - **`shad git sync` layering**: the slice is a DAG — `run` and `model` are leaves, `refs` reads, `discover` resolves, `plan` decides, `apply` mutates, `command` orchestrates. `plan.py` is the safety boundary: it runs no git mutations, it only classifies. Keep it that way — a deletion rule that can also delete is much harder to test.
 - **`shad git sync` ordering**: two orderings in `git/command.py` are load-bearing. Fast-forward must run *before* branches are classified, or branches merged upstream are silently under-reported — and no test that fakes git output can catch it. Worktrees must be removed *before* branches are deleted, because `git branch -d` refuses a branch a worktree has checked out.
 - **`shad git sync --switch`**: the only step in the command that writes to a working tree, which is why it is opt-in. It runs *after* the fast-forward (so the checkout lands on the new tip in one update) and *before* branches are classified (so the branch it leaves behind is no longer pinned and can be deleted in the same run). `fetch_and_plan` re-reads `worktree list` when a switch happens — HEAD moved, so the earlier read is stale. Every blocking condition skips with a reason; nothing stashes, discards, or detaches.
