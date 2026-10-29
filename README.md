@@ -865,9 +865,26 @@ shad/
         ├── completion/
         │   └── command.py
         ├── config/
-        │   ├── command.py
+        │   ├── render.py
         │   ├── schema.py
-        │   └── toml_edit.py
+        │   ├── store.py
+        │   ├── toml_edit.py
+        │   ├── edit/
+        │   │   └── command.py
+        │   ├── get/
+        │   │   └── command.py
+        │   ├── keys/
+        │   │   └── command.py
+        │   ├── path/
+        │   │   └── command.py
+        │   ├── set/
+        │   │   └── command.py
+        │   ├── show/
+        │   │   └── command.py
+        │   ├── unset/
+        │   │   └── command.py
+        │   └── validate/
+        │       └── command.py
         ├── git/
         │   ├── apply.py
         │   ├── command.py
@@ -905,9 +922,11 @@ shad/
         │       └── command.py
         ├── shared/
         │   ├── config.py
+        │   ├── editor.py
         │   ├── errors.py
         │   ├── picker.py
         │   ├── render.py
+        │   ├── terminal.py
         │   └── tmux.py
         └── todo/
             ├── model.py

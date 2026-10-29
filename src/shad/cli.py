@@ -36,7 +36,14 @@ from rich.text import Text
 from shad import __version__
 from shad.cheat.command import cmd_cheat
 from shad.completion.command import print_completion
-from shad.config.command import cmd_config
+from shad.config.edit.command import edit_config
+from shad.config.get.command import get_config_value
+from shad.config.keys.command import print_config_keys
+from shad.config.path.command import print_config_path
+from shad.config.set.command import set_config_value
+from shad.config.show.command import show_config
+from shad.config.unset.command import unset_config_value
+from shad.config.validate.command import validate_config
 from shad.git.command import cmd_git
 from shad.init.command import cmd_init
 from shad.projects.open.banner import print_banner
@@ -68,6 +75,7 @@ console = Console()
 err_console = Console(stderr=True)
 
 ACTIONS = ("status",)
+CONFIG_ACTIONS = ("show", "path", "keys", "get", "set", "unset", "edit", "validate")
 SESSIONS_ACTIONS = ("save", "restore", "stop", "show")
 TODO_ACTIONS = ("panel", "add", "list", "status", "edit", "rm", "label")
 
@@ -247,6 +255,32 @@ def cmd_todo(cfg: Config, args: argparse.Namespace, path: Path | None = None) ->
         manage_labels(cfg, args, path or config_path())
     else:
         raise ShadError(f"unknown todo action '{action}'; available: {', '.join(TODO_ACTIONS)}")
+
+
+def cmd_config(args: argparse.Namespace, path: Path | None = None) -> None:
+    """Dispatch the config actions; a bare `shad config` is `show`. *path* overrides config_path()."""
+    target = path or config_path()
+    action = getattr(args, "config_action", None) or "show"
+    if action == "show":
+        show_config(target, raw_output=getattr(args, "raw", False))
+    elif action == "path":
+        print_config_path(target)
+    elif action == "keys":
+        print_config_keys(target)
+    elif action == "get":
+        get_config_value(target, args.key)
+    elif action == "set":
+        set_config_value(target, args.key, args.value, force=getattr(args, "force", False))
+    elif action == "unset":
+        unset_config_value(target, args.key, force=getattr(args, "force", False))
+    elif action == "edit":
+        edit_config(target)
+    elif action == "validate":
+        validate_config(target)
+    else:
+        raise ShadError(
+            f"unknown config action '{action}'; available: {', '.join(CONFIG_ACTIONS)}"
+        )
 
 
 # ---------------------------------------------------------------------------

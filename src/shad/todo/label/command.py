@@ -13,7 +13,7 @@ from pathlib import Path
 from rich.console import Console
 from rich.text import Text
 
-from shad.config.command import write_value
+from shad.config.store import write_value
 from shad.shared.config import LABEL_RE, Config
 from shad.shared.errors import ShadError
 from shad.todo import store
