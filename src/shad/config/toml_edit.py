@@ -11,7 +11,7 @@ Scope and limits
   strings) are detected and rejected instead of being rewritten.
 - Inline tables are not edited in place.
 - Callers MUST verify the result with `tomllib` before replacing the real file;
-  see `shad.config.command._commit`.
+  see `shad.config.store.commit`.
 """
 
 from __future__ import annotations

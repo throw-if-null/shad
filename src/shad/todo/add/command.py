@@ -17,8 +17,8 @@ from rich.console import Console
 from rich.prompt import Confirm
 from rich.text import Text
 
-from shad.config.command import resolve_editor
 from shad.shared.config import Config
+from shad.shared.editor import resolve_editor
 from shad.shared.errors import ShadError
 from shad.todo import store
 from shad.todo.model import Item, check_labels, parse, template

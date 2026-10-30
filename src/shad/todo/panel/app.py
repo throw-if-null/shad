@@ -26,7 +26,7 @@ from textual.binding import Binding
 from textual.containers import VerticalScroll
 from textual.widgets import DataTable, Footer, Static
 
-from shad.config.command import resolve_editor
+from shad.shared.editor import resolve_editor
 from shad.shared.errors import ShadError
 from shad.shared.render import relative_age
 from shad.todo import store
