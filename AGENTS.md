@@ -10,7 +10,8 @@ Entry point: `shad.cli:main` (registered as the `shad` console script).
 
 Load `CORAL-CONTRACT.md` before you change code. It holds every `[auto]` and `[review]` Coral
 rule that applies to this project, plus the project's accepted exceptions and extensions. It is
-generated. Do not edit it.
+generated. Do not edit it. When you change code, follow the contract where it differs from this
+file or from the patterns in the existing code.
 
 Load https://coral.appsandtools.work/guides/deciding-and-escalating before you change code. It is
 the protocol for which decisions are yours, which you verify first, and which a human makes. It
