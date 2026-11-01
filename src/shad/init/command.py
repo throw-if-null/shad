@@ -16,6 +16,7 @@ import os
 import platform
 import shutil
 import subprocess
+import tempfile
 import tomllib
 import urllib.request
 from collections.abc import Callable
@@ -156,11 +157,12 @@ def _install_via_dnf(package: str) -> Callable[[], None]:
 
 
 def _install_opencode_systemwide() -> None:
-    tmp_dir = Path("/tmp") / f"shad-opencode-{os.getpid()}"
+    # This runs as root. A predictable directory under /tmp lets another local user create it
+    # first and replace the binary before `install` copies it into /usr/local/bin.
+    tmp_dir = Path(tempfile.mkdtemp(prefix="shad-opencode-"))
     archive = tmp_dir / OPENCODE_INSTALL_URL.rsplit("/", 1)[-1]
     binary = tmp_dir / "opencode"
 
-    tmp_dir.mkdir(parents=True, exist_ok=True)
     try:
         console.print(Text("  → installing opencode to /usr/local/bin/opencode", style="cyan"))
         with urllib.request.urlopen(OPENCODE_INSTALL_URL) as response, archive.open("wb") as fh:

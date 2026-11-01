@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import io
 import os
+import stat
+import tarfile
 import tempfile
 import unittest
 import unittest.mock
@@ -8,11 +11,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 from shad.cli import build_parser
+from shad.init import command as init_command
 from shad.init.command import (
     Dependency,
     _append_toml,
     _detect_fedora,
     _expand,
+    _install_opencode_systemwide,
     _is_root,
     _key_exists,
     _toml_key,
@@ -85,6 +90,41 @@ class InstallDepsTests(unittest.TestCase):
              patch("shad.init.command.console.print") as print_mock:
             ensure_dependencies_installed()
         print_mock.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# _install_opencode_systemwide
+# ---------------------------------------------------------------------------
+
+class InstallOpencodeTests(unittest.TestCase):
+    def test_download_directory_is_private_and_removed(self) -> None:
+        archive = io.BytesIO()
+        with tarfile.open(fileobj=archive, mode="w:gz") as tar:
+            info = tarfile.TarInfo("opencode")
+            info.size = len(b"binary")
+            tar.addfile(info, io.BytesIO(b"binary"))
+        captured: list[tuple[Path, int, bytes]] = []
+        run_install_command = init_command._run_install_command
+
+        def run(command: list[str], description: str) -> None:
+            if command[0] != "install":
+                run_install_command(command, description)
+                return
+            binary = Path(command[-2])
+            mode = stat.S_IMODE(binary.parent.stat().st_mode)
+            captured.append((binary.parent, mode, binary.read_bytes()))
+
+        with patch("shad.init.command.urllib.request.urlopen", return_value=io.BytesIO(archive.getvalue())), \
+             patch("shad.init.command._run_install_command", side_effect=run), \
+             patch("shad.init.command.console.print"):
+            _install_opencode_systemwide()
+
+        self.assertEqual(len(captured), 1)
+        directory, mode, content = captured[0]
+        self.assertEqual(content, b"binary")
+        self.assertEqual(mode, 0o700)
+        self.assertNotEqual(directory, Path("/tmp") / f"shad-opencode-{os.getpid()}")
+        self.assertFalse(directory.exists())
 
 
 # ---------------------------------------------------------------------------
