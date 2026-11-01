@@ -827,7 +827,7 @@ If `shad` is run from **inside** an existing tmux session it uses `switch-client
 `shad init --install-deps` is tailored for Fedora and installs missing dependencies before starting the init wizard.
 
 - `tmux` via `dnf`
-- `opencode` by downloading the latest Linux x64 release into `/usr/local/bin/opencode`
+- `opencode` by downloading release `v1.19.5` for Linux x64, checking its SHA-256, and installing it into `/usr/local/bin/opencode`. Other architectures are refused.
 
 Run it with `sudo`:
 

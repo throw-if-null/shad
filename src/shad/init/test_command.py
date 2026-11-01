@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import os
 import stat
@@ -96,13 +97,18 @@ class InstallDepsTests(unittest.TestCase):
 # _install_opencode_systemwide
 # ---------------------------------------------------------------------------
 
+def _release_archive(binary: bytes) -> bytes:
+    archive = io.BytesIO()
+    with tarfile.open(fileobj=archive, mode="w:gz") as tar:
+        info = tarfile.TarInfo("opencode")
+        info.size = len(binary)
+        tar.addfile(info, io.BytesIO(binary))
+    return archive.getvalue()
+
+
 class InstallOpencodeTests(unittest.TestCase):
     def test_download_directory_is_private_and_removed(self) -> None:
-        archive = io.BytesIO()
-        with tarfile.open(fileobj=archive, mode="w:gz") as tar:
-            info = tarfile.TarInfo("opencode")
-            info.size = len(b"binary")
-            tar.addfile(info, io.BytesIO(b"binary"))
+        release = _release_archive(b"binary")
         captured: list[tuple[Path, int, bytes]] = []
         run_install_command = init_command._run_install_command
 
@@ -114,7 +120,9 @@ class InstallOpencodeTests(unittest.TestCase):
             mode = stat.S_IMODE(binary.parent.stat().st_mode)
             captured.append((binary.parent, mode, binary.read_bytes()))
 
-        with patch("shad.init.command.urllib.request.urlopen", return_value=io.BytesIO(archive.getvalue())), \
+        with patch("shad.init.command.urllib.request.urlopen", return_value=io.BytesIO(release)), \
+             patch("shad.init.command.OPENCODE_LINUX_X64_SHA256", hashlib.sha256(release).hexdigest()), \
+             patch("shad.init.command.platform.machine", return_value="x86_64"), \
              patch("shad.init.command._run_install_command", side_effect=run), \
              patch("shad.init.command.console.print"):
             _install_opencode_systemwide()
@@ -125,6 +133,28 @@ class InstallOpencodeTests(unittest.TestCase):
         self.assertEqual(mode, 0o700)
         self.assertNotEqual(directory, Path("/tmp") / f"shad-opencode-{os.getpid()}")
         self.assertFalse(directory.exists())
+
+    def test_checksum_mismatch_installs_nothing(self) -> None:
+        release = _release_archive(b"tampered")
+
+        with patch("shad.init.command.urllib.request.urlopen", return_value=io.BytesIO(release)), \
+             patch("shad.init.command.platform.machine", return_value="x86_64"), \
+             patch("shad.init.command._run_install_command") as run, \
+             patch("shad.init.command.console.print"), \
+             self.assertRaises(ShadError) as ctx:
+            _install_opencode_systemwide()
+
+        self.assertIn("checksum mismatch", str(ctx.exception))
+        run.assert_not_called()
+
+    def test_other_architectures_are_refused_before_download(self) -> None:
+        with patch("shad.init.command.urllib.request.urlopen") as urlopen, \
+             patch("shad.init.command.platform.machine", return_value="aarch64"), \
+             self.assertRaises(ShadError) as ctx:
+            _install_opencode_systemwide()
+
+        self.assertIn("aarch64", str(ctx.exception))
+        urlopen.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

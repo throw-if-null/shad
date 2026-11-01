@@ -12,6 +12,7 @@ Then appends the new [projects.*] entry to shad.toml.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import platform
 import shutil
@@ -34,9 +35,13 @@ from shad.shared.errors import ShadError
 console = Console()
 err_console = Console(stderr=True)
 
+# A pinned release, so the archive can be checked against a known SHA-256. Change the version and
+# the checksum together, from the release's asset digest.
+OPENCODE_VERSION = "1.19.5"
+OPENCODE_LINUX_X64_SHA256 = "588310a336fa3b9df36b3f0225b26f679d453efaad0cf3d66c3651ef3ec1647a"
 OPENCODE_INSTALL_URL = (
-    "https://github.com/anomalyco/opencode/releases/latest/download/"
-    f"opencode-linux-{platform.machine().replace('x86_64', 'x64')}.tar.gz"
+    "https://github.com/anomalyco/opencode/releases/download/"
+    f"v{OPENCODE_VERSION}/opencode-linux-x64.tar.gz"
 )
 
 
@@ -157,6 +162,9 @@ def _install_via_dnf(package: str) -> Callable[[], None]:
 
 
 def _install_opencode_systemwide() -> None:
+    if platform.machine() != "x86_64":
+        raise ShadError(f"--install-deps installs opencode on x86_64 only, not on {platform.machine()}")
+
     # This runs as root. A predictable directory under /tmp lets another local user create it
     # first and replace the binary before `install` copies it into /usr/local/bin.
     tmp_dir = Path(tempfile.mkdtemp(prefix="shad-opencode-"))
@@ -164,9 +172,16 @@ def _install_opencode_systemwide() -> None:
     binary = tmp_dir / "opencode"
 
     try:
-        console.print(Text("  → installing opencode to /usr/local/bin/opencode", style="cyan"))
+        console.print(Text(f"  → installing opencode {OPENCODE_VERSION} to /usr/local/bin/opencode", style="cyan"))
         with urllib.request.urlopen(OPENCODE_INSTALL_URL) as response, archive.open("wb") as fh:
             shutil.copyfileobj(response, fh)
+
+        with archive.open("rb") as fh:
+            digest = hashlib.file_digest(fh, "sha256").hexdigest()
+        if digest != OPENCODE_LINUX_X64_SHA256:
+            raise ShadError(
+                f"opencode archive checksum mismatch: expected {OPENCODE_LINUX_X64_SHA256}, got {digest}"
+            )
 
         _run_install_command(["tar", "-xzf", str(archive), "-C", str(tmp_dir)], "extracting opencode release")
         _run_install_command(["install", "-m", "0755", str(binary), "/usr/local/bin/opencode"], "copying opencode binary")
