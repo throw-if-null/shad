@@ -35,7 +35,9 @@ The codebase follows a **vertical slice** layout — each CLI subcommand owns it
 
 ```
 src/shad/
-├── cli.py                      # arg parsing, dispatch, top-level error handling
+├── cli.py                      # arg parsing, dispatch, top-level error handling; main(argv) -> exit code
+├── __main__.py                 # `python -m shad`
+├── testing.py                  # test support: run() calls main in-process; TmuxCase, Pane drive an isolated tmux server
 ├── shared/                     # cross-cutting utilities
 │   ├── config.py               # TOML config loading, Project/Defaults, target resolution, data dir
 │   ├── errors.py               # ShadError exception
@@ -133,7 +135,9 @@ make typecheck  # mypy
 make check      # all three
 ```
 
-Tests use `unittest.TestCase` with `unittest.mock.patch` for isolating subprocess/IO calls. No fixtures or conftest files — each test file is self-contained.
+Tests use `unittest.TestCase` with `unittest.mock.patch` for isolating subprocess/IO calls. No conftest files. Shared test support is `src/shad/testing.py` and a slice's `testing.py`; no command imports either.
+
+`shad.testing.run(argv, env=...)` calls `cli.main` in this process and returns the exit code, stdout and stderr. `shad.testing.TmuxCase` gives a test a tmux server on a private socket under `/tmp` (`-S` on its own calls, `TMUX_TMPDIR` for the processes it starts, `TMUX` unset, `-f /dev/null`), a temporary home, config and data directory, and `pane(*args)`, which runs `python -m shad` in a window of that server under a real pseudo-terminal: `send`, `type`, `wait_for`, `screen`, `wait_exit`. A command that drives tmux or needs a terminal is tested there, never against the user's server. `fake_harness("claude")` puts a sleeping `claude` on `PATH` whose pane reports `claude` as its foreground command. CI installs tmux for this.
 
 ## Common pitfalls
 

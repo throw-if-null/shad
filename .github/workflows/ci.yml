@@ -15,6 +15,10 @@ jobs:
         with:
           python-version: "3.14"
 
+      - name: Install tmux
+        shell: bash
+        run: sudo apt-get update && sudo apt-get install -y tmux
+
       - name: Install dependencies
         shell: bash
         run: pip install -e ".[dev]"
