@@ -1,107 +1,102 @@
 from __future__ import annotations
 
-import argparse
-import unittest
-from unittest.mock import patch
-
-from shad.sessions.stop.command import stop_sessions
-from shad.sessions.testing import CFG, SHAD, running
-from shad.shared.errors import ShadError
-from shad.shared.picker import NoTerminal
-from shad.testing import TmuxCase
-
-_ARGS = argparse.Namespace(sessions_action="stop")
+from shad.sessions.testing import UUID_A, UUID_B, SessionsCase
 
 
-class StopTests(unittest.TestCase):
-    def test_kills_the_picked_sessions_and_not_the_current_one(self) -> None:
-        live = [running("kb--cc-here"), running("kb--cc-x"), running("tin-shad--cc-y", SHAD)]
-        with (
-            patch("shad.sessions.live.collect", return_value=live),
-            patch("shad.sessions.stop.command.current_session", return_value="kb--cc-here"),
-            patch("shad.sessions.pick.pick_many", return_value=frozenset({1})) as pick,
-            patch("shad.sessions.stop.command.kill_session") as kill,
-        ):
-            stop_sessions(CFG, _ARGS)
+class StopTests(SessionsCase):
+    """
+    Feature:    sessions/stop
+    Boundary:   command. `shad sessions stop` in a terminal pane of the
+                test's tmux server, or as a process with no terminal.
+                Contract: exit code + screen or streams + the sessions on
+                the server.
+    """
 
-        self.assertEqual(pick.call_args.args[1], 2)
-        self.assertEqual(list(pick.call_args.args[2]), [])
-        kill.assert_called_once_with("tin-shad--cc-y")
-
-    def test_nothing_picked_kills_nothing(self) -> None:
-        with (
-            patch("shad.sessions.live.collect", return_value=[running("kb--cc-x")]),
-            patch("shad.sessions.stop.command.current_session", return_value=None),
-            patch("shad.sessions.pick.pick_many", return_value=frozenset()),
-            patch("shad.sessions.stop.command.kill_session") as kill,
-        ):
-            stop_sessions(CFG, _ARGS)
-        kill.assert_not_called()
-
-    def test_cancel_kills_nothing(self) -> None:
-        with (
-            patch("shad.sessions.live.collect", return_value=[running("kb--cc-x")]),
-            patch("shad.sessions.stop.command.current_session", return_value=None),
-            patch("shad.sessions.pick.pick_many", return_value=None),
-            patch("shad.sessions.stop.command.kill_session") as kill,
-        ):
-            stop_sessions(CFG, _ARGS)
-        kill.assert_not_called()
-
-    def test_only_the_current_session_opens_no_picker(self) -> None:
-        with (
-            patch("shad.sessions.live.collect", return_value=[running("kb--cc-here")]),
-            patch("shad.sessions.stop.command.current_session", return_value="kb--cc-here"),
-            patch("shad.sessions.pick.pick_many") as pick,
-            patch("shad.sessions.stop.command.kill_session") as kill,
-        ):
-            stop_sessions(CFG, _ARGS)
-        pick.assert_not_called()
-        kill.assert_not_called()
-
-    def test_lists_unsupported_sessions_too(self) -> None:
-        live = [running("kb--oc-x", session_id=None, harness="opencode", unsupported="no")]
-        with (
-            patch("shad.sessions.live.collect", return_value=live),
-            patch("shad.sessions.stop.command.current_session", return_value=None),
-            patch("shad.sessions.pick.pick_many", return_value=frozenset({0})),
-            patch("shad.sessions.stop.command.kill_session") as kill,
-        ):
-            stop_sessions(CFG, _ARGS)
-        kill.assert_called_once_with("kb--oc-x")
-
-    def test_without_a_terminal_fails(self) -> None:
-        with (
-            patch("shad.sessions.live.collect", return_value=[running("kb--cc-x")]),
-            patch("shad.sessions.stop.command.current_session", return_value=None),
-            patch("shad.sessions.pick.pick_many", side_effect=NoTerminal("no tty")),
-            patch("shad.sessions.stop.command.kill_session") as kill,
-            self.assertRaises(ShadError),
-        ):
-            stop_sessions(CFG, _ARGS)
-        kill.assert_not_called()
-
-
-class StopPickerTests(TmuxCase):
-    def test_cancelling_the_picker_stops_nothing(self) -> None:
+    def test_stop_cancel_leaves_every_session_running(self) -> None:
         """
-        Feature:    sessions/stop
-        Boundary:   command. `shad sessions stop` in a terminal pane of an
-                    isolated tmux server. Contract: exit code + screen.
         Criterion:  stop-cancel-leaves-every-session-running
-          Given:    project kb's session `kb` runs, and no other.
-          When:     `shad sessions stop`, then `q` at the picker.
-          Then:     exit 0, the screen says nothing stopped, and `kb` still
-                    runs.
+          Given:    kb runs claude on A, and no other session.
+          When:     `shad sessions stop` in a terminal, then `q`.
+          Then:     exit 0, the screen says nothing stopped, and the session
+                    still runs.
         """
-        (self.root / "kb").mkdir()
-        self.write_config(f'[projects.kb]\npath = "{self.root / "kb"}"\n')
-        self.server.new_session("kb", command="sleep 100000")
-
+        session = self.start_session("kb", UUID_A)
         pane = self.pane("sessions", "stop")
         pane.wait_for("stop sessions")
         pane.send("q")
-
         self.assertEqual(pane.wait_exit(), 0)
         self.assertIn("nothing stopped", pane.screen())
-        self.assertIn("kb", self.server.sessions())
+        self.assertIn(session, self.server.sessions())
+
+    def test_stop_kills_the_picked_sessions_and_reports_them(self) -> None:
+        """
+        Criterion:  stop-kills-the-picked-sessions-and-reports-them
+          Given:    kb runs claude on A and tin shad on B.
+          When:     `shad sessions stop` in a terminal, Down, Space, Enter.
+          Then:     exit 0, the screen reports tin shad stopped, kb's
+                    session still runs, and tin shad's is gone.
+        """
+        kb = self.start_session("kb", UUID_A)
+        shad = self.start_session("tin-shad", UUID_B)
+        pane = self.pane("sessions", "stop")
+        pane.wait_for("stop sessions")
+        pane.send("Down", "Space", "Enter")
+        self.assertEqual(pane.wait_exit(), 0)
+        screen = pane.screen()
+        self.assertIn("stopped", screen)
+        self.assertIn("tin shad", screen)
+        self.assertIn(kb, self.server.sessions())
+        self.assertNotIn(shad, self.server.sessions())
+
+    def test_stop_lists_an_unsupported_session_too(self) -> None:
+        """
+        Criterion:  stop-lists-an-unsupported-session-too
+          Given:    kb runs opencode.
+          When:     `shad sessions stop` in a terminal, Space, Enter.
+          Then:     the picker shows the session as not supported, exit 0,
+                    and the session is gone.
+        """
+        session = self.start_session("kb", "fresh-1", harness="opencode")
+        pane = self.pane("sessions", "stop")
+        screen = pane.wait_for("stop sessions")
+        self.assertIn("not supported", screen)
+        pane.send("Space", "Enter")
+        self.assertEqual(pane.wait_exit(), 0)
+        self.assertNotIn(session, self.server.sessions())
+
+    def test_stop_leaves_out_the_session_it_runs_in(self) -> None:
+        """
+        Criterion:  stop-leaves-out-the-session-it-runs-in
+          Given:    the only shad session is kb, and the command runs in it.
+          When:     `shad sessions stop` in a terminal of session kb.
+          Then:     exit 0, and the screen says no shad session runs besides
+                    this one.
+        """
+        pane = self.pane("sessions", "stop", session="kb")
+        self.assertEqual(pane.wait_exit(), 0)
+        self.assertIn("no shad sessions are running besides this one", pane.screen())
+
+    def test_stop_without_a_terminal_fails(self) -> None:
+        """
+        Criterion:  stop-without-a-terminal-fails
+          Given:    kb runs claude on A.
+          When:     `shad sessions stop` as a process with no terminal.
+          Then:     exit 1, stdout empty, stderr says a terminal is needed,
+                    and the session still runs.
+        """
+        session = self.start_session("kb", UUID_A)
+        result = self.run_detached("sessions", "stop")
+        self.assertEqual((result.code, result.out), (1, ""), result.err)
+        self.assertIn("terminal", result.err)
+        self.assertIn(session, self.server.sessions())
+
+    def test_stop_with_nothing_running_says_so(self) -> None:
+        """
+        Criterion:  stop-with-nothing-running-says-so
+          Given:    no shad session runs.
+          When:     `shad sessions stop` as a process with no terminal.
+          Then:     exit 0, stderr empty, stdout says no shad session runs.
+        """
+        result = self.run_detached("sessions", "stop")
+        self.assertEqual((result.code, result.err), (0, ""), result.out)
+        self.assertIn("no shad sessions are running", result.out)

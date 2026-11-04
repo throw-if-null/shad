@@ -41,6 +41,10 @@ PACKAGE_PARENT = Path(shad.__file__).resolve().parent.parent
 
 KEEPER = "shad-test-server"  # the session that keeps a test server alive
 
+# What a test process must not inherit: the user's tmux, the user's kitty
+# (restore would open real tabs), and the user's editor.
+UNSET = ("TMUX", "KITTY_WINDOW_ID", "KITTY_LISTEN_ON", "VISUAL", "EDITOR")
+
 _counter = itertools.count(1)
 
 T = TypeVar("T")
@@ -101,13 +105,21 @@ class TmuxServer:
     path is limited to about 100 bytes.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, env: Mapping[str, str] | None = None) -> None:
+        """
+        *env* is what the server's own environment adds to the test
+        process's: every pane the server opens, including the panes a shad
+        layout creates, inherits it.
+        """
         self.directory = Path(tempfile.mkdtemp(prefix="shad-tmux-", dir="/tmp"))
         # The path tmux derives from TMUX_TMPDIR, so -S and the environment agree.
         self.socket = self.directory / f"tmux-{os.getuid()}" / "default"
         self.socket.parent.mkdir(mode=0o700)  # tmux creates it for its default path only
-        self.env: dict[str, str] = {**os.environ, "TMUX_TMPDIR": str(self.directory)}
-        self.env.pop("TMUX", None)
+        self.env: dict[str, str] = {
+            **os.environ, **(env or {}), "TMUX_TMPDIR": str(self.directory)
+        }
+        for name in UNSET:
+            self.env.pop(name, None)
         try:
             # A server exits with its last session, and a global option needs
             # a running server. The keeper outlives every session a test
@@ -175,15 +187,21 @@ class Pane:
         server: TmuxServer,
         argv: Sequence[str],
         *,
-        env: Mapping[str, str],
+        env: Mapping[str, str | None],
         cwd: Path,
         width: int = 100,
         height: int = 30,
+        session: str | None = None,
     ) -> None:
+        """A None in *env* removes the variable. *session* names the tmux session."""
         self.server = server
-        self.name = f"shad-test-pane-{next(_counter)}"
-        assignments = " ".join(f"{name}={shlex.quote(value)}" for name, value in env.items())
-        command = f"exec env {assignments} {shlex.join(argv)}"
+        self.name = session or f"shad-test-pane-{next(_counter)}"
+        # env takes its options before the assignments.
+        removals = " ".join(f"-u {name}" for name, value in env.items() if value is None)
+        assignments = " ".join(
+            f"{name}={shlex.quote(value)}" for name, value in env.items() if value is not None
+        )
+        command = f"exec env {removals} {assignments} {shlex.join(argv)}"
         server.tmux(
             "new-session", "-d", "-s", self.name,
             "-x", str(width), "-y", str(height), "-c", str(cwd), command,
@@ -275,9 +293,11 @@ def _unreaped_status(pid: int) -> int | None:
 class TmuxCase(unittest.TestCase):
     """
     A test with a tmux server, a home, a config and a data directory of its
-    own. `self.env` is the environment a shad run or pane gets: HOME and the
-    XDG directories under the temporary root, SHAD_CONFIG at self.config,
-    PATH with self.bin first, and the server's socket directory.
+    own. `self.env` is the environment every shad run and pane gets, and
+    the server's own: HOME and the XDG directories under the temporary
+    root, SHAD_CONFIG at self.config, PATH with self.bin first, where a
+    `shad` runs this checkout, PYTHONPATH for the same, the server's socket
+    directory, and none of UNSET.
     """
 
     def setUp(self) -> None:
@@ -290,37 +310,61 @@ class TmuxCase(unittest.TestCase):
         self.config = self.root / "shad.toml"
         for directory in (self.home, self.bin, self.data):
             directory.mkdir()
-        self.server = TmuxServer()
-        self.addCleanup(self.server.kill)
-        self.env: dict[str, str] = {
+        shim = self.bin / "shad"
+        shim.write_text(f'#!/bin/sh\nexec {shlex.quote(sys.executable)} -m shad "$@"\n')
+        shim.chmod(0o755)
+        self.env: dict[str, str | None] = {
             "HOME": str(self.home),
             "XDG_CONFIG_HOME": str(self.home / ".config"),
             "XDG_DATA_HOME": str(self.data),
             "SHAD_CONFIG": str(self.config),
             "PATH": f"{self.bin}{os.pathsep}{os.environ.get('PATH', '')}",
             "PYTHONPATH": str(PACKAGE_PARENT),
-            "TMUX_TMPDIR": str(self.server.directory),
+            **dict.fromkeys(UNSET),
         }
+        self.server = TmuxServer(env={k: v for k, v in self.env.items() if v is not None})
+        self.addCleanup(self.server.kill)
+        self.env["TMUX_TMPDIR"] = str(self.server.directory)
 
     def write_config(self, text: str) -> None:
         self.config.write_text(text)
 
     def run_shad(self, *args: str) -> Result:
         """`shad <args>` in this process, outside any tmux client."""
-        return run(args, env={**self.env, "TMUX": None})
+        return run(args, env=self.env)
+
+    def run_detached(self, *args: str) -> Result:
+        """
+        `shad <args>` as a process with no controlling terminal: what a
+        script or a cron job sees. Its tmux calls reach this test's server.
+        """
+        env = {**os.environ, **{k: v for k, v in self.env.items() if v is not None}}
+        for name in UNSET:
+            env.pop(name, None)
+        result = subprocess.run(
+            shad_argv(*args), env=env, cwd=self.root, start_new_session=True,
+            capture_output=True, text=True, timeout=60, check=False,
+        )
+        return Result(result.returncode, result.stdout, result.stderr)
 
     def pane(
         self,
         *args: str,
-        env: Mapping[str, str] | None = None,
+        env: Mapping[str, str | None] | None = None,
         cwd: Path | None = None,
         width: int = 100,
         height: int = 30,
+        session: str | None = None,
     ) -> Pane:
-        """`shad <args>` as a process in a pane of this test's server."""
+        """
+        `shad <args>` as a process in a pane of this test's server. The pane
+        keeps the TMUX that tmux sets for it: that is how the process knows
+        it runs inside tmux, and it names this server.
+        """
+        pane_env = {name: value for name, value in self.env.items() if name != "TMUX"}
         return Pane(
-            self.server, shad_argv(*args), env={**self.env, **(env or {})},
-            cwd=cwd or self.root, width=width, height=height,
+            self.server, shad_argv(*args), env={**pane_env, **(env or {})},
+            cwd=cwd or self.root, width=width, height=height, session=session,
         )
 
     def fake_harness(self, name: str) -> Path:
