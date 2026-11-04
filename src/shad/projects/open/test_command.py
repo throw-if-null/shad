@@ -1,264 +1,232 @@
 from __future__ import annotations
 
-import subprocess
 import unittest
+import uuid
 from pathlib import Path
 from unittest.mock import patch
 
 from shad.projects.open.command import open_project
 from shad.projects.open.sessions import OpencodeTarget
+from shad.projects.testing import UUID_A, ProjectsCase
 from shad.shared.config import Defaults, Project
 
 
-def _completed(
-    returncode: int = 0, stdout: str = "", stderr: str = ""
-) -> subprocess.CompletedProcess:
-    return subprocess.CompletedProcess(
-        args=[], returncode=returncode, stdout=stdout, stderr=stderr
-    )
+class OpenTests(ProjectsCase):
+    """
+    Feature:    projects/open
+    Boundary:   command. `shad projects [<group>] <name> [--harness H]`,
+                typed into a shell that a tmux client sits on, or run in a
+                terminal pane, against the test's server with Claude Code's
+                transcripts under the test home. Contract: exit code +
+                screen + the sessions on the server + the client's session.
+    """
+
+    def test_open_creates_the_layout_and_attaches(self) -> None:
+        """
+        Criterion:  open-creates-the-layout-and-attaches
+          Given:    kb has no earlier conversation, and a client sits on a
+                    shell session.
+          When:     `shad projects kb` typed into that shell.
+          Then:     the client moves to a session named kb--cc-<uuid>, which
+                    has four panes with claude running in one.
+        """
+        self.shell_with_client()
+        self.type_into_shell("shad projects kb")
+        session = self.wait_for_client_on(lambda name: name.startswith("kb--cc-"))
+        uuid.UUID(session.removeprefix("kb--cc-"))
+        self.assertEqual(len(self.pane_commands(session)), 4)
+        self.wait_for_harness(session)
+
+    def test_open_shows_the_picker_when_conversations_exist(self) -> None:
+        """
+        Criterion:  open-shows-the-picker-when-conversations-exist
+          Given:    kb has a conversation named Netbird whose first prompt
+                    is "Fix the panel".
+          When:     `shad projects kb` in a terminal, then `q`.
+          Then:     the picker offers a new session, Netbird and the prompt;
+                    exit 0, and no kb session exists.
+        """
+        self.write_transcript("kb", UUID_A, "Fix the panel", name="Netbird")
+        pane = self.pane("projects", "kb")
+        screen = pane.wait_for("New session")
+        for text in ("claude session", "Netbird", "Fix the panel"):
+            self.assertIn(text, screen)
+        pane.send("q")
+        self.assertEqual(pane.wait_exit(), 0)
+        self.assertEqual(self.sessions_of("kb"), [])
+
+    def test_open_resumes_the_picked_conversation(self) -> None:
+        """
+        Criterion:  open-resumes-the-picked-conversation
+          Given:    kb has conversation A, and a client sits on a shell.
+          When:     `shad projects kb` typed into the shell, Down, Enter.
+          Then:     the client moves to kb--cc-A, with claude running in it.
+        """
+        self.write_transcript("kb", UUID_A, "Fix the panel")
+        self.shell_with_client()
+        self.type_into_shell("shad projects kb")
+        self.wait_for_shell("New session")
+        self.server.tmux("send-keys", "-t", "shell", "Down", "Enter")
+        session = self.wait_for_client_on(lambda name: name == f"kb--cc-{UUID_A}")
+        self.wait_for_harness(session)
+
+    def test_open_attaches_to_the_existing_session_of_a_conversation(self) -> None:
+        """
+        Criterion:  open-attaches-to-the-existing-session-of-a-conversation
+          Given:    kb has conversation A, a session kb--cc-A with one pane
+                    runs it, and a client sits on a shell.
+          When:     `shad projects kb` typed into the shell, Down, Enter.
+          Then:     the client moves to that session, which still has one
+                    pane, and kb has no other session.
+        """
+        self.write_transcript("kb", UUID_A, "Fix the panel")
+        existing = f"kb--cc-{UUID_A}"
+        self.server.new_session(existing, cwd=self.root / "kb", command="claude")
+        self.shell_with_client()
+        self.type_into_shell("shad projects kb")
+        self.wait_for_shell("New session")
+        self.server.tmux("send-keys", "-t", "shell", "Down", "Enter")
+        self.wait_for_client_on(lambda name: name == existing)
+        self.assertEqual(self.sessions_of("kb"), [existing])
+        self.assertEqual(len(self.pane_commands(existing)), 1)
+
+    def test_open_with_a_harness_override_uses_that_harness(self) -> None:
+        """
+        Criterion:  open-with-a-harness-override-uses-that-harness
+          Given:    kb is configured for claude, opencode has no sessions,
+                    and a client sits on a shell.
+          When:     `shad projects kb --harness opencode` typed into it.
+          Then:     the client moves to a session named kb--oc-fresh-<n>.
+        """
+        self.fake_harness("opencode")
+        self.shell_with_client()
+        self.type_into_shell("shad projects kb --harness opencode")
+        self.wait_for_client_on(lambda name: name.startswith("kb--oc-fresh-"))
+
+    def test_open_of_an_unknown_project_fails(self) -> None:
+        """
+        Criterion:  open-of-an-unknown-project-fails
+          When:     `shad projects nope`.
+          Then:     exit 1, stdout empty, stderr names nope.
+        """
+        result = self.run_shad("projects", "nope")
+        self.assertEqual((result.code, result.out), (1, ""), result.err)
+        self.assertIn("nope", result.err)
+
+    def test_open_of_an_ambiguous_prefix_fails(self) -> None:
+        """
+        Criterion:  open-of-an-ambiguous-prefix-fails
+          Given:    the projects kb and kc exist.
+          When:     `shad projects k`.
+          Then:     exit 1, stdout empty, stderr says the prefix is
+                    ambiguous and lists both.
+        """
+        result = self.run_shad("projects", "k")
+        self.assertEqual((result.code, result.out), (1, ""), result.err)
+        self.assertIn("ambiguous", result.err)
+        self.assertIn("kb, kc", result.err)
+
+    def test_open_rejects_an_action_on_a_group(self) -> None:
+        """
+        Criterion:  open-rejects-an-action-on-a-group
+          When:     `shad projects tin status`.
+          Then:     exit 1, stdout empty, stderr says tin is a group.
+        """
+        result = self.run_shad("projects", "tin", "status")
+        self.assertEqual((result.code, result.out), (1, ""), result.err)
+        self.assertIn("group", result.err)
+
+    def test_open_rejects_too_many_tokens(self) -> None:
+        """
+        Criterion:  open-rejects-too-many-tokens
+          When:     `shad projects a b c d`.
+          Then:     exit 1, stdout empty, stderr says too many arguments.
+        """
+        result = self.run_shad("projects", "a", "b", "c", "d")
+        self.assertEqual((result.code, result.out), (1, ""), result.err)
+        self.assertIn("too many arguments", result.err)
+
+    def test_open_rejects_an_unknown_harness(self) -> None:
+        """
+        Criterion:  open-rejects-an-unknown-harness
+          When:     `shad projects kb --harness nope`.
+          Then:     exit 2, stdout empty, stderr lists the harnesses.
+        """
+        result = self.run_shad("projects", "kb", "--harness", "nope")
+        self.assertEqual((result.code, result.out), (2, ""), result.err)
+        self.assertIn("claude", result.err)
 
 
-class OpenProjectTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.project = Project(
-            key="shad", group="tin", path=Path("/tmp/shad"), session="tin-shad"
-        )
-        self.defaults = Defaults()
+class ListTests(ProjectsCase):
+    """
+    Feature:    projects/list
+    Boundary:   command. `shad projects` and `shad projects <group>`,
+                through main(argv) with SHAD_CONFIG set. Contract: exit
+                code + stdout + stderr.
+    """
 
-    def test_open_project_returns_none_when_picker_cancelled(self) -> None:
-        with (
-            patch("shad.projects.open.command.pick_opencode_target", return_value=None),
-            patch("shad.projects.open.command._create_session") as create_session,
-            patch("shad.projects.open.command._attach") as attach,
-        ):
-            result = open_project(self.project, self.defaults)
+    def test_list_prints_every_project_and_group(self) -> None:
+        """
+        Criterion:  list-prints-every-project-and-group
+          Given:    the projects kb, kc, tin shad and tin coral.
+          When:     `shad projects`.
+          Then:     exit 0, stderr empty, stdout names each project and the
+                    group.
+        """
+        result = self.run_shad("projects")
+        self.assertEqual((result.code, result.err), (0, ""), result.out)
+        for text in ("kb", "kc", "tin", "tin shad", "tin coral"):
+            self.assertIn(text, result.out)
 
-        self.assertIsNone(result)
-        create_session.assert_not_called()
-        attach.assert_not_called()
+    def test_list_of_a_group_prints_its_projects(self) -> None:
+        """
+        Criterion:  list-of-a-group-prints-its-projects
+          When:     `shad projects tin`.
+          Then:     exit 0, stderr empty, stdout names tin shad and tin
+                    coral and no top-level project.
+        """
+        result = self.run_shad("projects", "tin")
+        self.assertEqual((result.code, result.err), (0, ""), result.out)
+        self.assertIn("tin shad", result.out)
+        self.assertIn("tin coral", result.out)
+        self.assertNotIn("kb", result.out)
 
-    def test_open_project_returns_attach_exit_code(self) -> None:
-        target = OpencodeTarget(command="opencode -s sess-123", session_key="sess-123")
+    def test_list_with_no_projects_says_so(self) -> None:
+        """
+        Criterion:  list-with-no-projects-says-so
+          Given:    the config names no project.
+          When:     `shad projects`.
+          Then:     exit 0, stderr empty, stdout says none is configured.
+        """
+        self.write_config("[defaults]\n")
+        result = self.run_shad("projects")
+        self.assertEqual((result.code, result.err), (0, ""), result.out)
+        self.assertIn("no projects configured", result.out)
 
-        with (
-            patch(
-                "shad.projects.open.command.pick_opencode_target", return_value=target
-            ),
-            patch("shad.projects.open.command.session_exists", return_value=True),
-            patch("shad.projects.open.command._create_session"),
-            patch("shad.projects.open.command._attach", return_value=0) as attach,
-        ):
-            result = open_project(self.project, self.defaults)
 
-        attach.assert_called_once_with("tin-shad--oc-sess-123")
-        self.assertEqual(result, 0)
-
-    def test_open_project_creates_scoped_tmux_session_for_existing_oc_session(
-        self,
-    ) -> None:
-        target = OpencodeTarget(command="opencode -s sess-123", session_key="sess-123")
-
-        with (
-            patch(
-                "shad.projects.open.command.pick_opencode_target", return_value=target
-            ),
-            patch("shad.projects.open.command.session_exists", return_value=False),
-            patch("shad.projects.open.command._create_session") as create_session,
-            patch("shad.projects.open.command._attach"),
-        ):
-            open_project(self.project, self.defaults)
-
-        create_session.assert_called_once_with(
-            self.project, self.defaults, "opencode -s sess-123", "tin-shad--oc-sess-123"
-        )
-
-    def test_open_project_reuses_existing_scoped_tmux_session(self) -> None:
-        target = OpencodeTarget(command="opencode -s sess-123", session_key="sess-123")
-
-        with (
-            patch(
-                "shad.projects.open.command.pick_opencode_target", return_value=target
-            ),
-            patch("shad.projects.open.command.session_exists", return_value=True),
-            patch("shad.projects.open.command._create_session") as create_session,
-            patch("shad.projects.open.command._attach"),
-        ):
-            open_project(self.project, self.defaults)
-
-        create_session.assert_not_called()
-
-    def test_open_project_no_session_key_uses_base_session_name(self) -> None:
-        target = OpencodeTarget(command="opencode")
-
-        with (
-            patch(
-                "shad.projects.open.command.pick_opencode_target", return_value=target
-            ),
-            patch("shad.projects.open.command.session_exists", return_value=False),
-            patch("shad.projects.open.command._create_session") as create_session,
-            patch("shad.projects.open.command._attach"),
-        ):
-            open_project(self.project, self.defaults)
-
-        create_session.assert_called_once_with(
-            self.project, self.defaults, "opencode", "tin-shad"
-        )
+class FreshTargetTests(unittest.TestCase):
+    """
+    A fresh target that meets an existing session of its name. The pickers
+    give every fresh target a new name, so the boundary cannot reach this
+    branch; it is tested on the function until the branch is removed.
+    """
 
     def test_open_project_fresh_kills_existing_session_and_recreates(self) -> None:
+        project = Project(key="shad", group="tin", path=Path("/tmp/shad"), session="tin-shad")
         target = OpencodeTarget(command="opencode", session_key="fresh-123", fresh=True)
 
         with (
-            patch(
-                "shad.projects.open.command.pick_opencode_target", return_value=target
-            ),
+            patch("shad.projects.open.command.pick_opencode_target", return_value=target),
             patch("shad.projects.open.command.session_exists", return_value=True),
             patch("shad.projects.open.command._run") as run,
             patch("shad.projects.open.command._create_session") as create_session,
             patch("shad.projects.open.command._attach"),
         ):
-            open_project(self.project, self.defaults)
+            open_project(project, Defaults())
 
         run.assert_called_once_with(
             ["tmux", "kill-session", "-t", "tin-shad--oc-fresh-123"], check=False
         )
         create_session.assert_called_once_with(
-            self.project, self.defaults, "opencode", "tin-shad--oc-fresh-123"
+            project, Defaults(), "opencode", "tin-shad--oc-fresh-123"
         )
-
-
-class OpenProjectClaudeHarnessTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.project = Project(
-            key="shad",
-            group="tin",
-            path=Path("/tmp/shad"),
-            session="tin-shad",
-            harness="claude",
-        )
-        self.defaults = Defaults()
-
-    def _open(self, target: OpencodeTarget) -> str:
-        with (
-            patch(
-                "shad.projects.open.command.pick_claude_target", return_value=target
-            ),
-            patch("shad.projects.open.command.session_exists", return_value=False),
-            patch("shad.projects.open.command._create_session") as create_session,
-            patch("shad.projects.open.command._attach"),
-        ):
-            open_project(self.project, self.defaults)
-        return create_session.call_args.args[3]
-
-    def test_each_resumed_conversation_gets_its_own_tmux_session(self) -> None:
-        first = self._open(
-            OpencodeTarget(
-                command="claude --resume uuid-a",
-                session_key="uuid-a",
-                session_prefix="cc",
-            )
-        )
-        second = self._open(
-            OpencodeTarget(
-                command="claude --resume uuid-b",
-                session_key="uuid-b",
-                session_prefix="cc",
-            )
-        )
-
-        self.assertEqual(first, "tin-shad--cc-uuid-a")
-        self.assertEqual(second, "tin-shad--cc-uuid-b")
-        self.assertNotEqual(first, second)
-
-    def test_claude_picker_receives_the_project_path(self) -> None:
-        target = OpencodeTarget(
-            command="claude --resume uuid-a",
-            session_key="uuid-a",
-            session_prefix="cc",
-        )
-
-        with (
-            patch(
-                "shad.projects.open.command.pick_claude_target", return_value=target
-            ) as picker,
-            patch("shad.projects.open.command.session_exists", return_value=False),
-            patch("shad.projects.open.command._create_session"),
-            patch("shad.projects.open.command._attach"),
-        ):
-            open_project(self.project, self.defaults)
-
-        picker.assert_called_once_with(Path("/tmp/shad"), "claude")
-
-
-class OpenProjectHarnessOverrideTests(unittest.TestCase):
-    """`--harness` wins over the project's configured harness for one open."""
-
-    def setUp(self) -> None:
-        self.defaults = Defaults()
-
-    def _project(self, harness: str) -> Project:
-        return Project(
-            key="shad",
-            group="tin",
-            path=Path("/tmp/shad"),
-            session="tin-shad",
-            harness=harness,
-        )
-
-    def test_override_sends_an_opencode_project_to_the_claude_picker(self) -> None:
-        target = OpencodeTarget(
-            command="claude", session_key="uuid-a", session_prefix="cc"
-        )
-
-        with (
-            patch(
-                "shad.projects.open.command.pick_claude_target", return_value=target
-            ) as claude_picker,
-            patch(
-                "shad.projects.open.command.pick_opencode_target"
-            ) as opencode_picker,
-            patch("shad.projects.open.command.session_exists", return_value=False),
-            patch("shad.projects.open.command._create_session"),
-            patch("shad.projects.open.command._attach"),
-        ):
-            open_project(self._project("opencode"), self.defaults, harness="claude")
-
-        claude_picker.assert_called_once_with(Path("/tmp/shad"), "claude")
-        opencode_picker.assert_not_called()
-
-    def test_override_sends_a_claude_project_to_the_opencode_picker(self) -> None:
-        target = OpencodeTarget(command="opencode", session_key="sess-1")
-
-        with (
-            patch(
-                "shad.projects.open.command.pick_opencode_target", return_value=target
-            ) as opencode_picker,
-            patch("shad.projects.open.command.pick_claude_target") as claude_picker,
-            patch("shad.projects.open.command.session_exists", return_value=False),
-            patch("shad.projects.open.command._create_session"),
-            patch("shad.projects.open.command._attach"),
-        ):
-            open_project(self._project("claude"), self.defaults, harness="opencode")
-
-        opencode_picker.assert_called_once_with(Path("/tmp/shad"), "opencode")
-        claude_picker.assert_not_called()
-
-    def test_no_override_keeps_the_configured_harness(self) -> None:
-        target = OpencodeTarget(
-            command="claude", session_key="uuid-a", session_prefix="cc"
-        )
-
-        with (
-            patch(
-                "shad.projects.open.command.pick_claude_target", return_value=target
-            ) as claude_picker,
-            patch("shad.projects.open.command.session_exists", return_value=False),
-            patch("shad.projects.open.command._create_session"),
-            patch("shad.projects.open.command._attach"),
-        ):
-            open_project(self._project("claude"), self.defaults, harness=None)
-
-        claude_picker.assert_called_once_with(Path("/tmp/shad"), "claude")
-
-
-if __name__ == "__main__":
-    unittest.main()
