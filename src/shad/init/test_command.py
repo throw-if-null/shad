@@ -25,6 +25,7 @@ from shad.init.command import (
     ensure_dependencies_installed,
 )
 from shad.shared.errors import ShadError
+from shad.testing import Pane, TmuxCase
 
 # ---------------------------------------------------------------------------
 # CLI parser
@@ -338,3 +339,139 @@ class AppendTomlTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------------------
+# the wizard, as a user runs it
+# ---------------------------------------------------------------------------
+
+
+class InitWizardTests(TmuxCase):
+    """
+    Feature:    init
+    Boundary:   command. `shad init` in a terminal pane of the test's tmux
+                server, with SHAD_CONFIG under the test root, answering
+                the prompts by typing. Contract: exit code + screen + the
+                config file, read back through `shad projects`.
+    """
+
+    def _answer(self, pane: Pane, prompt: str, text: str = "") -> None:
+        pane.wait_for(prompt)
+        if text:
+            pane.type(text)
+        pane.send("Enter")
+
+    def test_init_adds_a_project_through_the_wizard(self) -> None:
+        """
+        Criterion:  init-adds-a-project-through-the-wizard
+          Given:    no config file exists, and <root>/kb is a directory.
+          When:     `shad init`, answering path <root>/kb, no group, the
+                    default key, the default session, and yes.
+          Then:     exit 0, the screen says the project was added and how to
+                    open it, the file starts with the commented defaults and
+                    holds [projects.kb] with that path and session kb, and
+                    `shad projects` lists kb.
+        """
+        (self.root / "kb").mkdir()
+        pane = self.pane("init")
+        self._answer(pane, "e.g. ~/gh/myproject", str(self.root / "kb"))
+        self._answer(pane, "leave blank for top-level")
+        self._answer(pane, "key")
+        self._answer(pane, "session name")
+        self._answer(pane, "Add to config?", "y")
+        self.assertEqual(pane.wait_exit(), 0)
+        screen = pane.screen()
+        self.assertIn(f"Added to {self.config}", screen)
+        self.assertIn("shad projects kb", screen)
+        text = self.config.read_text()
+        self.assertTrue(text.startswith("# ~/.config/shad/shad.toml\n\n[defaults]\n"), text[:60])
+        self.assertIn("[projects.kb]\n", text)
+        self.assertIn(f'path    = "{self.root / "kb"}"\n', text)
+        self.assertIn('session = "kb"\n', text)
+        self.assertIn("kb", self.run_shad("projects").out)
+
+    def test_init_adds_a_grouped_project_with_derived_defaults(self) -> None:
+        """
+        Criterion:  init-adds-a-grouped-project-with-derived-defaults
+          When:     `shad init`, answering path <root>/tin/shad, group tin,
+                    the default key, the default session, and yes.
+          Then:     exit 0, and the file holds [projects.tin.shad] with
+                    session tin-shad.
+        """
+        (self.root / "tin" / "shad").mkdir(parents=True)
+        pane = self.pane("init")
+        self._answer(pane, "e.g. ~/gh/myproject", str(self.root / "tin" / "shad"))
+        self._answer(pane, "leave blank for top-level", "tin")
+        self._answer(pane, "key")
+        self._answer(pane, "session name")
+        self._answer(pane, "Add to config?", "y")
+        self.assertEqual(pane.wait_exit(), 0)
+        text = self.config.read_text()
+        self.assertIn("[projects.tin.shad]\n", text)
+        self.assertIn('session = "tin-shad"\n', text)
+
+    def test_init_asks_again_for_a_path_that_does_not_exist(self) -> None:
+        """
+        Criterion:  init-asks-again-for-a-path-that-does-not-exist
+          When:     `shad init`, answering a path that does not exist, then
+                    one that does, and the defaults.
+          Then:     the screen says the first path does not exist, the
+                    wizard goes on, and the file holds the second path.
+        """
+        (self.root / "kb").mkdir()
+        pane = self.pane("init")
+        self._answer(pane, "e.g. ~/gh/myproject", str(self.root / "nope"))
+        pane.wait_for("path does not exist")
+        pane.type(str(self.root / "kb"))
+        pane.send("Enter")
+        self._answer(pane, "leave blank for top-level")
+        self._answer(pane, "key")
+        self._answer(pane, "session name")
+        self._answer(pane, "Add to config?", "y")
+        self.assertEqual(pane.wait_exit(), 0)
+        self.assertIn(f'path    = "{self.root / "kb"}"\n', self.config.read_text())
+
+    def test_init_refuses_a_key_that_exists_and_asks_again(self) -> None:
+        """
+        Criterion:  init-refuses-a-key-that-exists-and-asks-again
+          Given:    the config holds [projects.kb].
+          When:     `shad init` for <root>/other, answering key kb, then
+                    key other, and the defaults.
+          Then:     the screen says kb exists, exit 0, and the file holds
+                    both projects.
+        """
+        (self.root / "kb").mkdir()
+        (self.root / "other").mkdir()
+        self.write_config(f'[projects.kb]\npath = "{self.root / "kb"}"\n')
+        pane = self.pane("init")
+        self._answer(pane, "e.g. ~/gh/myproject", str(self.root / "other"))
+        self._answer(pane, "leave blank for top-level")
+        self._answer(pane, "key", "kb")
+        pane.wait_for("already exists")
+        pane.type("other")
+        pane.send("Enter")
+        self._answer(pane, "session name")
+        self._answer(pane, "Add to config?", "y")
+        self.assertEqual(pane.wait_exit(), 0)
+        text = self.config.read_text()
+        self.assertIn("[projects.kb]\n", text)
+        self.assertIn("[projects.other]\n", text)
+        self.assertNotIn("[defaults]", text)
+
+    def test_init_declined_at_the_confirmation_writes_nothing(self) -> None:
+        """
+        Criterion:  init-declined-at-the-confirmation-writes-nothing
+          Given:    no config file exists.
+          When:     `shad init`, answering the prompts and then no.
+          Then:     exit 0, the screen says aborted, and no file exists.
+        """
+        (self.root / "kb").mkdir()
+        pane = self.pane("init")
+        self._answer(pane, "e.g. ~/gh/myproject", str(self.root / "kb"))
+        self._answer(pane, "leave blank for top-level")
+        self._answer(pane, "key")
+        self._answer(pane, "session name")
+        self._answer(pane, "Add to config?", "n")
+        self.assertEqual(pane.wait_exit(), 0)
+        self.assertIn("Aborted", pane.screen())
+        self.assertFalse(self.config.exists())

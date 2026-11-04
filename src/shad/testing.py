@@ -367,6 +367,70 @@ class TmuxCase(unittest.TestCase):
             cwd=cwd or self.root, width=width, height=height, session=session,
         )
 
+    def attach_client(self, session: str, *, width: int = 100, height: int = 30) -> Pane:
+        """
+        A tmux client attached to *session*, running in a pane of its own:
+        what a user's terminal of *width* by *height* is to a session.
+        Returns once it is attached.
+        """
+        pane = Pane(
+            self.server,
+            ["tmux", "-S", str(self.server.socket), "-f", "/dev/null",
+             "attach-session", "-t", f"={session}"],
+            env=self.env,
+            cwd=self.root,
+            width=width,
+            height=height,
+        )
+        deadline = time.monotonic() + 10
+        while session not in self.clients():
+            if time.monotonic() > deadline:
+                raise AssertionError(f"no client attached to {session}; screen:\n{pane.screen()}")
+            time.sleep(0.05)
+        return pane
+
+    def clients(self) -> dict[str, str]:
+        """The clients on the server, as {session: client tty}."""
+        result = self.server.tmux(
+            "list-clients", "-F", "#{client_session} #{client_tty}", check=False
+        )
+        pairs = (line.split(" ", 1) for line in result.stdout.splitlines() if " " in line)
+        return {session: tty for session, tty in pairs}
+
+    def wait_for_client_on(self, predicate: Callable[[str], bool], *, timeout: float = 10.0) -> str:
+        """The first client session that *predicate* accepts, once there is one."""
+        deadline = time.monotonic() + timeout
+        while True:
+            for session in self.clients():
+                if predicate(session):
+                    return session
+            if time.monotonic() > deadline:
+                raise AssertionError(f"clients: {self.clients()}; screen:\n{self.shell_screen()}")
+            time.sleep(0.05)
+
+    def shell_with_client(self, *, width: int = 100, height: int = 30) -> None:
+        """A `shell` session running sh, with a client attached: a user at a prompt."""
+        self.server.new_session("shell", cwd=self.root, command="sh")
+        self.attach_client("shell", width=width, height=height)
+
+    def type_into_shell(self, command: str) -> None:
+        self.server.tmux("send-keys", "-t", "shell", command, "Enter")
+
+    def shell_screen(self) -> str:
+        result = self.server.tmux("capture-pane", "-p", "-S", "-", "-t", "shell", check=False)
+        return result.stdout
+
+    def wait_for_shell(self, text: str, *, timeout: float = 10.0) -> str:
+        """The shell's screen once *text* appears on it."""
+        deadline = time.monotonic() + timeout
+        while True:
+            screen = self.shell_screen()
+            if text in screen:
+                return screen
+            if time.monotonic() > deadline:
+                raise AssertionError(f"{text!r} did not appear; screen:\n{screen}")
+            time.sleep(0.05)
+
     def fake_harness(self, name: str) -> Path:
         """
         A *name* command on self.bin that sleeps. A pane running it reports
