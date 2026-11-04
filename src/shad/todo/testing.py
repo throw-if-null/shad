@@ -2,17 +2,11 @@
 
 from __future__ import annotations
 
-import contextlib
-import io
-import subprocess
 import unittest
-from collections.abc import Iterator
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
 
-from shad.cli import build_parser, cmd_todo
-from shad.shared.config import load
+from shad.testing import FakeEditor, Result, TmuxCase, run
 
 CONFIG = """\
 [defaults]
@@ -42,63 +36,79 @@ The resize handler fires twice.
 """
 
 
+def write_config(root: Path, config: Path) -> None:
+    """CONFIG at *config*, with its three project directories under *root*."""
+    for name in ("kb", "alvr/db", "alvr/api"):
+        (root / name).mkdir(parents=True, exist_ok=True)
+    config.write_text(CONFIG.format(root=root))
+
+
 class TodoCase(unittest.TestCase):
-    """A config with two labels, and the todo dir under a temporary data dir."""
+    """
+    A config with two labels, and the todo dir under a temporary data dir.
+
+    Every run goes through the entry point with SHAD_CONFIG at self.config,
+    HOME and XDG_DATA_HOME under self.root, and no editor set until
+    `editor` installs one.
+    """
 
     def setUp(self) -> None:
         self._tmp = TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.root = Path(self._tmp.name)
-        for name in ("kb", "alvr/db", "alvr/api", "data"):
-            (self.root / name).mkdir(parents=True)
         self.config = self.root / "shad.toml"
-        self.config.write_text(CONFIG.format(root=self.root))
-        self.cfg = load(self.config)
+        write_config(self.root, self.config)
+        self.env: dict[str, str | None] = {
+            "SHAD_CONFIG": str(self.config),
+            "HOME": str(self.root),
+            "XDG_DATA_HOME": str(self.root / "data"),
+            "VISUAL": None,
+            "EDITOR": None,
+        }
 
-        patcher = patch("shad.todo.store.default_data_dir", return_value=self.root / "data")
-        patcher.start()
-        self.addCleanup(patcher.stop)
+    def _result(self, *argv: str) -> Result:
+        """`shad todo <argv>` through the entry point."""
+        return run(["todo", *argv], env=self.env)
 
     def _run(self, *argv: str) -> str:
-        """Run `shad todo <argv>` through the parser and the dispatcher; return stdout."""
-        args = build_parser().parse_args(["todo", *argv])
-        out = io.StringIO()
-        with contextlib.redirect_stdout(out):
-            cmd_todo(self.cfg, args, path=self.config)
-        return out.getvalue()
+        """A run that must exit 0 with nothing on stderr. Returns stdout."""
+        result = self._result(*argv)
+        self.assertEqual((result.code, result.err), (0, ""), result.out)
+        return result.out
+
+    def _fail(self, *argv: str) -> str:
+        """A run that must exit 1 with nothing on stdout. Returns stderr."""
+        result = self._result(*argv)
+        self.assertEqual((result.code, result.out), (1, ""), result.err)
+        return result.err
 
     def _dir(self) -> Path:
-        return self.root / "data" / "todo"
+        """Where the items land: the data directory's todo dir."""
+        return self.root / "data" / "shad" / "todo"
 
-    @contextlib.contextmanager
-    def _editor(
-        self,
-        *drafts: str | None,
-        module: str = "shad.todo.add.command",
-        confirm: tuple[bool, ...] = (),
-        status: int = 0,
-    ) -> Iterator[list[tuple[Path, str]]]:
-        """
-        A fake editor on a terminal, patched into *module*. Each run records
-        the file it was given and the text it found there, then saves the next
-        of *drafts* over it; None leaves the file as it was.
-        """
-        shown: list[tuple[Path, str]] = []
-        queue = list(drafts)
+    def editor(self, *drafts: str | None, status: int = 0) -> FakeEditor:
+        """Install a FakeEditor as EDITOR for the runs that follow."""
+        fake = FakeEditor(self.root / "editor-state", drafts, status=status)
+        self.env["EDITOR"] = fake.command
+        return fake
 
-        def edit(command: list[str], check: bool) -> subprocess.CompletedProcess[bytes]:
-            path = Path(command[-1])
-            shown.append((path, path.read_text()))
-            draft = queue.pop(0)
-            if draft is not None:
-                path.write_text(draft)
-            return subprocess.CompletedProcess(command, status)
 
-        with (
-            patch(f"{module}.resolve_editor", return_value="nano"),
-            patch(f"{module}.subprocess.run", side_effect=edit),
-            patch("shad.todo.add.command.sys.stdin") as stdin,
-            patch("shad.todo.add.command.Confirm.ask", side_effect=list(confirm)),
-        ):
-            stdin.isatty.return_value = True
-            yield shown
+class TodoTerminalCase(TmuxCase):
+    """The same config, for the commands that need a terminal."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        write_config(self.root, self.config)
+        self.todo_dir = self.data / "shad" / "todo"
+
+    def editor(self, *drafts: str | None, status: int = 0) -> FakeEditor:
+        """Install a FakeEditor as EDITOR for the panes that follow."""
+        fake = FakeEditor(self.root / "editor-state", drafts, status=status)
+        self.env["EDITOR"] = fake.command
+        return fake
+
+    def keys(self) -> list[str]:
+        """The item keys on disk, as `shad todo list --keys` would print them."""
+        if not self.todo_dir.is_dir():
+            return []
+        return sorted(path.stem for path in self.todo_dir.glob("*.md"))

@@ -1,34 +1,58 @@
 from __future__ import annotations
 
-from shad.shared.errors import ShadError
-from shad.todo import store
 from shad.todo.testing import TodoCase
-
-_MODULE = "shad.todo.edit.command"
 
 
 class EditTests(TodoCase):
-    def test_opens_the_item_file_in_the_editor(self) -> None:
-        self._run("add", "Fix panel resize")
-        with self._editor(None, module=_MODULE) as shown:
-            out = self._run("edit", "fix")
-        self.assertEqual(shown[0][0], store.item_path(self._dir(), "fix-panel-resize"))
-        self.assertEqual(out, "")
+    """
+    Feature:    todo/edit
+    Boundary:   command. `shad todo edit KEY`, through main(argv) with
+                SHAD_CONFIG and XDG_DATA_HOME under the test root and EDITOR
+                a real program. Contract: exit code + stdout + stderr.
+    """
 
-    def test_reports_what_the_saved_file_gets_wrong(self) -> None:
+    def test_edit_opens_the_item_file_in_the_editor(self) -> None:
+        """
+        Criterion:  edit-opens-the-item-file-in-the-editor
+          Given:    the item fix-panel-resize exists.
+          When:     `shad todo edit fix`.
+          Then:     exit 0, stdout and stderr empty, and the editor received
+                    the item's file.
+        """
         self._run("add", "Fix panel resize")
-        path = store.item_path(self._dir(), "fix-panel-resize")
-        broken = path.read_text().replace("status: todo", "status: doing")
-        with self._editor(broken, module=_MODULE):
-            out = self._run("edit", "fix")
-        self.assertIn("unknown status 'doing'", out)
+        editor = self.editor(None)
+        self.assertEqual(self._run("edit", "fix"), "")
+        self.assertEqual(editor.shown()[0][0], self._dir() / "fix-panel-resize.md")
 
-    def test_a_failing_editor_is_an_error(self) -> None:
+    def test_edit_reports_what_the_saved_file_gets_wrong(self) -> None:
+        """
+        Criterion:  edit-reports-what-the-saved-file-gets-wrong
+          Given:    EDITOR saves the item with an unknown status.
+          When:     `shad todo edit fix`.
+          Then:     exit 0, and the output names the unknown status.
+        """
         self._run("add", "Fix panel resize")
-        with self._editor(None, module=_MODULE, status=1), self.assertRaises(ShadError) as ctx:
-            self._run("edit", "fix")
-        self.assertIn("status 1", str(ctx.exception))
+        path = self._dir() / "fix-panel-resize.md"
+        self.editor(path.read_text().replace("status: todo", "status: doing"))
+        result = self._result("edit", "fix")
+        self.assertEqual(result.code, 0)
+        self.assertIn("unknown status 'doing'", result.out + result.err)
 
-    def test_unknown_key_is_an_error(self) -> None:
-        with self.assertRaises(ShadError):
-            self._run("edit", "nothing")
+    def test_edit_reports_a_failing_editor(self) -> None:
+        """
+        Criterion:  edit-reports-a-failing-editor
+          Given:    EDITOR exits with status 1.
+          When:     `shad todo edit fix`.
+          Then:     exit 1, stdout empty, stderr names the status.
+        """
+        self._run("add", "Fix panel resize")
+        self.editor(None, status=1)
+        self.assertIn("status 1", self._fail("edit", "fix"))
+
+    def test_edit_of_an_unknown_key_fails(self) -> None:
+        """
+        Criterion:  edit-of-an-unknown-key-fails
+          When:     `shad todo edit nothing`.
+          Then:     exit 1, stdout empty, stderr names the key.
+        """
+        self.assertIn("nothing", self._fail("edit", "nothing"))

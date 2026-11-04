@@ -6,6 +6,7 @@ the two streams. `TmuxServer` starts a separate tmux server for one test,
 on a private socket, and `Pane` runs a command in a window of it under a
 real pseudo-terminal, for the commands that drive tmux or need a terminal.
 `TmuxCase` wires both to a temporary home, config and data directory.
+`FakeEditor` is an $EDITOR that is a real program.
 
 No command imports this module.
 """
@@ -309,12 +310,17 @@ class TmuxCase(unittest.TestCase):
         return run(args, env={**self.env, "TMUX": None})
 
     def pane(
-        self, *args: str, cwd: Path | None = None, width: int = 100, height: int = 30
+        self,
+        *args: str,
+        env: Mapping[str, str] | None = None,
+        cwd: Path | None = None,
+        width: int = 100,
+        height: int = 30,
     ) -> Pane:
         """`shad <args>` as a process in a pane of this test's server."""
         return Pane(
-            self.server, shad_argv(*args), env=self.env, cwd=cwd or self.root,
-            width=width, height=height,
+            self.server, shad_argv(*args), env={**self.env, **(env or {})},
+            cwd=cwd or self.root, width=width, height=height,
         )
 
     def fake_harness(self, name: str) -> Path:
@@ -328,3 +334,52 @@ class TmuxCase(unittest.TestCase):
         script.write_text(f"#!/bin/bash\nexec -a {name} sleep 100000\n")
         script.chmod(0o755)
         return script
+
+
+class FakeEditor:
+    """
+    An $EDITOR for tests, as a real program. Each time it runs it records
+    the file it was given and the text it found there, saves the next of
+    *drafts* over the file (None leaves the file as it was), and exits with
+    *status*. `command` is the value to put in EDITOR.
+    """
+
+    def __init__(
+        self, directory: Path, drafts: Sequence[str | None] = (), *, status: int = 0
+    ) -> None:
+        self.directory = directory
+        directory.mkdir(parents=True, exist_ok=True)
+        for index, draft in enumerate(drafts):
+            if draft is not None:
+                (directory / f"draft-{index}.md").write_text(draft)
+        (directory / "status").write_text(str(status))
+        self.script = directory / "editor"
+        self.script.write_text(
+            f"#!{sys.executable}\n"
+            "import pathlib, shutil, sys\n"
+            f"state = pathlib.Path({str(directory)!r})\n"
+            "path = pathlib.Path(sys.argv[-1])\n"
+            "index = sum(1 for _ in state.glob('shown-*.path'))\n"
+            "(state / f'shown-{index}.path').write_text(str(path))\n"
+            "(state / f'shown-{index}.md').write_text(path.read_text())\n"
+            "draft = state / f'draft-{index}.md'\n"
+            "if draft.exists():\n"
+            "    shutil.copyfile(draft, path)\n"
+            "sys.exit(int((state / 'status').read_text()))\n"
+        )
+        self.script.chmod(0o755)
+
+    @property
+    def command(self) -> str:
+        return str(self.script)
+
+    def shown(self) -> list[tuple[Path, str]]:
+        """Each file the editor was given, with the text it found, in order."""
+        found: list[tuple[Path, str]] = []
+        for index in itertools.count():
+            record = self.directory / f"shown-{index}.path"
+            if not record.exists():
+                return found
+            text = (self.directory / f"shown-{index}.md").read_text()
+            found.append((Path(record.read_text()), text))
+        raise AssertionError("unreachable")
