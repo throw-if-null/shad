@@ -10,7 +10,7 @@ requires-python = ">=3.11"
 dependencies = ["rich>=15.0.0", "textual>=8.2.8"]
 
 [project.optional-dependencies]
-dev = ["pytest==9.2.0", "ruff==0.17.3", "mypy==2.4.1"]
+dev = ["pytest==9.2.0", "ruff==0.17.4", "mypy==2.4.1"]
 
 [project.scripts]
 shad = "shad.cli:main"
