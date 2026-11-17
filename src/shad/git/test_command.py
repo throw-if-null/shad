@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import argparse
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -8,7 +7,8 @@ from unittest.mock import Mock, patch
 from shad.git import apply, refs
 from shad.git import command as C
 from shad.git.model import BranchInfo, ProjectOutcome, ProjectPlan, Repo, WorktreeInfo
-from shad.shared.config import Config, Defaults, Project
+from shad.git.testing import GitCase, git, words
+from shad.shared.config import Project
 from shad.shared.errors import ShadError
 
 ROOT = Path("/tmp/repo")
@@ -134,13 +134,6 @@ class SyncGateTests(unittest.TestCase):
 
 
 class SyncOrchestrationTests(unittest.TestCase):
-    def test_no_projects_does_no_work(self) -> None:
-        with patch.object(C, "console") as console, patch.object(C, "require_git") as require:
-            run = C.sync_projects([])
-        require.assert_not_called()
-        self.assertEqual(run.outcomes, [])
-        self.assertIn("no projects configured", str(console.print.call_args))
-
     def test_one_failing_project_does_not_abort_the_others(self) -> None:
         projects = [_project("a"), _project("b"), _project("c")]
 
@@ -176,18 +169,6 @@ class SyncOrchestrationTests(unittest.TestCase):
         ):
             run = C.sync_projects(projects)
         self.assertEqual([o.plan.project.key for o in run.outcomes], ["a", "b", "c"])
-
-    def test_every_project_failing_is_a_shad_error(self) -> None:
-        with (
-            patch.object(C, "require_git"),
-            patch.object(C, "_resolve", side_effect=_resolve_all),
-            patch.object(C, "fetch_and_plan", side_effect=RuntimeError("nope")),
-            patch.object(C, "report"),
-            patch.object(C, "console"),
-            self.assertRaises(ShadError) as ctx,
-        ):
-            C.sync_projects([_project("a"), _project("b")])
-        self.assertIn("all 2 project(s) failed", str(ctx.exception))
 
     def test_a_partial_failure_is_not_a_shad_error(self) -> None:
         def fake(project: Project, **_kw: object) -> ProjectPlan:
@@ -377,141 +358,249 @@ class FailureIsolationTests(unittest.TestCase):
         self.assertEqual(plan.branch_deletions, [])
 
 
-class CmdGitTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.cfg = Config(
-            defaults=Defaults(),
-            projects={"kb": _project("kb")},
-            groups={"tin": {"shad": _project("shad", "tin"), "coral": _project("coral", "tin")}},
-        )
+class SyncTests(GitCase):
+    """
+    Feature:    git/sync
+    Boundary:   command. `shad git sync [<group>] [<name>] [--dry-run]
+                [--yes] [--switch]` as a process with no terminal, against
+                real clones of bare remotes under the test root. Contract:
+                exit code + stdout + stderr + the repositories.
+    """
 
-    def _args(self, **kwargs: object) -> argparse.Namespace:
-        base: dict[str, object] = {
-            "git_action": "sync", "name": [], "yes": False, "dry_run": False,
-            "switch": False,
-        }
-        base.update(kwargs)
-        return argparse.Namespace(**base)
+    def test_sync_dry_run_reports_deletions_and_deletes_nothing(self) -> None:
+        """
+        Criterion:  sync-dry-run-reports-deletions-and-deletes-nothing
+          Given:    kb tracks feat/merged, which the remote's main has merged.
+          When:     `shad git sync kb --dry-run`.
+          Then:     exit 0, stderr empty, stdout lists feat/merged under the
+                    pending deletions and says nothing was deleted, and the
+                    branch still exists.
+        """
+        self.clone("kb", merged=True)
+        result = self.run_detached("git", "sync", "kb", "--dry-run")
+        self.assertEqual((result.code, result.err), (0, ""), result.out)
+        self.assertIn("pending deletions", result.out)
+        self.assertIn("feat/merged", result.out)
+        self.assertIn("nothing was deleted", result.out)
+        self.assertIn("feat/merged", self.branches("kb"))
 
-    def _keys(self, **kwargs: object) -> list[str]:
-        with patch.object(C, "sync_projects") as sync:
-            C.cmd_git(self.cfg, self._args(**kwargs))
-        return [p.key for p in sync.call_args.args[0]]
+    def test_sync_yes_deletes_a_merged_branch(self) -> None:
+        """
+        Criterion:  sync-yes-deletes-a-merged-branch
+          Given:    kb tracks feat/merged, which the remote's main has merged.
+          When:     `shad git sync kb --yes`.
+          Then:     exit 0, stderr empty, stdout reports the branch deleted
+                    with a restore command and counts 1 branch deleted, and
+                    the branch is gone.
+        """
+        self.clone("kb", merged=True)
+        result = self.run_detached("git", "sync", "kb", "--yes")
+        self.assertEqual((result.code, result.err), (0, ""), result.out)
+        self.assertIn("deleted branch", result.out)
+        self.assertIn("restore: git branch feat/merged", words(result.out))
+        self.assertIn("1 branch deleted", result.out)
+        self.assertNotIn("feat/merged", self.branches("kb"))
 
-    def test_no_tokens_targets_every_project(self) -> None:
-        self.assertEqual(sorted(self._keys()), ["coral", "kb", "shad"])
+    def test_sync_keeps_a_branch_with_unpushed_commits(self) -> None:
+        """
+        Criterion:  sync-keeps-a-branch-with-unpushed-commits
+          Given:    kb's feat/unpushed is one commit ahead of its upstream.
+          When:     `shad git sync kb --yes`.
+          Then:     exit 0, stdout lists feat/unpushed among the branches
+                    kept, and the branch still exists.
+        """
+        self.clone("kb", unpushed=True)
+        result = self.run_detached("git", "sync", "kb", "--yes")
+        self.assertEqual(result.code, 0, result.err)
+        self.assertIn("branches kept", result.out)
+        self.assertIn("feat/unpushed", result.out)
+        self.assertIn("feat/unpushed", self.branches("kb"))
 
-    def test_one_token_targets_one_project(self) -> None:
-        self.assertEqual(self._keys(name=["kb"]), ["kb"])
+    def test_sync_fast_forwards_the_default_branch(self) -> None:
+        """
+        Criterion:  sync-fast-forwards-the-default-branch
+          Given:    the remote's main is one commit ahead of kb's.
+          When:     `shad git sync kb --yes`.
+          Then:     exit 0, stdout reports the fast-forward, and kb's HEAD is
+                    the remote's commit.
+        """
+        self.clone("kb")
+        oid = self.advance_remote("kb")
+        result = self.run_detached("git", "sync", "kb", "--yes")
+        self.assertEqual(result.code, 0, result.err)
+        self.assertIn("fast-forward", result.out)
+        self.assertEqual(self.head("kb"), oid)
 
-    def test_one_token_expands_a_group(self) -> None:
-        self.assertEqual(self._keys(name=["tin"]), ["coral", "shad"])
+    def test_sync_switch_checks_out_the_default_branch(self) -> None:
+        """
+        Criterion:  sync-switch-checks-out-the-default-branch
+          Given:    kb has feat/work checked out, and `shad git sync kb
+                    --yes` without --switch left it there.
+          When:     `shad git sync kb --switch --yes`.
+          Then:     exit 0, stdout reports the switch, and main is checked
+                    out.
+        """
+        path = self.clone("kb")
+        git(path, "switch", "-q", "-c", "feat/work")
+        self.run_detached("git", "sync", "kb", "--yes")
+        self.assertEqual(git(path, "branch", "--show-current"), "feat/work")
+        result = self.run_detached("git", "sync", "kb", "--switch", "--yes")
+        self.assertEqual(result.code, 0, result.err)
+        self.assertIn("switch", result.out)
+        self.assertEqual(git(path, "branch", "--show-current"), "main")
 
-    def test_two_tokens_target_one_grouped_project(self) -> None:
-        self.assertEqual(self._keys(name=["tin", "shad"]), ["shad"])
+    def test_sync_reports_every_project_and_skips_a_plain_directory(self) -> None:
+        """
+        Criterion:  sync-reports-every-project-and-skips-a-plain-directory
+          Given:    kb is an up-to-date clone, and tin shad and tin coral
+                    are plain directories.
+          When:     `shad git sync --yes`.
+          Then:     exit 0, stdout reports kb up to date and the other two
+                    skipped with a reason, and counts 1 project synced and 2
+                    skipped.
+        """
+        self.clone("kb")
+        for name in ("tin/shad", "tin/coral"):
+            (self.root / name).mkdir(parents=True)
+        result = self.run_detached("git", "sync", "--yes")
+        self.assertEqual(result.code, 0, result.err)
+        self.assertIn("syncing 3 projects", result.out)
+        self.assertIn("up to date", result.out)
+        self.assertIn("1 project synced", result.out)
+        self.assertIn("2 projects skipped", result.out)
 
-    def test_flags_are_forwarded(self) -> None:
-        with patch.object(C, "sync_projects") as sync:
-            C.cmd_git(self.cfg, self._args(yes=True, dry_run=True, switch=True))
-        self.assertEqual(
-            sync.call_args.kwargs, {"yes": True, "dry_run": True, "switch": True}
-        )
+    def test_sync_targets_a_group(self) -> None:
+        """
+        Criterion:  sync-targets-a-group
+          Given:    kb, tin shad and tin coral are clones.
+          When:     `shad git sync tin --dry-run`.
+          Then:     exit 0, and stdout names tin shad and tin coral and not
+                    kb.
+        """
+        for name in ("kb", "tin/shad", "tin/coral"):
+            self.clone(name)
+        result = self.run_detached("git", "sync", "tin", "--dry-run")
+        self.assertEqual(result.code, 0, result.err)
+        self.assertIn("tin shad", result.out)
+        self.assertIn("tin coral", result.out)
+        self.assertNotIn("kb", result.out)
 
-    def test_switch_defaults_to_off(self) -> None:
-        # The only working-tree mutation in the command; a bare `shad git sync`
-        # must never check anything out.
-        with patch.object(C, "sync_projects") as sync:
-            C.cmd_git(self.cfg, self._args())
-        self.assertIs(sync.call_args.kwargs["switch"], False)
+    def test_sync_with_every_project_failed_exits_1(self) -> None:
+        """
+        Criterion:  sync-with-every-project-failed-exits-1
+          Given:    kb's remote cannot be reached.
+          When:     `shad git sync kb --yes`.
+          Then:     exit 1, stdout reports kb failed, and stderr says every
+                    project failed.
+        """
+        self.clone("kb")
+        self.break_remote("kb")
+        result = self.run_detached("git", "sync", "kb", "--yes")
+        self.assertEqual(result.code, 1, result.out)
+        self.assertIn("1 project failed", result.out)
+        self.assertIn("all 1 project(s) failed", result.err)
 
-    def test_missing_action_is_rejected(self) -> None:
-        with self.assertRaises(ShadError) as ctx:
-            C.cmd_git(self.cfg, self._args(git_action=None))
-        self.assertIn("no git action given", str(ctx.exception))
+    def test_sync_with_no_projects_does_no_work(self) -> None:
+        """
+        Criterion:  sync-with-no-projects-does-no-work
+          Given:    the config names no project.
+          When:     `shad git sync`.
+          Then:     exit 0, stderr empty, stdout says none is configured.
+        """
+        self.write_config("[defaults]\n")
+        result = self.run_detached("git", "sync")
+        self.assertEqual((result.code, result.err), (0, ""), result.out)
+        self.assertIn("no projects configured", result.out)
 
-    def test_unknown_action_is_rejected(self) -> None:
-        with self.assertRaises(ShadError) as ctx:
-            C.cmd_git(self.cfg, self._args(git_action="nope"))
-        self.assertIn("unknown git action 'nope'", str(ctx.exception))
+    def test_sync_of_an_unknown_target_fails(self) -> None:
+        """
+        Criterion:  sync-of-an-unknown-target-fails
+          When:     `shad git sync nope`, and `shad git sync kb shad`.
+          Then:     each exits 1 with stdout empty; the first names nope, the
+                    second names the `shad git sync kb` form.
+        """
+        result = self.run_detached("git", "sync", "nope")
+        self.assertEqual((result.code, result.out), (1, ""), result.err)
+        self.assertIn("nope", result.err)
+        result = self.run_detached("git", "sync", "kb", "shad")
+        self.assertEqual((result.code, result.out), (1, ""), result.err)
+        self.assertIn("shad git sync kb", words(result.err))
 
-    def test_resolution_errors_name_the_git_command(self) -> None:
-        with self.assertRaises(ShadError) as ctx:
-            C.cmd_git(self.cfg, self._args(name=["kb", "shad"]))
-        self.assertIn("shad git sync kb", str(ctx.exception))
+    def test_git_without_an_action_fails(self) -> None:
+        """
+        Criterion:  git-without-an-action-fails
+          When:     `shad git`, and `shad git frob`.
+          Then:     the first exits 1 with stderr saying no action was given;
+                    the second exits 2.
+        """
+        result = self.run_shad("git")
+        self.assertEqual((result.code, result.out), (1, ""), result.err)
+        self.assertIn("no git action given", result.err)
+        self.assertEqual(self.run_shad("git", "frob").code, 2)
 
 
-class PanelActionTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.cfg = Config(
-            defaults=Defaults(),
-            projects={"kb": _project("kb")},
-            groups={"tin": {"shad": _project("shad", "tin"), "coral": _project("coral", "tin")}},
-        )
-        self.repo = Repo(root=ROOT, common_dir=ROOT / ".git")
+class PanelTests(GitCase):
+    """
+    Feature:    git/panel
+    Boundary:   command. `shad git panel [<group>] [<name>] [--no-fetch]` in
+                a terminal pane of the test's tmux server, or as a process
+                with no terminal where it fails before the view opens.
+                Contract: exit code + screen or stderr.
+    """
 
-    def _args(self, **kwargs: object) -> argparse.Namespace:
-        base: dict[str, object] = {"git_action": "panel", "name": [], "no_fetch": False}
-        base.update(kwargs)
-        return argparse.Namespace(**base)
+    def test_panel_shows_the_repository_and_quits(self) -> None:
+        """
+        Criterion:  panel-shows-the-repository-and-quits
+          Given:    kb is a clone on main.
+          When:     `shad git panel kb` in a terminal, then `q`.
+          Then:     the view shows the sections and the branch main, and the
+                    command exits 0.
+        """
+        self.clone("kb")
+        pane = self.pane("git", "panel", "kb")
+        screen = pane.wait_for("worktrees")
+        self.assertIn("branches", screen)
+        pane.wait_for("main")
+        pane.send("q")
+        self.assertEqual(pane.wait_exit(), 0)
 
-    def _open(self, **kwargs: object) -> Mock:
-        with (
-            patch.object(C, "require_git"),
-            patch.object(C.discover, "discover", return_value=self.repo) as found,
-            patch("shad.git.panel.run_panel") as run,
-        ):
-            C.cmd_git(self.cfg, self._args(**kwargs))
-            run.discovered = found  # type: ignore[attr-defined]
-            return run
+    def test_panel_without_a_name_uses_the_current_directory(self) -> None:
+        """
+        Criterion:  panel-without-a-name-uses-the-current-directory
+          Given:    the current directory is tin coral's clone, which is not
+                    named on the command line.
+          When:     `shad git panel --no-fetch` in a terminal there, then `q`.
+          Then:     the view shows the branch main, and the command exits 0.
+        """
+        path = self.clone("tin/coral")
+        pane = self.pane("git", "panel", "--no-fetch", cwd=path)
+        pane.wait_for("main")
+        pane.send("q")
+        self.assertEqual(pane.wait_exit(), 0)
 
-    def test_no_name_uses_the_current_directory(self) -> None:
-        with patch.object(C.Path, "cwd", return_value=Path("/tmp/here")):
-            run = self._open()
-        self.assertEqual(run.discovered.call_args.args[0], Path("/tmp/here"))
-        self.assertIs(run.call_args.args[0], self.repo)
+    def test_panel_of_a_group_with_several_projects_fails(self) -> None:
+        """
+        Criterion:  panel-of-a-group-with-several-projects-fails
+          When:     `shad git panel tin`.
+          Then:     exit 1, stdout empty, stderr says the panel shows one
+                    repository and that tin matches 2 projects.
+        """
+        result = self.run_detached("git", "panel", "tin")
+        self.assertEqual((result.code, result.out), (1, ""), result.err)
+        self.assertIn("matches 2 projects", result.err)
+        self.assertIn("shows one repository", words(result.err))
 
-    def test_a_named_project_uses_its_configured_path(self) -> None:
-        run = self._open(name=["kb"])
-        self.assertEqual(run.discovered.call_args.args[0], Path("/tmp/kb"))
-
-    def test_a_grouped_project_resolves_to_one_repository(self) -> None:
-        run = self._open(name=["tin", "shad"])
-        self.assertEqual(run.discovered.call_args.args[0], Path("/tmp/shad"))
-
-    def test_fetch_is_on_by_default(self) -> None:
-        run = self._open()
-        self.assertIs(run.call_args.kwargs["fetch"], True)
-
-    def test_no_fetch_is_forwarded(self) -> None:
-        run = self._open(no_fetch=True)
-        self.assertIs(run.call_args.kwargs["fetch"], False)
-
-    def test_a_group_matching_several_projects_is_rejected(self) -> None:
-        # The panel shows one repository; `sync`'s fan-out has no meaning here.
-        with (
-            patch.object(C, "require_git"),
-            patch("shad.git.panel.run_panel") as run,
-            self.assertRaises(ShadError) as ctx,
-        ):
-            C.cmd_git(self.cfg, self._args(name=["tin"]))
-        self.assertIn("matches 2 projects", str(ctx.exception))
-        run.assert_not_called()
-
-    def test_an_unusable_path_is_reported_as_a_shad_error(self) -> None:
-        with (
-            patch.object(C, "require_git"),
-            patch.object(
-                C.discover,
-                "discover",
-                side_effect=C.discover.NotUsable("not a git repository"),
-            ),
-            self.assertRaises(ShadError) as ctx,
-        ):
-            C.cmd_git(self.cfg, self._args(name=["kb"]))
-        self.assertIn("not a git repository", str(ctx.exception))
-
-    def test_panel_is_a_known_action(self) -> None:
-        self.assertIn("panel", C.ACTIONS)
+    def test_panel_of_a_plain_directory_fails(self) -> None:
+        """
+        Criterion:  panel-of-a-plain-directory-fails
+          Given:    kb is a plain directory.
+          When:     `shad git panel kb`.
+          Then:     exit 1, stdout empty, stderr non-empty.
+        """
+        self.path("kb").mkdir()
+        result = self.run_detached("git", "panel", "kb")
+        self.assertEqual((result.code, result.out), (1, ""), result.err)
+        self.assertNotEqual(result.err, "")
 
 
 if __name__ == "__main__":
