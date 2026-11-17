@@ -1,4 +1,4 @@
-"""`python -m shad`: the entry point the `shad` console script runs."""
+"""`python -m shad`: exits with what `cli.main` returns, as the `shad` console script does."""
 
 from __future__ import annotations
 

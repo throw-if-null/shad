@@ -715,10 +715,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """
-    The `shad` entry point. *argv* is the command line after the program
-    name, or None for the process's own. Returns the exit code, which the
-    console script and `python -m shad` exit with.
+    """The `shad` entry point. Returns the exit code, which the console
+    script and `python -m shad` exit with.
+
+    *argv* is the command line after the program name; None reads the
+    process's own.
     """
     parser = build_parser()
     try:
