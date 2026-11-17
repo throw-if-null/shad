@@ -142,6 +142,11 @@ class TmuxServer:
     def new_session(
         self, name: str, *, cwd: Path | None = None, command: str | None = None
     ) -> None:
+        """
+        A detached session. *command* runs under `/bin/sh -c`; start it with
+        `exec` when the pane's command must read as the program, because
+        dash keeps `sh -c` alive around it.
+        """
         args = ["new-session", "-d", "-s", name, "-x", "120", "-y", "40"]
         if cwd is not None:
             args += ["-c", str(cwd)]
