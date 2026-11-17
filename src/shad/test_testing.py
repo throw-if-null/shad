@@ -87,13 +87,29 @@ class PaneTests(TmuxCase):
 
     def test_the_pane_sees_this_server_and_the_test_environment(self) -> None:
         pane = Pane(
-            self.server, ["sh", "-c", 'echo "home=$HOME"; tmux display-message -p "#{socket_path}"'],
+            self.server,
+            ["sh", "-c", 'echo "home=$HOME kitty=${KITTY_WINDOW_ID-unset}"; tmux display-message -p "#{socket_path}"'],
             env=self.env, cwd=self.root,
         )
         self.assertEqual(pane.wait_exit(), 0)
         screen = pane.screen()
-        self.assertIn(f"home={self.home}", screen)
+        self.assertIn(f"home={self.home} kitty=unset", screen)
         self.assertIn(self.server.socket_path, screen)
+
+    def test_a_session_the_server_opens_runs_in_the_test_environment(self) -> None:
+        # What a shad layout's panes see: the server's environment, with the
+        # `shad` shim first on PATH.
+        self.server.new_session("probe", command='echo "home=$HOME"; command -v shad; sleep 100')
+        pane = Pane(self.server, ["sleep", "0"], env={}, cwd=self.root)
+        pane.wait_exit()
+        screen = self.server.tmux("capture-pane", "-p", "-t", "probe").stdout
+        self.assertIn(f"home={self.home}", screen)
+        self.assertIn(str(self.bin / "shad"), screen)
+
+    def test_run_detached_has_no_terminal_and_reaches_this_server(self) -> None:
+        result = self.run_detached("--version")
+        self.assertEqual((result.code, result.err), (0, ""))
+        self.assertIn(f"shad {__version__}", result.out)
 
     def test_the_fake_harness_is_the_foreground_command(self) -> None:
         self.fake_harness("claude")

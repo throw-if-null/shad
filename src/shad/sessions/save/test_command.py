@@ -1,146 +1,194 @@
 from __future__ import annotations
 
-import argparse
-import tempfile
-import unittest
-from pathlib import Path
-from unittest.mock import patch
-
-from shad.sessions import store
-from shad.sessions.model import Entry, Snapshot
-from shad.sessions.save.command import save_sessions
-from shad.sessions.testing import CFG, KB, SHAD, UUID_A, UUID_B, running
-from shad.shared.errors import ShadError
-from shad.shared.picker import NoTerminal
+from shad.sessions.testing import UUID_A, UUID_B, SessionsCase, entry
 
 
-def _args(*, all: bool = False) -> argparse.Namespace:
-    return argparse.Namespace(sessions_action="save", all=all)
+class SaveAllTests(SessionsCase):
+    """
+    Feature:    sessions/save --all
+    Boundary:   command. `shad sessions save --all` as a process with no
+                terminal, against the test's tmux server, home and data
+                directory. Contract: exit code + stdout + stderr + the
+                snapshot, read back through `shad sessions show`.
+    """
 
+    def test_save_all_records_every_savable_session(self) -> None:
+        """
+        Criterion:  save-all-records-every-savable-session
+          Given:    kb runs claude on conversation A (named Netbird, first
+                    prompt "Fix the panel"), tin shad runs claude on B (first
+                    prompt "first prompt"), and kb also runs an opencode
+                    session.
+          When:     `shad sessions save --all`.
+          Then:     exit 0, stderr empty, stdout reports 2 sessions saved and
+                    lists the opencode session as not supported, and the
+                    snapshot holds kb with A, Netbird and its prompt, and tin
+                    shad with B and its prompt, neither attached.
+        """
+        self.start_session("kb", UUID_A, name="Netbird", title="Fix the panel", status="idle")
+        self.start_session("tin-shad", UUID_B)
+        opencode = self.start_session("kb", "fresh-1", harness="opencode")
 
-def _entry(key: str, session_id: str | None) -> Entry:
-    return Entry(group=None, key=key, harness="claude", session_id=session_id, attached=False)
+        result = self.run_detached("sessions", "save", "--all")
 
-
-class SaveTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self._tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self._tmp.cleanup)
-        self.path = Path(self._tmp.name) / "sessions.json"
-        patcher = patch("shad.sessions.store.snapshot_path", return_value=self.path)
-        patcher.start()
-        self.addCleanup(patcher.stop)
-
-    def _write_snapshot(self, *entries: Entry) -> None:
-        store.write(self.path, Snapshot(saved_at=1, entries=entries))
-
-    def test_all_writes_every_savable_session(self) -> None:
-        live = [
-            running("kb--cc-x", KB, session_id=UUID_A, attached=True, name="N", title="T"),
-            running("kb--oc-y", KB, session_id=None, harness="opencode", unsupported="no"),
-            running("tin-shad--cc-z", SHAD, session_id=UUID_B),
-        ]
-        with (
-            patch("shad.sessions.live.collect", return_value=live),
-            patch("shad.sessions.pick.pick_many") as pick,
-        ):
-            save_sessions(CFG, _args(all=True))
-
-        pick.assert_not_called()
+        self.assertEqual((result.code, result.err), (0, ""), result.out)
+        self.assertIn("2 sessions saved", result.out)
+        self.assertIn(opencode, result.out)
+        self.assertIn("not supported", result.out)
         self.assertEqual(
-            list(store.read(self.path).entries),
+            self.read_snapshot(),
             [
-                Entry(group=None, key="kb", harness="claude", session_id=UUID_A, attached=True, name="N", title="T"),
-                Entry(group="tin", key="shad", harness="claude", session_id=UUID_B, attached=False),
+                entry("kb", UUID_A, name="Netbird", title="Fix the panel"),
+                entry("shad", UUID_B, group="tin", title="first prompt"),
             ],
         )
+        self.assertIn("2 sessions", self.run_shad("sessions", "show").out)
 
-    def test_writes_the_picked_rows_only(self) -> None:
-        live = [running("kb--cc-x", KB, session_id=UUID_A), running("tin-shad--cc-z", SHAD, session_id=UUID_B)]
-        with (
-            patch("shad.sessions.live.collect", return_value=live),
-            patch("shad.sessions.pick.pick_many", return_value=frozenset({1})),
-        ):
-            save_sessions(CFG, _args())
+    def test_save_all_records_a_bare_session_through_the_harness_record(self) -> None:
+        """
+        Criterion:  save-all-records-a-bare-session-through-the-harness-record
+          Given:    the bare session kb runs claude, whose process record
+                    names conversation A.
+          When:     `shad sessions save --all`.
+          Then:     exit 0, and the snapshot holds kb with A.
+        """
+        self.start_session("kb", None, conversation=UUID_A, title=None)
+        result = self.run_detached("sessions", "save", "--all")
+        self.assertEqual(result.code, 0, result.err)
+        self.assertEqual(self.read_snapshot(), [entry("kb", UUID_A)])
 
-        self.assertEqual([e.session_id for e in store.read(self.path).entries], [UUID_B])
+    def test_save_all_with_nothing_running_fails(self) -> None:
+        """
+        Criterion:  save-all-with-nothing-running-fails
+          Given:    no shad session runs.
+          When:     `shad sessions save --all`.
+          Then:     exit 1, stdout empty, stderr says no shad session is
+                    running, and no snapshot is written.
+        """
+        result = self.run_detached("sessions", "save", "--all")
+        self.assertEqual((result.code, result.out), (1, ""), result.err)
+        self.assertIn("no shad sessions are running", result.err)
+        self.assertFalse(self.snapshot.exists())
 
-    def test_checks_every_row_when_there_is_no_snapshot(self) -> None:
-        live = [running("kb--cc-x", session_id=UUID_A), running("kb--cc-y", session_id=UUID_B)]
-        with (
-            patch("shad.sessions.live.collect", return_value=live),
-            patch("shad.sessions.pick.pick_many", return_value=frozenset()) as pick,
-        ):
-            save_sessions(CFG, _args())
+    def test_save_all_with_only_unsupported_sessions_fails(self) -> None:
+        """
+        Criterion:  save-all-with-only-unsupported-sessions-fails
+          Given:    the only shad session runs opencode.
+          When:     `shad sessions save --all`.
+          Then:     exit 1, stderr says no session could be saved, and no
+                    snapshot is written.
+        """
+        self.start_session("kb", "fresh-1", harness="opencode")
+        result = self.run_detached("sessions", "save", "--all")
+        self.assertEqual(result.code, 1)
+        self.assertIn("no session could be saved", result.err)
+        self.assertFalse(self.snapshot.exists())
 
-        self.assertEqual(set(pick.call_args.args[2]), {0, 1})
 
-    def test_checks_the_rows_the_snapshot_already_holds(self) -> None:
-        self._write_snapshot(_entry("kb", UUID_B))
-        live = [
-            running("kb--cc-x", session_id=UUID_A),
-            running("kb--cc-y", session_id=UUID_B),
-            running("kb--cc-fresh", session_id=None),
-        ]
-        with (
-            patch("shad.sessions.live.collect", return_value=live),
-            patch("shad.sessions.pick.pick_many", return_value=frozenset()) as pick,
-        ):
-            save_sessions(CFG, _args())
+class SavePickerTests(SessionsCase):
+    """
+    Feature:    sessions/save (the picker)
+    Boundary:   command. `shad sessions save` in a terminal pane of the
+                test's tmux server. Contract: exit code + screen + the
+                snapshot.
+    """
 
-        self.assertEqual(set(pick.call_args.args[2]), {1})
+    def test_save_picker_starts_with_every_row_checked_without_a_snapshot(self) -> None:
+        """
+        Criterion:  save-picker-starts-with-every-row-checked-without-a-snapshot
+          Given:    kb runs claude on A and tin shad on B, and no snapshot
+                    exists.
+          When:     `shad sessions save` in a terminal, then Enter.
+          Then:     the picker shows both rows checked, exit 0, and the
+                    snapshot holds A and B.
+        """
+        self.start_session("kb", UUID_A)
+        self.start_session("tin-shad", UUID_B)
+        pane = self.pane("sessions", "save")
+        screen = pane.wait_for("save sessions")
+        self.assertEqual(screen.count("[x]"), 2)
+        pane.send("Enter")
+        self.assertEqual(pane.wait_exit(), 0)
+        self.assertEqual([e["session_id"] for e in self.read_snapshot()], [UUID_A, UUID_B])
 
-    def test_an_empty_pick_writes_an_empty_snapshot(self) -> None:
-        self._write_snapshot(_entry("kb", UUID_A))
-        with (
-            patch("shad.sessions.live.collect", return_value=[running("kb--cc-x")]),
-            patch("shad.sessions.pick.pick_many", return_value=frozenset()),
-        ):
-            save_sessions(CFG, _args())
+    def test_save_picker_prechecks_the_rows_the_snapshot_holds(self) -> None:
+        """
+        Criterion:  save-picker-prechecks-the-rows-the-snapshot-holds
+          Given:    the snapshot holds B, and kb runs A while tin shad runs B.
+          When:     `shad sessions save` in a terminal, then Enter.
+          Then:     the picker shows one row unchecked and one checked, exit
+                    0, and the snapshot still holds B only.
+        """
+        self.write_snapshot(entry("shad", UUID_B, group="tin"))
+        self.start_session("kb", UUID_A)
+        self.start_session("tin-shad", UUID_B)
+        pane = self.pane("sessions", "save")
+        screen = pane.wait_for("save sessions")
+        self.assertEqual((screen.count("[ ]"), screen.count("[x]")), (1, 1))
+        pane.send("Enter")
+        self.assertEqual(pane.wait_exit(), 0)
+        self.assertEqual([e["session_id"] for e in self.read_snapshot()], [UUID_B])
 
-        self.assertEqual(store.read(self.path).entries, ())
+    def test_save_picker_writes_the_toggled_rows(self) -> None:
+        """
+        Criterion:  save-picker-writes-the-toggled-rows
+          Given:    kb runs A and tin shad runs B, and no snapshot exists.
+          When:     `shad sessions save` in a terminal, Space on the first
+                    row, then Enter.
+          Then:     exit 0, and the snapshot holds B only.
+        """
+        self.start_session("kb", UUID_A)
+        self.start_session("tin-shad", UUID_B)
+        pane = self.pane("sessions", "save")
+        pane.wait_for("save sessions")
+        pane.send("Space", "Enter")
+        self.assertEqual(pane.wait_exit(), 0)
+        self.assertEqual([e["session_id"] for e in self.read_snapshot()], [UUID_B])
 
-    def test_cancel_leaves_the_file_alone(self) -> None:
-        self._write_snapshot(_entry("kb", UUID_A))
-        before = self.path.read_text()
-        with (
-            patch("shad.sessions.live.collect", return_value=[running("kb--cc-x")]),
-            patch("shad.sessions.pick.pick_many", return_value=None),
-        ):
-            save_sessions(CFG, _args())
+    def test_save_picker_accepts_an_empty_selection(self) -> None:
+        """
+        Criterion:  save-picker-accepts-an-empty-selection
+          Given:    the snapshot holds A, and kb runs A.
+          When:     `shad sessions save` in a terminal, `a` to clear every
+                    row, then Enter.
+          Then:     exit 0, and the snapshot holds no entry.
+        """
+        self.write_snapshot(entry("kb", UUID_A))
+        self.start_session("kb", UUID_A)
+        pane = self.pane("sessions", "save")
+        pane.wait_for("save sessions")
+        pane.send("a", "Enter")
+        self.assertEqual(pane.wait_exit(), 0)
+        self.assertEqual(self.read_snapshot(), [])
 
-        self.assertEqual(self.path.read_text(), before)
+    def test_save_picker_cancel_leaves_the_snapshot_alone(self) -> None:
+        """
+        Criterion:  save-picker-cancel-leaves-the-snapshot-alone
+          Given:    the snapshot holds A, and kb runs B.
+          When:     `shad sessions save` in a terminal, then `q`.
+          Then:     exit 0, the screen says cancelled, and the snapshot is
+                    byte-identical.
+        """
+        self.write_snapshot(entry("kb", UUID_A))
+        before = self.snapshot.read_text()
+        self.start_session("kb", UUID_B)
+        pane = self.pane("sessions", "save")
+        pane.wait_for("save sessions")
+        pane.send("q")
+        self.assertEqual(pane.wait_exit(), 0)
+        self.assertIn("cancelled", pane.screen())
+        self.assertEqual(self.snapshot.read_text(), before)
 
-    def test_without_a_terminal_points_at_all(self) -> None:
-        with (
-            patch("shad.sessions.live.collect", return_value=[running("kb--cc-x")]),
-            patch("shad.sessions.pick.pick_many", side_effect=NoTerminal("no tty")),
-            self.assertRaises(ShadError) as ctx,
-        ):
-            save_sessions(CFG, _args())
-
-        self.assertIn("--all", str(ctx.exception))
-        self.assertFalse(self.path.exists())
-
-    def test_nothing_running_leaves_the_file_alone(self) -> None:
-        self._write_snapshot(_entry("kb", UUID_A))
-        before = self.path.read_text()
-        with (
-            patch("shad.sessions.live.collect", return_value=[]),
-            self.assertRaises(ShadError) as ctx,
-        ):
-            save_sessions(CFG, _args(all=True))
-
-        self.assertIn("no shad sessions are running", str(ctx.exception))
-        self.assertEqual(self.path.read_text(), before)
-
-    def test_only_unsupported_sessions_leaves_the_file_alone(self) -> None:
-        live = [running("kb--oc-x", session_id=None, harness="opencode", unsupported="no")]
-        with (
-            patch("shad.sessions.live.collect", return_value=live),
-            self.assertRaises(ShadError) as ctx,
-        ):
-            save_sessions(CFG, _args(all=True))
-
-        self.assertIn("no session could be saved", str(ctx.exception))
-        self.assertFalse(self.path.exists())
+    def test_save_without_a_terminal_points_at_all(self) -> None:
+        """
+        Criterion:  save-without-a-terminal-points-at-all
+          Given:    kb runs A.
+          When:     `shad sessions save` as a process with no terminal.
+          Then:     exit 1, stdout empty, stderr names `--all`, and no
+                    snapshot is written.
+        """
+        self.start_session("kb", UUID_A)
+        result = self.run_detached("sessions", "save")
+        self.assertEqual((result.code, result.out), (1, ""), result.err)
+        self.assertIn("--all", result.err)
+        self.assertFalse(self.snapshot.exists())
