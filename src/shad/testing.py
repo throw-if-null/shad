@@ -2,9 +2,9 @@
 Test support that drives shad the way its users do.
 
 `run` calls the entry point in this process and returns the exit code and
-the two streams. `TmuxServer` is a tmux server of the test's own, on a
-private socket, and `Pane` runs a command in a window of it under a real
-pseudo-terminal, for the commands that drive tmux or need a terminal.
+the two streams. `TmuxServer` starts a separate tmux server for one test,
+on a private socket, and `Pane` runs a command in a window of it under a
+real pseudo-terminal, for the commands that drive tmux or need a terminal.
 `TmuxCase` wires both to a temporary home, config and data directory.
 
 No command imports this module.
@@ -84,13 +84,14 @@ def shad_argv(*args: str) -> list[str]:
 
 class TmuxServer:
     """
-    A tmux server of the test's own.
+    A separate tmux server, started by one test for its use alone and
+    killed by it. The user's server is never touched.
 
     tmux keeps its default socket under $TMUX_TMPDIR, and a client inside
     tmux follows $TMUX instead. The environment this server hands out sets
     the first to a private directory and removes the second, so every tmux
     call a shad process started by the test makes reaches this server and
-    never the user's. The server's own calls name the socket outright (-S):
+    never the user's. The calls this class makes name the socket outright (-S):
     with TMUX_TMPDIR alone, tmux falls back to the user's server once the
     directory is gone. The user's tmux.conf is not read (-f /dev/null), so
     the tests see tmux's defaults.
