@@ -37,9 +37,12 @@ class CheatTests(TmuxCase):
           Then:     the sheet is not printed into the shell, the command
                     returns only once the popup closes, and the shell goes on.
         """
+        # The typed command line holds "rc=" too; only a whole line counts.
         returned = re.compile(r"^rc=\d+$", re.MULTILINE)
         self.shell_with_client(height=50)
         self.type_into_shell("shad cheat; echo rc=$?")
+        # Had shad printed the sheet and exited instead, it would have
+        # returned by now.
         time.sleep(1.0)
         screen = self.shell_screen()
         self.assertIsNone(returned.search(screen), screen)

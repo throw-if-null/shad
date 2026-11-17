@@ -337,10 +337,6 @@ class AppendTomlTests(unittest.TestCase):
         self.assertIn("[projects.newapp]", content)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 # ---------------------------------------------------------------------------
 # the wizard, as a user runs it
 # ---------------------------------------------------------------------------
@@ -475,3 +471,7 @@ class InitWizardTests(TmuxCase):
         self.assertEqual(pane.wait_exit(), 0)
         self.assertIn("Aborted", pane.screen())
         self.assertFalse(self.config.exists())
+
+
+if __name__ == "__main__":
+    unittest.main()
