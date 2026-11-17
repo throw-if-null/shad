@@ -107,9 +107,9 @@ class TmuxServer:
 
     def __init__(self, env: Mapping[str, str] | None = None) -> None:
         """
-        *env* is what the server's own environment adds to the test
-        process's: every pane the server opens, including the panes a shad
-        layout creates, inherits it.
+        *env* is added to this process's environment to form the server's.
+        Every pane the server opens, including the panes a shad layout
+        creates, inherits it.
         """
         self.directory = Path(tempfile.mkdtemp(prefix="shad-tmux-", dir="/tmp"))
         # The path tmux derives from TMUX_TMPDIR, so -S and the environment agree.
@@ -292,9 +292,9 @@ def _unreaped_status(pid: int) -> int | None:
 
 class TmuxCase(unittest.TestCase):
     """
-    A test with a tmux server, a home, a config and a data directory of its
-    own. `self.env` is the environment every shad run and pane gets, and
-    the server's own: HOME and the XDG directories under the temporary
+    A test with a separate tmux server, home, config and data directory.
+    `self.env` is the environment that every shad run, every pane and the
+    server itself get: HOME and the XDG directories under the temporary
     root, SHAD_CONFIG at self.config, PATH with self.bin first, where a
     `shad` runs this checkout, PYTHONPATH for the same, the server's socket
     directory, and none of UNSET.
