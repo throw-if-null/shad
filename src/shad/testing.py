@@ -223,7 +223,9 @@ class Pane:
                 "display-message", "-p", "-t", self.name, "#{pane_dead} #{pane_dead_status}"
             )
             dead, _, code = result.stdout.strip().partition(" ")
-            return int(code) if dead == "1" else None
+            # tmux marks the pane dead when its pty closes and records the
+            # status when it reaps the child; either can come first.
+            return int(code) if dead == "1" and code else None
 
         code = self._wait(status, lambda found: found is not None, timeout, "exit")
         assert code is not None  # _wait returned because it is
