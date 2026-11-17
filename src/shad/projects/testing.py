@@ -59,8 +59,9 @@ def git(repo: Path, *args: str) -> str:
 
 class ProjectsCase(TmuxCase):
     """
-    The projects kb, tin shad and tin coral on claude, with a fake claude
-    on PATH and Claude Code's transcript directory under the test home.
+    The projects kb, kc, tin shad and tin coral on claude, with a fake
+    claude on PATH and Claude Code's transcript directory under the test
+    home.
     """
 
     def setUp(self) -> None:
