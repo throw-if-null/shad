@@ -95,8 +95,7 @@ def _create_session(
                 "-t",
                 f"{session}:0.0",
                 "-v",
-                "-p",
-                str(panel_percent),
+                *_size(panel_percent),
                 "-c",
                 cwd,
             ]
@@ -109,8 +108,7 @@ def _create_session(
                     "-t",
                     f"{session}:0.1",
                     "-h",
-                    "-p",
-                    str(split_percent),
+                    *_size(split_percent),
                     "-c",
                     cwd,
                 ]
@@ -129,8 +127,7 @@ def _create_session(
                 "-t",
                 f"{session}:0.0",
                 "-v",
-                "-p",
-                str(oc_percent),
+                *_size(oc_percent),
                 "-c",
                 cwd,
             ]
@@ -146,8 +143,7 @@ def _create_session(
                     "-t",
                     f"{session}:0.0",
                     "-h",
-                    "-p",
-                    str(split_percent),
+                    *_size(split_percent),
                     "-c",
                     cwd,
                 ]
@@ -166,8 +162,7 @@ def _create_session(
                 "-t",
                 f"{session}:0.0",
                 "-h",
-                "-p",
-                str(panel_percent),
+                *_size(panel_percent),
                 "-c",
                 cwd,
             ]
@@ -180,8 +175,7 @@ def _create_session(
                     "-t",
                     f"{session}:0.1",
                     "-v",
-                    "-p",
-                    str(split_percent),
+                    *_size(split_percent),
                     "-c",
                     cwd,
                 ]
@@ -243,6 +237,15 @@ def _layout_with_todo(
     _run(["tmux", "select-pane", "-t", main])
 
 
+def _size(percent: int) -> list[str]:
+    """
+    The split-window size for *percent* of the pane. tmux 3.4 rejects the
+    older `-p percent` with "size missing"; `-l` with a percentage is
+    accepted by every tmux since 3.1.
+    """
+    return ["-l", f"{percent}%"]
+
+
 def _split(pane: str, direction: str, percent: int, cwd: str) -> str:
     """Split *pane* and return the new pane's id."""
     result = _run(
@@ -252,8 +255,7 @@ def _split(pane: str, direction: str, percent: int, cwd: str) -> str:
             "-t",
             pane,
             direction,
-            "-p",
-            str(percent),
+            *_size(percent),
             "-c",
             cwd,
             "-P",
