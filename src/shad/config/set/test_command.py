@@ -1,38 +1,55 @@
 from __future__ import annotations
 
-from unittest.mock import patch
-
 from shad.config.testing import ConfigCase
-from shad.shared.errors import ShadError
 
 
 class SetTests(ConfigCase):
-    def test_updates_the_value_and_keeps_the_comment(self) -> None:
-        self._run("set", "defaults.panel_percent", "42")
-        self.assertEqual(self._raw()["defaults"]["panel_percent"], 42)
+    """
+    Feature:    config/set
+    Boundary:   command. `shad config set KEY VALUE [--force]`, through
+                main(argv) with SHAD_CONFIG set and HOME at the test root.
+                Contract: exit code + stdout + stderr + the file.
+    """
+
+    def test_set_writes_the_value_and_keeps_the_file_layout(self) -> None:
+        """
+        Criterion:  set-writes-the-value-and-keeps-the-file-layout
+          Given:    shad.toml sets `panel_percent = 35  # bundle width`.
+          When:     `shad config set defaults.panel_percent 42`.
+          Then:     exit 0, stderr empty, stdout names the key and value,
+                    `shad config get defaults.panel_percent` prints 42, and
+                    the comment on that line survives.
+        """
+        out = self._run("set", "defaults.panel_percent", "42")
+        self.assertIn("defaults.panel_percent", out)
+        self.assertIn("42", out)
+        self.assertEqual(self._run("get", "defaults.panel_percent"), "42\n")
         self.assertIn("panel_percent = 42  # bundle width", self.path.read_text())
 
     def test_normalises_enum_case(self) -> None:
         self._run("set", "defaults.harness", "CLAUDE")
         self.assertEqual(self._raw()["defaults"]["harness"], "claude")
 
-    def test_rejects_an_invalid_enum(self) -> None:
-        with self.assertRaises(ShadError) as ctx:
-            self._run("set", "defaults.oc_position", "sideways")
-        self.assertIn("must be one of", str(ctx.exception))
-        self.assertEqual(self._raw()["defaults"]["oc_position"], "top")
+    def test_set_rejects_an_invalid_value_and_leaves_the_file_unchanged(self) -> None:
+        """
+        Criterion:  set-rejects-an-invalid-value-and-leaves-the-file-unchanged
+          Given:    shad.toml sets oc_position = "top".
+          When:     `shad config set defaults.oc_position sideways`.
+          Then:     exit 1, stdout empty, stderr lists the allowed values,
+                    and the file is byte-identical.
+        """
+        before = self.path.read_text()
+        self.assertIn("must be one of", self._fail("set", "defaults.oc_position", "sideways"))
+        self.assertEqual(self.path.read_text(), before)
 
     def test_rejects_a_percent_out_of_range(self) -> None:
-        with self.assertRaises(ShadError):
-            self._run("set", "defaults.split_percent", "200")
+        self._fail("set", "defaults.split_percent", "200")
 
     def test_rejects_a_non_integer_percent(self) -> None:
-        with self.assertRaises(ShadError):
-            self._run("set", "defaults.panel_percent", "wide")
+        self._fail("set", "defaults.panel_percent", "wide")
 
     def test_rejects_a_zero_todo_percent(self) -> None:
-        with self.assertRaises(ShadError):
-            self._run("set", "defaults.todo_percent", "0")
+        self._fail("set", "defaults.todo_percent", "0")
 
     def test_writes_a_panel_switch_as_a_toml_boolean(self) -> None:
         self._run("set", "defaults.git_panel", "False")
@@ -40,32 +57,39 @@ class SetTests(ConfigCase):
         self.assertIn("git_panel = false", self.path.read_text())
 
     def test_rejects_a_panel_switch_that_is_not_true_or_false(self) -> None:
-        with self.assertRaises(ShadError) as ctx:
-            self._run("set", "defaults.todo_panel", "off")
-        self.assertIn("true or false", str(ctx.exception))
+        self.assertIn("true or false", self._fail("set", "defaults.todo_panel", "off"))
 
-    def test_rejects_an_unknown_key_without_force(self) -> None:
-        with self.assertRaises(ShadError) as ctx:
-            self._run("set", "defaults.nope", "1")
-        self.assertIn("unknown key", str(ctx.exception))
-
-    def test_a_forced_unknown_key_infers_its_type(self) -> None:
+    def test_set_of_an_unknown_key_fails_unless_forced(self) -> None:
+        """
+        Criterion:  set-of-an-unknown-key-fails-unless-forced
+          When:     `shad config set defaults.nope 7`, then the same with
+                    `--force`.
+          Then:     the first exits 1 with stdout empty and stderr naming the
+                    unknown key; the second exits 0 and writes 7 as an
+                    integer.
+        """
+        self.assertIn("unknown key", self._fail("set", "defaults.nope", "7"))
         self._run("set", "--force", "defaults.nope", "7")
         self.assertEqual(self._raw()["defaults"]["nope"], 7)
 
     def test_rejects_a_missing_project_path(self) -> None:
-        with self.assertRaises(ShadError) as ctx:
-            self._run("set", "projects.kb.path", str(self.root / "gone"))
-        self.assertIn("path does not exist", str(ctx.exception))
+        self.assertIn(
+            "path does not exist", self._fail("set", "projects.kb.path", str(self.root / "gone"))
+        )
 
     def test_a_forced_missing_project_path_is_written(self) -> None:
         target = self.root / "gone"
         self._run("set", "--force", "projects.kb.path", str(target))
         self.assertEqual(self._raw()["projects"]["kb"]["path"], str(target))
 
-    def test_expands_user_in_paths(self) -> None:
-        with patch.dict("os.environ", {"HOME": str(self.root)}):
-            self._run("set", "projects.kb.path", "~/kb")
+    def test_set_expands_a_tilde_against_home(self) -> None:
+        """
+        Criterion:  set-expands-a-tilde-against-home
+          Given:    HOME is the test root, which holds the directory kb.
+          When:     `shad config set projects.kb.path ~/kb`.
+          Then:     exit 0, and the file holds the expanded path.
+        """
+        self._run("set", "projects.kb.path", "~/kb")
         self.assertEqual(self._raw()["projects"]["kb"]["path"], str(self.root / "kb"))
 
     def test_todo_path_creates_the_todo_table(self) -> None:
@@ -73,12 +97,12 @@ class SetTests(ConfigCase):
         notes.mkdir()
         self._run("set", "todo.path", str(notes))
         self.assertEqual(self._raw()["todo"]["path"], str(notes))
-        self.assertEqual(self._run("get", "todo.path").strip(), str(notes))
+        self.assertEqual(self._run("get", "todo.path"), f"{notes}\n")
 
     def test_rejects_a_missing_todo_path(self) -> None:
-        with self.assertRaises(ShadError) as ctx:
-            self._run("set", "todo.path", str(self.root / "gone"))
-        self.assertIn("path does not exist", str(ctx.exception))
+        self.assertIn(
+            "path does not exist", self._fail("set", "todo.path", str(self.root / "gone"))
+        )
 
     def test_creates_a_new_project_table(self) -> None:
         fresh = self.root / "fresh"
@@ -86,36 +110,40 @@ class SetTests(ConfigCase):
         self._run("set", "projects.fresh.path", str(fresh))
         self.assertEqual(self._raw()["projects"]["fresh"]["path"], str(fresh))
 
-    def test_refuses_a_path_another_project_already_uses(self) -> None:
-        # store.commit validates through load() before replacing the file, so
-        # the duplicate-directory rule is enforced on writes without extra wiring.
+    def test_set_refuses_a_result_that_does_not_load(self) -> None:
+        """
+        Criterion:  set-refuses-a-result-that-does-not-load
+          Given:    project kb is at <root>/kb.
+          When:     `shad config set projects.fresh.path <root>/kb`, and
+                    `shad config set --force projects.alvr.db.path <root>/kb`,
+                    and `shad config set projects.grp.sub.session x`.
+          Then:     each exits 1 with stdout empty and stderr naming the
+                    problem, and the file is byte-identical after each.
+        """
         before = self.path.read_text()
-        with self.assertRaises(ShadError) as ctx:
-            self._run("set", "projects.fresh.path", str(self.root / "kb"))
-        self.assertIn("both point at", str(ctx.exception))
+        self.assertIn(
+            "both point at", self._fail("set", "projects.fresh.path", str(self.root / "kb"))
+        )
+        self.assertEqual(self.path.read_text(), before)
+        self.assertIn(
+            "both point at",
+            self._fail("set", "--force", "projects.alvr.db.path", str(self.root / "kb")),
+        )
+        self.assertEqual(self.path.read_text(), before)
+        self.assertIn("set its 'path' first", self._fail("set", "projects.grp.sub.session", "x"))
         self.assertEqual(self.path.read_text(), before)
 
-    def test_refuses_to_point_a_project_at_another_projects_path(self) -> None:
-        before = self.path.read_text()
-        with self.assertRaises(ShadError) as ctx:
-            self._run("set", "--force", "projects.alvr.db.path", str(self.root / "kb"))
-        self.assertIn("both point at", str(ctx.exception))
-        self.assertEqual(self.path.read_text(), before)
-
-    def test_refuses_a_project_without_a_path(self) -> None:
-        before = self.path.read_text()
-        with self.assertRaises(ShadError) as ctx:
-            self._run("set", "projects.grp.sub.session", "x")
-        self.assertIn("set its 'path' first", str(ctx.exception))
-        self.assertEqual(self.path.read_text(), before)
-
-    def test_keeps_the_file_mode(self) -> None:
+    def test_set_keeps_the_file_mode_and_leaves_no_temporary_file(self) -> None:
+        """
+        Criterion:  set-keeps-the-file-mode-and-leaves-no-temporary-file
+          Given:    shad.toml has mode 0600.
+          When:     `shad config set defaults.panel_percent 40`.
+          Then:     exit 0, the file still has mode 0600, and no `.shad.toml*`
+                    file sits beside it.
+        """
         self.path.chmod(0o600)
         self._run("set", "defaults.panel_percent", "40")
         self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
-
-    def test_leaves_no_temporary_files_behind(self) -> None:
-        self._run("set", "defaults.panel_percent", "40")
         self.assertEqual(
             [p.name for p in self.root.iterdir() if p.name.startswith(".shad.toml")], []
         )
