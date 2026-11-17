@@ -135,9 +135,19 @@ make typecheck  # mypy
 make check      # all three
 ```
 
-Tests use `unittest.TestCase` with `unittest.mock.patch` for isolating subprocess/IO calls. No conftest files. Shared test support is `src/shad/testing.py` and a slice's `testing.py`; no command imports either.
+Tests are `unittest.TestCase` classes. A command's tests run it through the entry point and assert its contract: the exit code, both streams or the screen, and the files and tmux sessions it changes. The Feature and Boundary lines of the behavioral verification protocol sit on the test class; each acceptance criterion sits in the docstring of the test that asserts it, and the test is named after it. The unit tests of the modules behind a command use `unittest.mock.patch` to isolate subprocess and I/O calls. No conftest files. Shared test support is `src/shad/testing.py` and a slice's `testing.py`; no command imports either.
 
-`shad.testing.run(argv, env=...)` calls `cli.main` in this process and returns the exit code, stdout and stderr. `shad.testing.TmuxCase` gives a test a tmux server on a private socket under `/tmp` (`-S` on its own calls, `TMUX_TMPDIR` for the processes it starts, `TMUX` unset, `-f /dev/null`), a temporary home, config and data directory, and `pane(*args)`, which runs `python -m shad` in a window of that server under a real pseudo-terminal: `send`, `type`, `wait_for`, `screen`, `wait_exit`. A command that drives tmux or needs a terminal is tested there, never against the user's server. The server itself runs in that environment, so the panes a shad layout creates inherit it, and a `shad` shim on `PATH` runs this checkout in them. `run_detached(*args)` runs shad as a process with no controlling terminal, which is how the no-terminal paths are tested. `fake_harness("claude")` puts a sleeping `claude` on `PATH` whose pane reports `claude` as its foreground command. CI installs tmux for this.
+`src/shad/testing.py`:
+
+- `run(argv, env=...)` calls `cli.main` in this process and returns the exit code, stdout and stderr. A `None` value in `env` removes the variable for the call.
+- `TmuxCase` gives a test a tmux server of its own and a temporary home, config and data directory. The server listens on a private socket under `/tmp`; the fixture passes `-S` and `-f /dev/null` on its own calls and sets `TMUX_TMPDIR` for the processes it starts. Neither the server nor a process a test starts inherits `TMUX`, `KITTY_WINDOW_ID`, `KITTY_LISTEN_ON`, `VISUAL` or `EDITOR` (`UNSET`): `sessions restore` would open real kitty tabs, and a command would open the user's editor. A command that drives tmux or needs a terminal is tested there, never against the user's server. A `shad` shim on `PATH` runs this checkout, and the panes a shad layout creates inherit the server's environment.
+- `pane(*args)` runs `python -m shad` in a window of that server under a real pseudo-terminal: `send`, `type`, `wait_for`, `screen`, `wait_exit`. The pane keeps the `TMUX` that tmux sets for it.
+- `run_detached(*args)` runs shad as a process with no controlling terminal, which is how the no-terminal paths are tested.
+- `shell_with_client()` opens a `shell` session with a real nested tmux client attached. A command typed into it with `type_into_shell` runs as a user runs it, and `wait_for_client_on` watches which session the client lands on, which is how attach and `switch-client` are tested.
+- `fake_harness("claude")` puts a sleeping `claude` on `PATH` whose pane reports `claude` as its foreground command.
+- `FakeEditor` is an `$EDITOR` that is a real program: it records each file it is given, saves a scripted draft over it, and exits with a chosen status.
+
+CI installs tmux for this.
 
 ## Common pitfalls
 

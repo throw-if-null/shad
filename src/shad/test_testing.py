@@ -79,7 +79,8 @@ class PaneTests(TmuxCase):
             cwd=self.root,
         )
         self.assertEqual(pane.wait_exit(), 0)
-        self.assertIn(str(PACKAGE_PARENT / "shad" / "__init__.py"), pane.screen())
+        screen = pane.screen().replace("\n", "")  # a long checkout path wraps at the pane's width
+        self.assertIn(str(PACKAGE_PARENT / "shad" / "__init__.py"), screen)
 
         version = self.pane("--version")
         self.assertEqual(version.wait_exit(), 0)

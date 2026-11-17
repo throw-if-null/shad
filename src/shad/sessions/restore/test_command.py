@@ -125,7 +125,7 @@ class RestoreTests(SessionsCase):
 
         self.server.tmux("send-keys", "-t", "shell", "shad sessions restore", "Enter")
 
-        self.wait_for_client_on(f"kb--cc-{UUID_A}")
+        self.wait_for_client_on(lambda name: name == f"kb--cc-{UUID_A}")
         screen = self.server.tmux("capture-pane", "-p", "-S", "-", "-t", "shell").stdout
         self.assertIn("no tab for 1 session(s): the terminal is not kitty", screen)
         self.assertIn(f"tmux attach-session -t =tin-shad--cc-{UUID_B}", screen)

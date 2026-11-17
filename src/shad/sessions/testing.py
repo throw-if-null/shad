@@ -16,7 +16,7 @@ from pathlib import Path
 from shad.sessions.harness import Conversation
 from shad.sessions.live import Running
 from shad.shared.config import Config, Defaults, Project
-from shad.testing import Pane, TmuxCase
+from shad.testing import TmuxCase
 
 UUID_A = "11111111-1111-4111-8111-111111111111"
 UUID_B = "22222222-2222-4222-8222-222222222222"
@@ -192,36 +192,3 @@ class SessionsCase(TmuxCase):
     def pane_commands(self, session: str) -> list[str]:
         result = self.server.tmux("list-panes", "-t", session, "-F", "#{pane_current_command}")
         return result.stdout.split()
-
-    def attach_client(self, session: str) -> Pane:
-        """
-        A tmux client attached to *session*, running in a pane of its own.
-        What a user's terminal is to a session.
-        """
-        pane = Pane(
-            self.server,
-            ["tmux", "-S", str(self.server.socket), "-f", "/dev/null",
-             "attach-session", "-t", f"={session}"],
-            env=self.env, cwd=self.root,
-        )
-        deadline = time.monotonic() + 10
-        while self.clients().get(session) is None:
-            if time.monotonic() > deadline:
-                raise AssertionError(f"no client attached to {session}; screen:\n{pane.screen()}")
-            time.sleep(0.05)
-        return pane
-
-    def clients(self) -> dict[str, str]:
-        """The session each client is on, by session: {session: client tty}."""
-        result = self.server.tmux(
-            "list-clients", "-F", "#{client_session} #{client_tty}", check=False
-        )
-        pairs = (line.split(" ", 1) for line in result.stdout.splitlines() if " " in line)
-        return {session: tty for session, tty in pairs}
-
-    def wait_for_client_on(self, session: str, *, timeout: float = 10.0) -> None:
-        deadline = time.monotonic() + timeout
-        while session not in self.clients():
-            if time.monotonic() > deadline:
-                raise AssertionError(f"no client reached {session}; clients: {self.clients()}")
-            time.sleep(0.05)

@@ -6,10 +6,9 @@ import json
 import re
 import subprocess
 import time
-from collections.abc import Callable
 from pathlib import Path
 
-from shad.testing import Pane, TmuxCase
+from shad.testing import TmuxCase
 
 UUID_A = "11111111-1111-4111-8111-111111111111"
 UUID_B = "22222222-2222-4222-8222-222222222222"
@@ -109,52 +108,4 @@ class ProjectsCase(TmuxCase):
                 return commands
             if time.monotonic() > deadline:
                 raise AssertionError(f"claude is not running in {session}: {commands}")
-            time.sleep(0.05)
-
-    def shell_with_client(self) -> None:
-        """A `shell` session with a tmux client attached: a user's terminal."""
-        self.server.new_session("shell", cwd=self.root, command="sh")
-        Pane(
-            self.server,
-            ["tmux", "-S", str(self.server.socket), "-f", "/dev/null", "attach-session", "-t", "=shell"],
-            env=self.env,
-            cwd=self.root,
-        )
-        deadline = time.monotonic() + 10
-        while "shell" not in self.clients():
-            if time.monotonic() > deadline:
-                raise AssertionError(f"no client attached to shell; clients: {self.clients()}")
-            time.sleep(0.05)
-
-    def clients(self) -> dict[str, str]:
-        result = self.server.tmux("list-clients", "-F", "#{client_session} #{client_tty}", check=False)
-        pairs = (line.split(" ", 1) for line in result.stdout.splitlines() if " " in line)
-        return {session: tty for session, tty in pairs}
-
-    def type_into_shell(self, command: str) -> None:
-        self.server.tmux("send-keys", "-t", "shell", command, "Enter")
-
-    def shell_screen(self) -> str:
-        return self.server.tmux("capture-pane", "-p", "-S", "-", "-t", "shell").stdout
-
-    def wait_for_shell(self, text: str, *, timeout: float = 10.0) -> str:
-        """The shell's screen once *text* appears on it."""
-        deadline = time.monotonic() + timeout
-        while True:
-            screen = self.shell_screen()
-            if text in screen:
-                return screen
-            if time.monotonic() > deadline:
-                raise AssertionError(f"{text!r} did not appear; screen:\n{screen}")
-            time.sleep(0.05)
-
-    def wait_for_client_on(self, predicate: Callable[[str], bool], *, timeout: float = 10.0) -> str:
-        """The session the shell's client is on once *predicate* accepts it."""
-        deadline = time.monotonic() + timeout
-        while True:
-            for session in self.clients():
-                if predicate(session):
-                    return session
-            if time.monotonic() > deadline:
-                raise AssertionError(f"clients: {self.clients()}; screen:\n{self.shell_screen()}")
             time.sleep(0.05)

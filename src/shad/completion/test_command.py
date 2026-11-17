@@ -26,6 +26,7 @@ from shad.cli import build_parser
 from shad.completion.command import BASH_COMPLETION, print_completion
 from shad.shared.config import HARNESSES
 from shad.shared.errors import ShadError
+from shad.testing import run
 from shad.todo import store
 from shad.todo.model import STATUSES
 
@@ -83,6 +84,38 @@ _shad_complete
 ((${#COMPREPLY[@]} > 0)) && printf '%s\\n' "${COMPREPLY[@]}"
 exit 0
 """
+
+
+class CompletionCommandTests(unittest.TestCase):
+    """
+    Feature:    completion
+    Boundary:   command. `shad completion <shell>`, through main(argv).
+                Contract: exit code + stdout + stderr. The output is a
+                published surface: a shell sources it.
+    """
+
+    def test_completion_bash_prints_the_script(self) -> None:
+        """
+        Criterion:  completion-bash-prints-the-script
+          When:     `shad completion bash`.
+          Then:     exit 0, stderr empty, stdout is the bash completion
+                    script, which defines `_shad_complete` and registers it.
+        """
+        result = run(["completion", "bash"])
+        self.assertEqual((result.code, result.err), (0, ""), result.out)
+        self.assertEqual(result.out, BASH_COMPLETION + "\n")
+        self.assertIn("_shad_complete()", result.out)
+        self.assertIn("complete -F _shad_complete shad", result.out)
+
+    def test_completion_of_another_shell_is_a_usage_error(self) -> None:
+        """
+        Criterion:  completion-of-another-shell-is-a-usage-error
+          When:     `shad completion zsh`.
+          Then:     exit 2, stdout empty, stderr names bash.
+        """
+        result = run(["completion", "zsh"])
+        self.assertEqual((result.code, result.out), (2, ""), result.err)
+        self.assertIn("bash", result.err)
 
 
 @unittest.skipUnless(BASH, "bash is required to run the completion script")
