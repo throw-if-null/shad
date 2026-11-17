@@ -27,7 +27,6 @@ Resolution uses exact-match first, then unique prefix match per level.
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 
 from rich.console import Console
@@ -118,31 +117,30 @@ def _list_group(cfg: Config, group_name: str) -> None:
 
 def _run_action(
     cfg: Config, project: Project, action: str | None, harness: str | None
-) -> None:
-    """Dispatch open / status for a resolved project.
+) -> int | None:
+    """Dispatch open / status for a resolved project. Returns the tmux exit
+    code when the project was opened, None otherwise.
 
     *harness* applies to open only; status ignores it.
     """
     if action is None:
         print_banner()
-        code = open_project(project, cfg.defaults, harness=harness)
-        if code is None:
-            return  # user cancelled the picker — exit cleanly
-        sys.exit(code)
-    elif action == "status":
+        return open_project(project, cfg.defaults, harness=harness)
+    if action == "status":
         print_status(project)
-    else:
-        raise ShadError(f"unknown action '{action}'; available: status")
+        return None
+    raise ShadError(f"unknown action '{action}'; available: status")
 
 
-def cmd_projects(cfg: Config, args: argparse.Namespace) -> None:
+def cmd_projects(cfg: Config, args: argparse.Namespace) -> int | None:
+    """List, or run an action on one project. Returns what _run_action returns."""
     parts: list[str] = args.name  # 0–3 tokens: [group] [name] [action]
     harness: str | None = args.harness
 
     # --- no args: list everything ---
     if not parts:
         _list_all(cfg)
-        return
+        return None
 
     # Peel off a trailing action token if present
     action: str | None = None
@@ -161,14 +159,13 @@ def cmd_projects(cfg: Config, args: argparse.Namespace) -> None:
             raise ShadError(f"no project or group matching '{token}'")
 
         if match in cfg.projects:
-            _run_action(cfg, cfg.projects[match], action, harness)
-        else:
-            if action:
-                raise ShadError(
-                    f"'{match}' is a group, not a project; specify a project within the group"
-                )
-            _list_group(cfg, match)
-        return
+            return _run_action(cfg, cfg.projects[match], action, harness)
+        if action:
+            raise ShadError(
+                f"'{match}' is a group, not a project; specify a project within the group"
+            )
+        _list_group(cfg, match)
+        return None
 
     # --- two tokens: group + project ---
     if len(parts) == 2:
@@ -194,8 +191,7 @@ def cmd_projects(cfg: Config, args: argparse.Namespace) -> None:
                 f"available: {', '.join(sorted(group_projects))}"
             )
 
-        _run_action(cfg, group_projects[proj_match], action, harness)
-        return
+        return _run_action(cfg, group_projects[proj_match], action, harness)
 
     # --- too many tokens ---
     raise ShadError(
@@ -718,9 +714,20 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> int:
+    """The `shad` entry point. Returns the exit code, which the console
+    script and `python -m shad` exit with.
+
+    *argv* is the command line after the program name; None reads the
+    process's own.
+    """
     parser = build_parser()
-    args = parser.parse_args()
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit as exc:
+        # argparse has already printed: --help and --version exit 0, a bad
+        # command line exits 2.
+        return _exit_code(exc.code)
 
     # None means "resolve normally"; shared.config.config_path() then applies
     # $SHAD_CONFIG and the per-OS default. Readers and writers get the same
@@ -730,40 +737,49 @@ def main() -> None:
     if args.command is None:
         print_banner()
         parser.print_help()
-        sys.exit(0)
+        return 0
 
     try:
         if args.command == "completion":
             print_completion(args.shell)
-            return
+            return 0
 
         if args.command == "init":
             cmd_init(install_deps=args.install_deps, path=override)
-            return
+            return 0
 
         if args.command == "cheat":
-            sys.exit(cmd_cheat())
+            return cmd_cheat()
 
         if args.command == "config":
             cmd_config(args, path=override)
-            return
+            return 0
 
         cfg: Config = load(override)
 
+        code: int | None = None
         if args.command == "projects":
-            cmd_projects(cfg, args)
+            code = cmd_projects(cfg, args)
         elif args.command == "git":
             cmd_git(cfg, args)
         elif args.command == "todo":
             cmd_todo(cfg, args, path=override)
         elif args.command == "sessions":
             code = cmd_sessions(cfg, args)
-            if code is not None:
-                sys.exit(code)
+        return 0 if code is None else code
 
     except ShadError as exc:
         err_console.print(Text(f"✗ {exc}", style="bold red"))
-        sys.exit(1)
+        return 1
     except (KeyboardInterrupt, EOFError):
         err_console.print(Text("\nAborted.", style="dim"))
-        sys.exit(130)
+        return 130
+
+
+def _exit_code(code: object) -> int:
+    """The exit status a SystemExit carries: None is 0, a message is 1."""
+    if code is None:
+        return 0
+    if isinstance(code, int):
+        return code
+    return 1

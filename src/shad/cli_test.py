@@ -46,11 +46,10 @@ class ProjectsCommandTests(unittest.TestCase):
         with (
             patch("shad.cli.print_banner"),
             patch("shad.cli.open_project", return_value=0) as open_project,
-            self.assertRaises(SystemExit) as ctx,
         ):
-            cmd_projects(cfg, args)
+            code = cmd_projects(cfg, args)
 
-        self.assertEqual(ctx.exception.code, 0)
+        self.assertEqual(code, 0)
         open_project.assert_called_once_with(project, cfg.defaults, harness=None)
 
     def test_top_level_project_open_dispatches_to_open_project(self) -> None:
@@ -61,11 +60,10 @@ class ProjectsCommandTests(unittest.TestCase):
         with (
             patch("shad.cli.print_banner"),
             patch("shad.cli.open_project", return_value=0) as open_project,
-            self.assertRaises(SystemExit) as ctx,
         ):
-            cmd_projects(cfg, args)
+            code = cmd_projects(cfg, args)
 
-        self.assertEqual(ctx.exception.code, 0)
+        self.assertEqual(code, 0)
         open_project.assert_called_once_with(project, cfg.defaults, harness=None)
 
 
@@ -192,7 +190,7 @@ class ProjectsListTests(unittest.TestCase):
 
         self.assertIn("too many arguments", str(ctx.exception))
 
-    def test_open_project_returns_none_no_sys_exit(self) -> None:
+    def test_a_cancelled_open_returns_none(self) -> None:
         project = _make_project("shad")
         cfg = Config(defaults=Defaults(), projects={"shad": project})
         args = _make_args(["shad"])
@@ -201,7 +199,18 @@ class ProjectsListTests(unittest.TestCase):
             patch("shad.cli.print_banner"),
             patch("shad.cli.open_project", return_value=None),
         ):
-            cmd_projects(cfg, args)
+            self.assertIsNone(cmd_projects(cfg, args))
+
+    def test_the_attach_exit_code_is_returned(self) -> None:
+        project = _make_project("shad")
+        cfg = Config(defaults=Defaults(), projects={"shad": project})
+        args = _make_args(["shad"])
+
+        with (
+            patch("shad.cli.print_banner"),
+            patch("shad.cli.open_project", return_value=3),
+        ):
+            self.assertEqual(cmd_projects(cfg, args), 3)
 
     def test_unknown_action_raises_shad_error(self) -> None:
         project = _make_project("shad")
@@ -228,7 +237,6 @@ class ProjectsHarnessOverrideTests(unittest.TestCase):
         with (
             patch("shad.cli.print_banner"),
             patch("shad.cli.open_project", return_value=0) as open_project,
-            self.assertRaises(SystemExit),
         ):
             cmd_projects(cfg, args)
 
@@ -242,7 +250,6 @@ class ProjectsHarnessOverrideTests(unittest.TestCase):
         with (
             patch("shad.cli.print_banner"),
             patch("shad.cli.open_project", return_value=0) as open_project,
-            self.assertRaises(SystemExit),
         ):
             cmd_projects(cfg, args)
 
@@ -341,30 +348,47 @@ class TodoCommandTests(unittest.TestCase):
 class MainErrorHandlingTests(unittest.TestCase):
     def test_shad_error_exits_1(self) -> None:
         with (
-            patch("sys.argv", ["shad", "projects"]),
             patch("shad.cli.load", side_effect=ShadError("boom")),
-            patch("shad.cli.err_console"),self.assertRaises(SystemExit) as ctx
+            patch("shad.cli.err_console"),
         ):
-            main()
-        self.assertEqual(ctx.exception.code, 1)
+            self.assertEqual(main(["projects"]), 1)
 
     def test_keyboard_interrupt_exits_130(self) -> None:
         with (
-            patch("sys.argv", ["shad", "projects"]),
             patch("shad.cli.load", side_effect=KeyboardInterrupt()),
-            patch("shad.cli.err_console"),self.assertRaises(SystemExit) as ctx
+            patch("shad.cli.err_console"),
         ):
-            main()
-        self.assertEqual(ctx.exception.code, 130)
+            self.assertEqual(main(["projects"]), 130)
 
     def test_eof_error_exits_130(self) -> None:
         with (
-            patch("sys.argv", ["shad", "projects"]),
             patch("shad.cli.load", side_effect=EOFError()),
-            patch("shad.cli.err_console"),self.assertRaises(SystemExit) as ctx
+            patch("shad.cli.err_console"),
         ):
-            main()
-        self.assertEqual(ctx.exception.code, 130)
+            self.assertEqual(main(["projects"]), 130)
+
+    def test_a_bad_command_line_exits_2(self) -> None:
+        with patch("sys.stderr"):
+            self.assertEqual(main(["--nope"]), 2)
+
+    def test_version_exits_0(self) -> None:
+        with patch("sys.stdout"):
+            self.assertEqual(main(["--version"]), 0)
+
+    def test_no_command_prints_help_and_exits_0(self) -> None:
+        with patch("shad.cli.print_banner"), patch("sys.stdout"):
+            self.assertEqual(main([]), 0)
+
+    def test_the_sessions_exit_code_is_returned(self) -> None:
+        with (
+            patch("shad.cli.load", return_value=Config(defaults=Defaults())),
+            patch("shad.cli.cmd_sessions", return_value=3),
+        ):
+            self.assertEqual(main(["sessions", "restore"]), 3)
+
+    def test_the_cheat_exit_code_is_returned(self) -> None:
+        with patch("shad.cli.cmd_cheat", return_value=4):
+            self.assertEqual(main(["cheat"]), 4)
 
 
 # ---------------------------------------------------------------------------
@@ -395,25 +419,21 @@ class GitCliTests(unittest.TestCase):
     def test_main_dispatches_git_after_loading_the_config(self) -> None:
         cfg = Config(defaults=Defaults())
         with (
-            patch("sys.argv", ["shad", "git", "sync"]),
             patch("shad.cli.load", return_value=cfg) as load,
             patch("shad.cli.cmd_git") as cmd_git,
         ):
-            main()
+            self.assertEqual(main(["git", "sync"]), 0)
         load.assert_called_once()
         cmd_git.assert_called_once()
         self.assertIs(cmd_git.call_args.args[0], cfg)
 
     def test_git_errors_exit_one(self) -> None:
         with (
-            patch("sys.argv", ["shad", "git", "sync"]),
             patch("shad.cli.load", return_value=Config(defaults=Defaults())),
             patch("shad.cli.cmd_git", side_effect=ShadError("boom")),
             patch("shad.cli.err_console"),
-            self.assertRaises(SystemExit) as ctx,
         ):
-            main()
-        self.assertEqual(ctx.exception.code, 1)
+            self.assertEqual(main(["git", "sync"]), 1)
 
 
 if __name__ == "__main__":

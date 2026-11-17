@@ -8,6 +8,7 @@ from shad.sessions.stop.command import stop_sessions
 from shad.sessions.testing import CFG, SHAD, running
 from shad.shared.errors import ShadError
 from shad.shared.picker import NoTerminal
+from shad.testing import TmuxCase
 
 _ARGS = argparse.Namespace(sessions_action="stop")
 
@@ -79,3 +80,28 @@ class StopTests(unittest.TestCase):
         ):
             stop_sessions(CFG, _ARGS)
         kill.assert_not_called()
+
+
+class StopPickerTests(TmuxCase):
+    def test_cancelling_the_picker_stops_nothing(self) -> None:
+        """
+        Feature:    sessions/stop
+        Boundary:   command. `shad sessions stop` in a terminal pane of an
+                    isolated tmux server. Contract: exit code + screen.
+        Criterion:  stop-cancel-leaves-every-session-running
+          Given:    project kb's session `kb` runs, and no other.
+          When:     `shad sessions stop`, then `q` at the picker.
+          Then:     exit 0, the screen says nothing stopped, and `kb` still
+                    runs.
+        """
+        (self.root / "kb").mkdir()
+        self.write_config(f'[projects.kb]\npath = "{self.root / "kb"}"\n')
+        self.server.new_session("kb", command="sleep 100000")
+
+        pane = self.pane("sessions", "stop")
+        pane.wait_for("stop sessions")
+        pane.send("q")
+
+        self.assertEqual(pane.wait_exit(), 0)
+        self.assertIn("nothing stopped", pane.screen())
+        self.assertIn("kb", self.server.sessions())

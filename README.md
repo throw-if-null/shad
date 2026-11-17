@@ -859,6 +859,7 @@ shad/
 └── src/
     └── shad/
         ├── __init__.py
+        ├── __main__.py
         ├── cli.py
         ├── cheat/
         │   └── command.py

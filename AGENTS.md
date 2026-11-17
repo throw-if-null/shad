@@ -35,7 +35,9 @@ The codebase follows a **vertical slice** layout — each CLI subcommand owns it
 
 ```
 src/shad/
-├── cli.py                      # arg parsing, dispatch, top-level error handling
+├── cli.py                      # arg parsing, dispatch, top-level error handling; main(argv) -> exit code
+├── __main__.py                 # `python -m shad`
+├── testing.py                  # test support: run() calls main in-process; TmuxCase, Pane drive an isolated tmux server
 ├── shared/                     # cross-cutting utilities
 │   ├── config.py               # TOML config loading, Project/Defaults, target resolution, data dir
 │   ├── errors.py               # ShadError exception
@@ -133,7 +135,9 @@ make typecheck  # mypy
 make check      # all three
 ```
 
-Tests use `unittest.TestCase` with `unittest.mock.patch` for isolating subprocess/IO calls. No fixtures or conftest files — each test file is self-contained.
+Tests use `unittest.TestCase` with `unittest.mock.patch` for isolating subprocess/IO calls. No conftest files. Shared test support is `src/shad/testing.py` and a slice's `testing.py`; no command imports either.
+
+`shad.testing.run(argv, env=...)` calls `cli.main` in this process and returns the exit code, stdout and stderr. `shad.testing.TmuxCase` gives a test a tmux server on a private socket under `/tmp` (`-S` on its own calls, `TMUX_TMPDIR` for the processes it starts, `TMUX` unset, `-f /dev/null`), a temporary home, config and data directory, and `pane(*args)`, which runs `python -m shad` in a window of that server under a real pseudo-terminal: `send`, `type`, `wait_for`, `screen`, `wait_exit`. A command that drives tmux or needs a terminal is tested there, never against the user's server. `fake_harness("claude")` puts a sleeping `claude` on `PATH` whose pane reports `claude` as its foreground command. CI installs tmux for this.
 
 ## Common pitfalls
 
@@ -179,3 +183,4 @@ Tests use `unittest.TestCase` with `unittest.mock.patch` for isolating subproces
 - **A textual `App` subclass must not set `self._name`**: `DOMNode.__init__` owns that attribute and `App.name` reads it. mypy catches the collision only when the value type differs.
 - **Todo panel polling**: the panel calls `store.signature()` once a second and reloads on any change — name, mtime, or size of any item file. `load()` is synchronous because the directory is tens of files; do not move it to a worker. The panel's tests call `app.poll()` directly rather than waiting out the interval.
 - **Completion input for todo**: the script parses `shad todo list --keys` and `shad todo label list`, both one plain word per line. The keys call carries `--config` from the command line, so the keys come from the `[todo] path` of the config the command will read. `shad todo list` without `--keys` is a rich table for humans and is not safe to parse.
+- **Pane sizes are `-l N%`, never `-p N`**: tmux 3.4 (Ubuntu 24.04) rejects `split-window -p` with "size missing", so `shad projects` could not build a layout there. `layout.py::_size` spells the size as `-l N%`, which every tmux since 3.1 accepts. The behavior tests run the layout on CI's tmux; the layout unit tests assert the spelling.

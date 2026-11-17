@@ -166,9 +166,9 @@ class GridTests(unittest.TestCase):
 
         splits = _splits(calls)
         # The right column first, then each column at panel_percent.
-        self.assertEqual(splits[0][2:7], ["-t", "%0", "-h", "-p", "30"])
-        self.assertEqual(splits[1][2:7], ["-t", "%0", "-v", "-p", "35"])
-        self.assertEqual(splits[2][2:7], ["-t", "%1", "-v", "-p", "35"])
+        self.assertEqual(splits[0][2:7], ["-t", "%0", "-h", "-l", "30%"])
+        self.assertEqual(splits[1][2:7], ["-t", "%0", "-v", "-l", "35%"])
+        self.assertEqual(splits[2][2:7], ["-t", "%1", "-v", "-l", "35%"])
 
     def test_bottom_puts_the_harness_and_todo_in_the_lower_panes(self) -> None:
         calls = self._calls("bottom")
@@ -179,8 +179,8 @@ class GridTests(unittest.TestCase):
         self.assertEqual(sent["shad todo panel\n"], "%3")
 
         splits = _splits(calls)
-        self.assertEqual(splits[1][2:7], ["-t", "%0", "-v", "-p", "65"])
-        self.assertEqual(splits[2][2:7], ["-t", "%1", "-v", "-p", "65"])
+        self.assertEqual(splits[1][2:7], ["-t", "%0", "-v", "-l", "65%"])
+        self.assertEqual(splits[2][2:7], ["-t", "%1", "-v", "-l", "65%"])
 
     def test_left_puts_the_todo_column_right_of_the_bundle(self) -> None:
         calls = self._calls("left")
@@ -193,9 +193,9 @@ class GridTests(unittest.TestCase):
         splits = _splits(calls)
         # The todo column, then the bundle beside the harness, then git
         # inside the bundle at split_percent.
-        self.assertEqual(splits[0][2:7], ["-t", "%0", "-h", "-p", "30"])
-        self.assertEqual(splits[1][2:7], ["-t", "%0", "-h", "-p", "35"])
-        self.assertEqual(splits[2][2:7], ["-t", "%2", "-v", "-p", "40"])
+        self.assertEqual(splits[0][2:7], ["-t", "%0", "-h", "-l", "30%"])
+        self.assertEqual(splits[1][2:7], ["-t", "%0", "-h", "-l", "35%"])
+        self.assertEqual(splits[2][2:7], ["-t", "%2", "-v", "-l", "40%"])
 
     def test_every_split_asks_tmux_for_the_new_pane_id(self) -> None:
         for position in OC_POSITIONS:
@@ -273,16 +273,16 @@ class GitPanelOffTests(unittest.TestCase):
             with self.subTest(position=position):
                 calls = self._calls(position, todo_panel=True)
                 splits = _splits(calls)
-                self.assertEqual(splits[0][2:7], ["-t", "%0", "-h", "-p", "30"])
+                self.assertEqual(splits[0][2:7], ["-t", "%0", "-h", "-l", "30%"])
                 todo = _sent(calls)["shad todo panel\n"]
                 self.assertEqual(todo, "%1")
                 self.assertFalse(any(split[3] == todo for split in splits))
 
     def test_without_either_panel_the_harness_and_bash_split_once(self) -> None:
         expected = {
-            "top": (["-v", "-p", "35"], "tin-shad:0.0", "tin-shad:0.1"),
-            "bottom": (["-v", "-p", "65"], "tin-shad:0.1", "tin-shad:0.0"),
-            "left": (["-h", "-p", "35"], "tin-shad:0.0", "tin-shad:0.1"),
+            "top": (["-v", "-l", "35%"], "tin-shad:0.0", "tin-shad:0.1"),
+            "bottom": (["-v", "-l", "65%"], "tin-shad:0.1", "tin-shad:0.0"),
+            "left": (["-h", "-l", "35%"], "tin-shad:0.0", "tin-shad:0.1"),
         }
         for position, (split, harness, shell) in expected.items():
             with self.subTest(position=position):
