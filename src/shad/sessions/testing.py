@@ -128,7 +128,13 @@ class SessionsCase(TmuxCase):
         """
         prefix = "cc" if harness == "claude" else "oc"
         session = f"{project}--{prefix}-{key}" if key else project
-        self.server.new_session(session, cwd=self.project_path(project), command=harness)
+        # exec, or dash (/bin/sh on Debian) stays the pane's process around the harness.
+        self.server.new_session(session, cwd=self.project_path(project), command=f"exec {harness}")
+        deadline = time.monotonic() + 10
+        while harness not in self.pane_commands(session):
+            if time.monotonic() > deadline:
+                raise AssertionError(f"{harness} is not running in {session}")
+            time.sleep(0.05)
         if harness == "claude":
             conversation = conversation or key
             if conversation:
