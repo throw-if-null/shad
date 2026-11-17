@@ -220,12 +220,13 @@ class Pane:
 
         def status() -> int | None:
             result = self.server.tmux(
-                "display-message", "-p", "-t", self.name, "#{pane_dead} #{pane_dead_status}"
+                "display-message", "-p", "-t", self.name,
+                "#{pane_dead}:#{pane_dead_status}:#{pane_pid}",
             )
-            dead, _, code = result.stdout.strip().partition(" ")
-            # tmux marks the pane dead when its pty closes and records the
-            # status when it reaps the child; either can come first.
-            return int(code) if dead == "1" and code else None
+            dead, code, pid = result.stdout.strip().split(":")
+            if dead != "1":
+                return None
+            return int(code) if code else _unreaped_status(int(pid))
 
         code = self._wait(status, lambda found: found is not None, timeout, "exit")
         assert code is not None  # _wait returned because it is
@@ -244,6 +245,25 @@ class Pane:
                     f"{what!r} did not happen within {timeout}s; screen:\n{self.screen()}"
                 )
             time.sleep(0.05)
+
+
+def _unreaped_status(pid: int) -> int | None:
+    """
+    The exit status of *pid*, a process that has exited but that its parent
+    has not reaped, read from /proc. tmux 3.4 (Ubuntu 24.04) sometimes never
+    reaps a pane process that exits within its first moments: the pane is
+    dead, the process stays a zombie, and pane_dead_status stays empty.
+    None while the process has not exited.
+    """
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text()
+    except OSError:
+        return None
+    fields = stat.rpartition(")")[2].split()  # the state onward; the name may hold spaces
+    if fields[0] != "Z" or len(fields) < 50:
+        return None
+    code = int(fields[49])  # exit_code, field 52 of /proc/[pid]/stat, in waitpid's form
+    return code >> 8 if code & 0x7F == 0 else 128 + (code & 0x7F)
 
 
 class TmuxCase(unittest.TestCase):
