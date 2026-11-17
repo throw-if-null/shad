@@ -1,115 +1,122 @@
 from __future__ import annotations
 
-import io
-import tempfile
-import time
 import unittest
-from collections.abc import Iterator
-from contextlib import contextmanager
 from pathlib import Path
-from unittest.mock import patch
 
-from rich.console import Console
-
-from shad.git.model import Commit
 from shad.projects.status import command as C
+from shad.projects.testing import ProjectsCase, git, plain
 
 
-@contextmanager
-def _capture(width: int = 200) -> Iterator[io.StringIO]:
-    """Render into a real Console; a rich Table has no useful __str__."""
-    buffer = io.StringIO()
-    console = Console(file=buffer, width=width, force_terminal=False, highlight=False)
-    with patch.object(C, "console", console):
-        yield buffer
-
-
-def _text(buffer: io.StringIO) -> str:
-    raw = buffer.getvalue()
-    for char in "│╭╮╰╯├┤┬┴┼─":
-        raw = raw.replace(char, " ")
-    return " ".join(raw.split())
-
-
-class PrintGitTests(unittest.TestCase):
+class StatusTests(ProjectsCase):
     """
-    The git section, with the queries stubbed.
-
-    The repository is a real directory carrying a .git marker so the gate is
-    exercised rather than patched; what git itself returns is covered against
-    a real repository in git/test_real_git.py.
+    Feature:    projects/status
+    Boundary:   command. `shad projects [<group>] <name> status` as a process
+                with no terminal, against the test's tmux server and real
+                repositories under the test root. Contract: exit code +
+                stdout + stderr.
     """
 
-    def setUp(self) -> None:
-        self._tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self._tmp.cleanup)
-        self.repo = Path(self._tmp.name) / "repo"
-        (self.repo / ".git").mkdir(parents=True)
-        self.plain = Path(self._tmp.name) / "plain"
-        self.plain.mkdir()
-
-    @contextmanager
-    def _git_state(
-        self,
-        *,
-        head: str | None = "refs/heads/main",
-        tag: str = "",
-        clean: tuple[bool, int, int] = (True, 0, 0),
-        commits: list[Commit] | None = None,
-    ) -> Iterator[None]:
-        with (
-            patch.object(C, "head_branch", return_value=head),
-            patch.object(C.refs, "latest_tag", return_value=tag),
-            patch.object(C, "is_clean", return_value=clean),
-            patch.object(C.refs, "recent_commits", return_value=commits or []),
-        ):
-            yield
-
-    def _render(self, **state: object) -> str:
-        with _capture() as buffer, self._git_state(**state):  # type: ignore[arg-type]
-            C._print_git(self.repo)
-        return _text(buffer)
-
-    def test_a_directory_without_git_is_reported_and_queries_nothing(self) -> None:
-        with _capture() as buffer, patch.object(C, "head_branch") as head:
-            C._print_git(self.plain)
-        self.assertIn("(not a git repository)", _text(buffer))
-        head.assert_not_called()
-
-    def test_branch_tag_and_clean_state_are_rendered(self) -> None:
-        out = self._render(tag="v1.2.3")
+    def test_status_reports_the_session_and_the_repository(self) -> None:
+        """
+        Criterion:  status-reports-the-session-and-the-repository
+          Given:    kb is a repository on main with the commit "Add a thing"
+                    and the tag v1.2.3, and a session kb runs.
+          When:     `shad projects kb status`.
+          Then:     exit 0, stderr empty, stdout names the project and its
+                    path, the running session, branch main, the tag, a clean
+                    tree, and the commit's subject.
+        """
+        self.repo("kb", tag="v1.2.3")
+        self.server.new_session("kb", command="sleep 100000")
+        result = self.run_detached("projects", "kb", "status")
+        self.assertEqual((result.code, result.err), (0, ""), result.out)
+        out = plain(result.out)
+        self.assertIn(f"kb {self.root / 'kb'}", out)
+        self.assertIn("session kb (base) running", out)
         self.assertIn("branch main", out)
         self.assertIn("latest tag v1.2.3", out)
         self.assertIn("uncommitted clean", out)
+        self.assertIn("Add a thing", out)
 
-    def test_a_detached_head_is_labelled_not_left_blank(self) -> None:
-        self.assertIn("branch detached", self._render(head=None))
+    def test_status_of_a_grouped_project_resolves_prefixes(self) -> None:
+        """
+        Criterion:  status-of-a-grouped-project-resolves-prefixes
+          Given:    tin shad is a repository, and no session runs.
+          When:     `shad projects ti sh status`.
+          Then:     exit 0, and stdout names tin shad and reports the
+                    session as not running.
+        """
+        self.repo("tin/shad")
+        result = self.run_detached("projects", "ti", "sh", "status")
+        self.assertEqual((result.code, result.err), (0, ""), result.out)
+        out = plain(result.out)
+        self.assertIn("tin shad", out)
+        self.assertIn("session tin-shad not running", out)
 
-    def test_a_repository_with_no_tags_renders_a_dash(self) -> None:
-        self.assertIn("latest tag —", self._render(tag=""))
+    def test_status_counts_changed_and_untracked_files(self) -> None:
+        """
+        Criterion:  status-counts-changed-and-untracked-files
+          Given:    kb is a repository with one committed file that was then
+                    changed, and one untracked file.
+          When:     `shad projects kb status`.
+          Then:     exit 0, and stdout reports 2 uncommitted files.
+        """
+        path = self.repo("kb")
+        (path / "file-0.txt").write_text("changed\n")
+        (path / "new.txt").write_text("new\n")
+        out = plain(self.run_detached("projects", "kb", "status").out)
+        self.assertIn("uncommitted 2 file(s)", out)
 
-    def test_the_dirty_count_sums_changed_and_untracked(self) -> None:
-        self.assertIn("uncommitted 5 file(s)", self._render(clean=(False, 2, 3)))
+    def test_status_labels_a_detached_head_and_a_missing_tag(self) -> None:
+        """
+        Criterion:  status-labels-a-detached-head-and-a-missing-tag
+          Given:    kb is a repository with no tag whose HEAD is detached.
+          When:     `shad projects kb status`.
+          Then:     exit 0, and stdout reports the branch as detached and
+                    the tag as a dash.
+        """
+        path = self.repo("kb")
+        git(path, "checkout", "-q", "--detach")
+        out = plain(self.run_detached("projects", "kb", "status").out)
+        self.assertIn("branch detached", out)
+        self.assertIn("latest tag —", out)
 
-    def test_commits_render_oid_subject_and_age(self) -> None:
-        now = int(time.time())
-        commits = [
-            Commit(short_oid="abc1234", subject="Add a thing", timestamp=now - 7200),
-            Commit(short_oid="def5678", subject="Fix a thing", timestamp=now - 86400 * 3),
-        ]
-        out = self._render(commits=commits)
-        self.assertIn("abc1234 Add a thing 2h", out)
-        self.assertIn("def5678 Fix a thing 3d", out)
+    def test_status_of_a_directory_that_is_not_a_repository(self) -> None:
+        """
+        Criterion:  status-of-a-directory-that-is-not-a-repository
+          Given:    kb is a plain directory.
+          When:     `shad projects kb status`.
+          Then:     exit 0, and stdout says it is not a git repository.
+        """
+        result = self.run_detached("projects", "kb", "status")
+        self.assertEqual(result.code, 0, result.err)
+        self.assertIn("(not a git repository)", result.out)
 
-    def test_an_unborn_head_reports_no_commits(self) -> None:
-        self.assertIn("commits none", self._render(commits=[]))
+    def test_status_of_an_unknown_project_fails(self) -> None:
+        """
+        Criterion:  status-of-an-unknown-project-fails
+          When:     `shad projects nope status`.
+          Then:     exit 1, stdout empty, stderr names nope.
+        """
+        result = self.run_detached("projects", "nope", "status")
+        self.assertEqual((result.code, result.out), (1, ""), result.err)
+        self.assertIn("nope", result.err)
 
-    def test_only_the_configured_count_of_commits_is_requested(self) -> None:
-        with _capture(), self._git_state(), patch.object(
-            C.refs, "recent_commits", return_value=[]
-        ) as recent:
-            C._print_git(self.repo)
-        self.assertEqual(recent.call_args.args[1], C.RECENT_COMMITS)
+    def test_status_ignores_an_inherited_git_dir(self) -> None:
+        """
+        Criterion:  status-ignores-an-inherited-git-dir
+          Given:    kb is a repository on main, and GIT_DIR names another
+                    repository that is on a branch called elsewhere.
+          When:     `shad projects kb status` with that GIT_DIR.
+          Then:     exit 0, and stdout reports branch main.
+        """
+        self.repo("kb")
+        other = self.repo("tin/coral")
+        git(other, "checkout", "-q", "-b", "elsewhere")
+        self.env["GIT_DIR"] = str(other / ".git")
+        out = plain(self.run_detached("projects", "kb", "status").out)
+        self.assertIn("branch main", out)
+        self.assertNotIn("elsewhere", out)
 
 
 class NoRawGitCallsTests(unittest.TestCase):
@@ -122,6 +129,3 @@ class NoRawGitCallsTests(unittest.TestCase):
         source = Path(C.__file__).read_text()
         self.assertNotIn('["git"', source)
 
-
-if __name__ == "__main__":
-    unittest.main()
