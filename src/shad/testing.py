@@ -369,7 +369,7 @@ class TmuxCase(unittest.TestCase):
 
     def attach_client(self, session: str, *, width: int = 100, height: int = 30) -> Pane:
         """
-        A tmux client attached to *session*, running in a pane of its own:
+        A tmux client attached to *session*, running in a separate pane:
         what a user's terminal of *width* by *height* is to a session.
         Returns once it is attached.
         """
