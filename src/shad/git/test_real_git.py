@@ -916,8 +916,8 @@ class StatusQueryTests(unittest.TestCase):
         self.assertEqual(refs.recent_commits(self.empty, 3), [])
 
     def test_an_inherited_git_dir_cannot_retarget_the_query(self) -> None:
-        # The bug this migration fixed: a bare subprocess with cwd= reported
-        # whichever repository GIT_DIR named, not the project.
+        # A git query must read the project, not whichever repository an
+        # inherited GIT_DIR names; run.git scrubs GIT_DIR for this reason.
         with patch.dict(
             os.environ,
             {"GIT_DIR": str(self.empty / ".git"), "GIT_WORK_TREE": str(self.empty)},

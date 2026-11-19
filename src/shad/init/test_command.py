@@ -368,7 +368,7 @@ class AddProjectTests(unittest.TestCase):
         self.assertIn("[projects.newapp]", text)
 
     def test_a_path_with_a_quote_is_escaped_and_reads_back(self) -> None:
-        # The old raw writer produced invalid TOML for such a path (§ 10 item 4).
+        # A path with a quote or a backslash must stay valid TOML and read back exactly.
         weird = Path('/tmp/a"b\\c')
         store.add_project(self.cfg, key="q", group=None, project_path=weird, session="q")
         cfg = load(self.cfg, data_dir=Path("/d"))
