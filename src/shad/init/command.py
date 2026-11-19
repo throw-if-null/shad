@@ -30,6 +30,7 @@ from rich.prompt import Confirm, Prompt
 from rich.text import Text
 
 from shad import parsers
+from shad.config import store
 from shad.deps import Deps
 from shad.errors import ShadError
 from shad.output import Output
@@ -51,65 +52,8 @@ class Dependency:
     installer: Callable[[Output], None] | None = field(default=None, compare=False, hash=False)
 
 
-_DEFAULTS_BLOCK = """\
-# ~/.config/shad/shad.toml
-
-[defaults]
-# Which side opencode occupies. The git+bash bundle takes the opposite side.
-# Allowed values: top | bottom | left
-# oc_position = "top"
-
-# How much of the window the git+bash bundle takes (%).
-# panel_percent = 35
-
-# How much of the bundle the git panel takes (%). Bash gets the rest.
-# With the todo pane on and oc_position top or bottom, the git panel sits
-# under the todo pane instead, and this is ignored.
-# split_percent = 20
-
-# Set to false to leave out the git panel or the todo pane.
-# git_panel = true
-# todo_panel = true
-
-# How much of the window width the todo column takes (%).
-# todo_percent = 20
-
-# The labels `shad todo add --label` accepts. Managed by `shad todo label`.
-# [todo]
-# labels = ["chore", "documentation", "investigation", "poc"]
-
-"""
-
-
-# ── config helpers ────────────────────────────────────────────────────────
-
-def _write_defaults_block(config_path: Path) -> None:
-    """Prepend a commented [defaults] block to a newly created config file."""
-    with config_path.open("w") as fh:
-        fh.write(_DEFAULTS_BLOCK)
-
-
 def _expand(p: str) -> Path:
     return Path(p).expanduser().resolve()
-
-
-def _append_toml(config_path: Path, group: str | None, key: str, path: Path, session: str) -> None:
-    """Append a new project entry to shad.toml as raw TOML text."""
-    if group:
-        header = f"[projects.{group}.{key}]"
-    else:
-        header = f"[projects.{key}]"
-
-    lines = [
-        "",
-        header,
-        f'path    = "{path}"',
-        f'session = "{session}"',
-        "",
-    ]
-
-    with config_path.open("a") as fh:
-        fh.write("\n".join(lines) + "\n")
 
 
 def _key_exists(config_path: Path, group: str | None, key: str) -> bool:
@@ -330,11 +274,9 @@ def init_project(target: Path, out: Output, *, install_deps: bool = False) -> No
         out.print(Text("  Aborted.", style="dim"))
         return
 
-    target.parent.mkdir(parents=True, exist_ok=True)
-    is_new_file = not target.exists()
-    if is_new_file:
-        _write_defaults_block(target)
-    _append_toml(target, group, key, project_path, session)
+    store.add_project(
+        target, key=key, group=group, project_path=project_path, session=session
+    )
 
     out.print()
     out.print(Text(f"  ✓ Added to {target}", style="bold green"))

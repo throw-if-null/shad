@@ -42,7 +42,7 @@ def register(sub: parsers.Subparsers) -> None:
 
 def run(args: argparse.Namespace, deps: Deps) -> None:
     cfg = deps.config
-    directory = store.todo_dir(cfg)
+    directory = cfg.todo_dir
     labels = list(args.label or [])
     if args.title is None:
         item = add_in_editor(directory, labels, cfg.todo_labels, deps.out, deps.editor)

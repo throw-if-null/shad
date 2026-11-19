@@ -3,10 +3,12 @@ What shad knows about Claude Code and opencode as programs: where each keeps
 its conversations, how a conversation is identified, resumed and started,
 and what a running process reports about itself.
 
-`KNOWN` holds both harnesses, for the pickers in `projects open`.
-`SUPPORTED` holds the ones `shad sessions` can save and restore: Claude
-Code. To support OpenCode there, implement `live_conversation` and
-`can_resume` on `Opencode` and add it to SUPPORTED.
+`Harnesses` is constructed once per run by the root from the home
+directory, where both programs keep their files, and injected. Its `known`
+holds both harnesses, for the pickers in `projects open`; its `supported`
+holds the ones `shad sessions` can save and restore: Claude Code. To
+support OpenCode there, implement `live_conversation` and `can_resume` on
+`Opencode` and add it to `supported`.
 
 Reads files other programs own and never writes them; shared-and-safe.
 """
@@ -19,15 +21,13 @@ import re
 import sqlite3
 import time
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
 from shad.tmux import SESSION_PREFIXES
 
-DB_PATH = Path.home() / ".local" / "share" / "opencode" / "opencode.db"
-CLAUDE_PROJECTS_DIR = Path.home() / ".claude" / "projects"
-CLAUDE_SESSIONS_DIR = Path.home() / ".claude" / "sessions"
 SESSION_LIMIT = 5
 
 _UUID_RE = re.compile(r"^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$")
@@ -89,44 +89,7 @@ class Target:
     session_prefix: str = "oc"
 
 
-# ── opencode ──────────────────────────────────────────────────────────────
-
-
-def query_opencode_sessions(project_path: Path, limit: int = SESSION_LIMIT) -> list[Recorded]:
-    """Up to *limit* most-recent non-archived opencode sessions for *project_path*."""
-    if not DB_PATH.exists():
-        return []
-    try:
-        with sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True) as con:
-            cur = con.cursor()
-            cur.execute(
-                """
-                SELECT s.id, s.title, s.time_updated
-                FROM session s
-                JOIN project p ON s.project_id = p.id
-                WHERE p.worktree = ?
-                  AND s.time_archived IS NULL
-                ORDER BY s.time_updated DESC
-                LIMIT ?
-                """,
-                (str(project_path), limit),
-            )
-            rows = cur.fetchall()
-        return [Recorded(id=r[0], title=r[1], updated=r[2]) for r in rows]
-    except sqlite3.DatabaseError as exc:
-        raise Unreadable(f"could not read the opencode session database: {exc}") from None
-
-
-# ── Claude Code ───────────────────────────────────────────────────────────
-
-
-def claude_project_dir(project_path: Path) -> Path:
-    """The Claude Code transcript directory for *project_path*.
-
-    Claude Code derives the directory name from the working directory by
-    replacing every character outside [A-Za-z0-9] with a hyphen.
-    """
-    return CLAUDE_PROJECTS_DIR / _CLAUDE_SLUG_RE.sub("-", str(project_path))
+# ── Claude Code's transcripts, read by path ──────────────────────────────
 
 
 def claude_session_title(transcript: Path) -> str | None:
@@ -200,37 +163,7 @@ def _claude_entry_text(entry: dict) -> str | None:
     return None
 
 
-def query_claude_sessions(project_path: Path, limit: int = SESSION_LIMIT) -> list[Recorded]:
-    """Up to *limit* most-recent Claude Code sessions for *project_path*."""
-    directory = claude_project_dir(project_path)
-    try:
-        transcripts = sorted(
-            directory.glob("*.jsonl"),
-            key=lambda f: f.stat().st_mtime,
-            reverse=True,
-        )
-    except OSError as exc:
-        raise Unreadable(f"could not read the Claude Code session directory: {exc}") from None
-
-    sessions: list[Recorded] = []
-    for transcript in transcripts:
-        if len(sessions) == limit:
-            break
-        title = claude_session_title(transcript)
-        if title is None:
-            continue
-        sessions.append(
-            Recorded(
-                id=transcript.stem,
-                title=title,
-                updated=int(transcript.stat().st_mtime * 1000),
-                name=claude_session_name(transcript),
-            )
-        )
-    return sessions
-
-
-# ── what `shad sessions` needs from a harness ─────────────────────────────
+# ── what `shad sessions` and the pickers need from a harness ─────────────
 
 
 @dataclass(frozen=True)
@@ -257,6 +190,13 @@ class Harness(Protocol):
     name: str
     prefix: str  # the segment of this harness's tmux session names
 
+    def recorded(self, project_path: Path, limit: int = SESSION_LIMIT) -> list[Recorded]:
+        """
+        Up to *limit* most-recent conversations the harness has on disk for
+        *project_path*, newest first. Raises Unreadable when its store
+        exists but cannot be read.
+        """
+
     def live_conversation(self, running: RunningSession) -> Conversation | None:
         """
         The conversation *running* holds now, or None when it cannot be
@@ -280,12 +220,62 @@ class Harness(Protocol):
         """An id for a new conversation, or None when the harness assigns its own."""
 
 
+@dataclass(frozen=True)
+class _Record:
+    session_id: str
+    started: int
+    name: str | None
+    status: str | None
+    status_since: int | None
+
+
 class Claude:
     name = "claude"
     prefix = SESSION_PREFIXES["claude"]
 
+    def __init__(self, home: Path) -> None:
+        """*home* is where Claude Code keeps `.claude/projects` and `.claude/sessions`."""
+        self.projects_dir = home / ".claude" / "projects"
+        self.sessions_dir = home / ".claude" / "sessions"
+
+    def project_dir(self, project_path: Path) -> Path:
+        """The transcript directory for *project_path*.
+
+        Claude Code derives the directory name from the working directory by
+        replacing every character outside [A-Za-z0-9] with a hyphen.
+        """
+        return self.projects_dir / _CLAUDE_SLUG_RE.sub("-", str(project_path))
+
+    def recorded(self, project_path: Path, limit: int = SESSION_LIMIT) -> list[Recorded]:
+        directory = self.project_dir(project_path)
+        try:
+            transcripts = sorted(
+                directory.glob("*.jsonl"),
+                key=lambda f: f.stat().st_mtime,
+                reverse=True,
+            )
+        except OSError as exc:
+            raise Unreadable(f"could not read the Claude Code session directory: {exc}") from None
+
+        sessions: list[Recorded] = []
+        for transcript in transcripts:
+            if len(sessions) == limit:
+                break
+            title = claude_session_title(transcript)
+            if title is None:
+                continue
+            sessions.append(
+                Recorded(
+                    id=transcript.stem,
+                    title=title,
+                    updated=int(transcript.stat().st_mtime * 1000),
+                    name=claude_session_name(transcript),
+                )
+            )
+        return sessions
+
     def live_conversation(self, running: RunningSession) -> Conversation | None:
-        record = _claude_process_record(running.tmux_session)
+        record = self._process_record(running.tmux_session)
         if record is not None:
             return Conversation(
                 id=record.session_id,
@@ -301,10 +291,10 @@ class Claude:
         return None
 
     def _title(self, project_path: Path, session_id: str) -> str | None:
-        return claude_session_title(claude_project_dir(project_path) / f"{session_id}.jsonl")
+        return claude_session_title(self.project_dir(project_path) / f"{session_id}.jsonl")
 
     def can_resume(self, project_path: Path, session_id: str) -> bool:
-        return (claude_project_dir(project_path) / f"{session_id}.jsonl").is_file()
+        return (self.project_dir(project_path) / f"{session_id}.jsonl").is_file()
 
     def resume_command(self, base_cmd: str, session_id: str) -> str:
         return f"{base_cmd} --resume {session_id}"
@@ -317,6 +307,55 @@ class Claude:
     def new_session_id(self) -> str | None:
         return str(uuid.uuid4())
 
+    def _process_record(self, tmux_session: str) -> _Record | None:
+        """
+        What Claude Code records about its process in *tmux_session*.
+
+        Claude Code 2.1 writes ~/.claude/sessions/<pid>.json for every running
+        process, with the current `sessionId`, the session's `name`, a `status`
+        of busy or idle with `statusUpdatedAt`, and a `tmux` field of the form
+        "<session>:@<window>.%<pane>". The record follows /clear and /resume,
+        where the tmux session name keeps the id the pane was opened with.
+
+        A record whose process has exited is ignored: Claude Code removes the
+        file on a clean exit, but a killed process leaves it behind. When two
+        live records name one tmux session, the later start wins, because a
+        session stopped and reopened under the same name is the only way that
+        happens.
+        """
+        best: _Record | None = None
+        try:
+            files = list(self.sessions_dir.glob("*.json"))
+        except OSError:
+            return None
+        for path in files:
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if not isinstance(data, dict):
+                continue
+            tmux = data.get("tmux")
+            if not isinstance(tmux, str) or tmux.split(":", 1)[0] != tmux_session:
+                continue
+            pid = data.get("pid")
+            session_id = data.get("sessionId")
+            if not isinstance(pid, int) or not isinstance(session_id, str) or not session_id:
+                continue
+            if not _alive(pid):
+                continue
+            record = _Record(
+                session_id=session_id,
+                started=_int(data.get("startedAt")) or 0,
+                name=_text(data.get("name")),
+                status=_text(data.get("status")),
+                status_since=_seconds(data.get("statusUpdatedAt"))
+                or _seconds(data.get("updatedAt")),
+            )
+            if best is None or record.started > best.started:
+                best = record
+        return best
+
 
 class Opencode:
     """
@@ -327,6 +366,33 @@ class Opencode:
 
     name = "opencode"
     prefix = SESSION_PREFIXES["opencode"]
+
+    def __init__(self, home: Path) -> None:
+        """*home* is where opencode keeps `.local/share/opencode/opencode.db`."""
+        self.db_path = home / ".local" / "share" / "opencode" / "opencode.db"
+
+    def recorded(self, project_path: Path, limit: int = SESSION_LIMIT) -> list[Recorded]:
+        if not self.db_path.exists():
+            return []
+        try:
+            with sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True) as con:
+                cur = con.cursor()
+                cur.execute(
+                    """
+                    SELECT s.id, s.title, s.time_updated
+                    FROM session s
+                    JOIN project p ON s.project_id = p.id
+                    WHERE p.worktree = ?
+                      AND s.time_archived IS NULL
+                    ORDER BY s.time_updated DESC
+                    LIMIT ?
+                    """,
+                    (str(project_path), limit),
+                )
+                rows = cur.fetchall()
+            return [Recorded(id=r[0], title=r[1], updated=r[2]) for r in rows]
+        except sqlite3.DatabaseError as exc:
+            raise Unreadable(f"could not read the opencode session database: {exc}") from None
 
     def live_conversation(self, running: RunningSession) -> Conversation | None:
         return None
@@ -371,64 +437,6 @@ def fresh_target(harness: Harness, base_cmd: str) -> Target:
     )
 
 
-@dataclass(frozen=True)
-class _Record:
-    session_id: str
-    started: int
-    name: str | None
-    status: str | None
-    status_since: int | None
-
-
-def _claude_process_record(tmux_session: str) -> _Record | None:
-    """
-    What Claude Code records about its process in *tmux_session*.
-
-    Claude Code 2.1 writes ~/.claude/sessions/<pid>.json for every running
-    process, with the current `sessionId`, the session's `name`, a `status`
-    of busy or idle with `statusUpdatedAt`, and a `tmux` field of the form
-    "<session>:@<window>.%<pane>". The record follows /clear and /resume,
-    where the tmux session name keeps the id the pane was opened with.
-
-    A record whose process has exited is ignored: Claude Code removes the
-    file on a clean exit, but a killed process leaves it behind. When two
-    live records name one tmux session, the later start wins, because a
-    session stopped and reopened under the same name is the only way that
-    happens.
-    """
-    best: _Record | None = None
-    try:
-        files = list(CLAUDE_SESSIONS_DIR.glob("*.json"))
-    except OSError:
-        return None
-    for path in files:
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        if not isinstance(data, dict):
-            continue
-        tmux = data.get("tmux")
-        if not isinstance(tmux, str) or tmux.split(":", 1)[0] != tmux_session:
-            continue
-        pid = data.get("pid")
-        session_id = data.get("sessionId")
-        if not isinstance(pid, int) or not isinstance(session_id, str) or not session_id:
-            continue
-        if not _alive(pid):
-            continue
-        record = _Record(
-            session_id=session_id,
-            started=_int(data.get("startedAt")) or 0,
-            name=_text(data.get("name")),
-            status=_text(data.get("status")),
-            status_since=_seconds(data.get("statusUpdatedAt")) or _seconds(data.get("updatedAt")),
-        )
-        if best is None or record.started > best.started:
-            best = record
-    return best
-
-
 def _text(value: object) -> str | None:
     if isinstance(value, str) and value.strip():
         return " ".join(value.split())
@@ -455,13 +463,34 @@ def _alive(pid: int) -> bool:
     return True
 
 
-KNOWN: dict[str, Harness] = {Opencode.name: Opencode(), Claude.name: Claude()}
-SUPPORTED: dict[str, Harness] = {Claude.name: Claude()}
+class Harnesses:
+    """
+    The harnesses this run knows, each reading its files under *home*.
 
+    The root constructs one per run from the environment and injects it; a
+    test constructs it on a temporary home.
+    """
 
-def for_harness(name: str) -> Harness | None:
-    """The harness `shad sessions` can save and restore under *name*, or None."""
-    return SUPPORTED.get(name)
+    def __init__(self, home: Path) -> None:
+        self.claude = Claude(home)
+        self.opencode = Opencode(home)
+        # Every harness a project may be configured with, for the pickers.
+        self.known: dict[str, Harness] = {
+            self.opencode.name: self.opencode,
+            self.claude.name: self.claude,
+        }
+        # The ones `shad sessions` can save and restore.
+        self.supported: dict[str, Harness] = {self.claude.name: self.claude}
+
+    @classmethod
+    def from_env(cls, env: Mapping[str, str]) -> Harnesses:
+        """Built from HOME, else the account's home directory."""
+        home = env.get("HOME")
+        return cls(Path(home) if home else Path.home())
+
+    def for_harness(self, name: str) -> Harness | None:
+        """The harness `shad sessions` can save and restore under *name*, or None."""
+        return self.supported.get(name)
 
 
 def harness_for_prefix(prefix: str) -> str | None:

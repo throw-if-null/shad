@@ -4,7 +4,7 @@ import io
 import unittest
 from pathlib import Path
 
-from shad.config.load import Project
+from shad.config import Project
 from shad.git.model import (
     BranchInfo,
     BranchKept,

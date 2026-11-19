@@ -26,7 +26,7 @@ def register(sub: parsers.Subparsers) -> None:
 
 
 def run(args: argparse.Namespace, deps: Deps) -> SavedSessions:
-    snapshot = store.read(store.snapshot_path())
+    snapshot = store.read(store.snapshot_path(deps.config))
     return SavedSessions(saved_at=snapshot.saved_at, sessions=snapshot.entries)
 
 

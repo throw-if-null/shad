@@ -33,9 +33,10 @@ from unittest.mock import patch
 
 import shad
 from shad.cli import main
-from shad.config.load import Config
+from shad.config import Config
 from shad.deps import Deps
 from shad.editor import Editor
+from shad.harness import Harnesses
 from shad.output import Output
 from shad.tmux import Tmux
 from shad.trace import Trace
@@ -94,6 +95,7 @@ def deps(
     out: Output | None = None,
     tmux: Tmux | None = None,
     editor: Editor | None = None,
+    harnesses: Harnesses | None = None,
     config_file: Path | None = None,
 ) -> Deps:
     """
@@ -106,7 +108,9 @@ def deps(
         trace=Trace(),
         tmux=tmux or Tmux(os.environ),
         editor=editor or Editor(None),
+        harnesses=harnesses or Harnesses.from_env(os.environ),
         config_file=config_file or Path(os.devnull),
+        data_dir=cfg.data_dir,
     )
     result.__dict__["config"] = cfg  # seeds the cached_property, so no file is read
     return result

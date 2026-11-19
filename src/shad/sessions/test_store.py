@@ -4,8 +4,8 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
+from shad.config import Config, Defaults
 from shad.errors import ShadError
 from shad.sessions import store
 from shad.sessions.model import Entry, Snapshot
@@ -45,5 +45,5 @@ class StoreTests(unittest.TestCase):
         self.assertIn("shad sessions save", str(ctx.exception))
 
     def test_snapshot_path_is_in_the_data_dir(self) -> None:
-        with patch("shad.sessions.store.default_data_dir", return_value=Path("/data/shad")):
-            self.assertEqual(store.snapshot_path(), Path("/data/shad/sessions.json"))
+        cfg = Config(defaults=Defaults(), data_dir=Path("/data/shad"))
+        self.assertEqual(store.snapshot_path(cfg), Path("/data/shad/sessions.json"))

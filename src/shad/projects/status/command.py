@@ -21,7 +21,7 @@ from pathlib import Path
 
 from rich.text import Text
 
-from shad.config.load import Project
+from shad.config import Project
 from shad.git import (
     Commit,
     head_branch,

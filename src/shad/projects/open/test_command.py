@@ -5,8 +5,8 @@ import uuid
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from shad.config.load import Defaults, Project
-from shad.harness import Target
+from shad.config import Defaults, Project
+from shad.harness import Harnesses, Target
 from shad.projects.open.command import open_project
 from shad.projects.testing import UUID_A, ProjectsCase
 from shad.tmux import Tmux
@@ -179,11 +179,12 @@ class FreshTargetTests(unittest.TestCase):
         tmux = Mock(spec=Tmux)
         tmux.session_exists.return_value = True
         tmux.attach.return_value = 0
+        harnesses = Harnesses(Path("/home"))
         with (
-            patch("shad.projects.open.command.pick_opencode_target", return_value=target),
+            patch("shad.projects.open.command.pick_target", return_value=target),
             patch("shad.projects.open.command.create_session") as create_session,
         ):
-            open_project(project, Defaults(), tmux)
+            open_project(project, Defaults(), tmux, harnesses)
 
         tmux.run.assert_called_once_with(
             "kill-session", "-t", "tin-shad--oc-fresh-123", check=False

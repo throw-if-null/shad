@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from shad.config.load import Config, Defaults, Project
+from shad.config import Config, Defaults, Project
 from shad.output import Output
 from shad.sessions import store
 from shad.sessions.model import Entry, Snapshot

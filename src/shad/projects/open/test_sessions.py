@@ -8,15 +8,18 @@ from unittest.mock import patch
 
 from rich.console import Console
 
-from shad.harness import Recorded, Target, Unreadable
+from shad.harness import Harnesses, Recorded, Target, Unreadable
 from shad.projects.open.sessions import (
     _render_picker,
     _truncate,
     display_title,
-    pick_claude_target,
-    pick_opencode_target,
+    pick_target,
     updated_str,
 )
+
+_HARNESSES = Harnesses(Path("/home"))
+_OPENCODE = _HARNESSES.known["opencode"]
+_CLAUDE = _HARNESSES.known["claude"]
 
 # ---------------------------------------------------------------------------
 # pick_opencode_target
@@ -25,8 +28,8 @@ from shad.projects.open.sessions import (
 
 class PickOpencodeTargetTests(unittest.TestCase):
     def test_returns_fresh_target_when_no_sessions_exist(self) -> None:
-        with patch("shad.projects.open.sessions.harness.query_opencode_sessions", return_value=[]):
-            target = pick_opencode_target(Path("/tmp/project"), "opencode")
+        with patch("shad.harness.Opencode.recorded", return_value=[]):
+            target = pick_target(_OPENCODE, Path("/tmp/project"), "opencode")
 
         assert target is not None
         self.assertEqual(target.command, "opencode")
@@ -38,10 +41,10 @@ class PickOpencodeTargetTests(unittest.TestCase):
         sessions = [Recorded(id="sess-123", title="Fix bug", updated=0)]
 
         with (
-            patch("shad.projects.open.sessions.harness.query_opencode_sessions", return_value=sessions),
+            patch("shad.harness.Opencode.recorded", return_value=sessions),
             patch("shad.projects.open.sessions._run_picker", return_value=1),
         ):
-            target = pick_opencode_target(Path("/tmp/project"), "opencode")
+            target = pick_target(_OPENCODE, Path("/tmp/project"), "opencode")
 
         self.assertEqual(
             target,
@@ -52,10 +55,10 @@ class PickOpencodeTargetTests(unittest.TestCase):
         sessions = [Recorded(id="sess-123", title="Fix bug", updated=0)]
 
         with (
-            patch("shad.projects.open.sessions.harness.query_opencode_sessions", return_value=sessions),
+            patch("shad.harness.Opencode.recorded", return_value=sessions),
             patch("shad.projects.open.sessions._run_picker", return_value=0),
         ):
-            target = pick_opencode_target(Path("/tmp/project"), "opencode")
+            target = pick_target(_OPENCODE, Path("/tmp/project"), "opencode")
 
         assert target is not None
         self.assertEqual(target.command, "opencode")
@@ -67,22 +70,22 @@ class PickOpencodeTargetTests(unittest.TestCase):
         sessions = [Recorded(id="sess-123", title="Fix bug", updated=0)]
 
         with (
-            patch("shad.projects.open.sessions.harness.query_opencode_sessions", return_value=sessions),
+            patch("shad.harness.Opencode.recorded", return_value=sessions),
             patch("shad.projects.open.sessions._run_picker", return_value=None),
         ):
-            target = pick_opencode_target(Path("/tmp/project"), "opencode")
+            target = pick_target(_OPENCODE, Path("/tmp/project"), "opencode")
 
         self.assertIsNone(target)
 
     def test_an_unreadable_store_is_shown_in_the_picker(self) -> None:
         with (
             patch(
-                "shad.projects.open.sessions.harness.query_opencode_sessions",
+                "shad.harness.Opencode.recorded",
                 side_effect=Unreadable("could not read the opencode session database: boom"),
             ),
             patch("shad.projects.open.sessions._run_picker", return_value=0) as picker,
         ):
-            target = pick_opencode_target(Path("/tmp/project"), "opencode")
+            target = pick_target(_OPENCODE, Path("/tmp/project"), "opencode")
 
         assert target is not None
         self.assertTrue(target.fresh)
@@ -94,10 +97,10 @@ class PickOpencodeTargetTests(unittest.TestCase):
         s2 = Recorded(id="bbb", title="Second", updated=2000)
 
         with (
-            patch("shad.projects.open.sessions.harness.query_opencode_sessions", return_value=[s1, s2]),
+            patch("shad.harness.Opencode.recorded", return_value=[s1, s2]),
             patch("shad.projects.open.sessions._run_picker", return_value=2),
         ):
-            target = pick_opencode_target(Path("/tmp/project"), "opencode")
+            target = pick_target(_OPENCODE, Path("/tmp/project"), "opencode")
 
         self.assertEqual(
             target, Target(command="opencode -s bbb", session_key="bbb")
@@ -195,9 +198,9 @@ class RenderPickerTests(unittest.TestCase):
 class PickClaudeTargetTests(unittest.TestCase):
     def test_returns_fresh_target_when_no_sessions_exist(self) -> None:
         with patch(
-            "shad.projects.open.sessions.harness.query_claude_sessions", return_value=[]
+            "shad.harness.Claude.recorded", return_value=[]
         ):
-            target = pick_claude_target(Path("/tmp/project"), "claude")
+            target = pick_target(_CLAUDE, Path("/tmp/project"), "claude")
 
         assert target is not None
         self.assertTrue(target.fresh)
@@ -216,14 +219,14 @@ class PickClaudeTargetTests(unittest.TestCase):
         for chosen in (1, 2):
             with (
                 patch(
-                    "shad.projects.open.sessions.harness.query_claude_sessions",
+                    "shad.harness.Claude.recorded",
                     return_value=sessions,
                 ),
                 patch(
                     "shad.projects.open.sessions._run_picker", return_value=chosen
                 ),
             ):
-                targets.append(pick_claude_target(Path("/tmp/project"), "claude"))
+                targets.append(pick_target(_CLAUDE, Path("/tmp/project"), "claude"))
 
         self.assertEqual(
             targets,
@@ -246,12 +249,12 @@ class PickClaudeTargetTests(unittest.TestCase):
 
         with (
             patch(
-                "shad.projects.open.sessions.harness.query_claude_sessions",
+                "shad.harness.Claude.recorded",
                 return_value=sessions,
             ),
             patch("shad.projects.open.sessions._run_picker", return_value=0),
         ):
-            target = pick_claude_target(Path("/tmp/project"), "claude")
+            target = pick_target(_CLAUDE, Path("/tmp/project"), "claude")
 
         assert target is not None
         self.assertTrue(target.fresh)
@@ -262,10 +265,10 @@ class PickClaudeTargetTests(unittest.TestCase):
 
     def test_fresh_targets_get_distinct_session_keys(self) -> None:
         with patch(
-            "shad.projects.open.sessions.harness.query_claude_sessions", return_value=[]
+            "shad.harness.Claude.recorded", return_value=[]
         ):
-            first = pick_claude_target(Path("/tmp/project"), "claude")
-            second = pick_claude_target(Path("/tmp/project"), "claude")
+            first = pick_target(_CLAUDE, Path("/tmp/project"), "claude")
+            second = pick_target(_CLAUDE, Path("/tmp/project"), "claude")
 
         assert first is not None and second is not None
         self.assertNotEqual(first.session_key, second.session_key)
@@ -275,12 +278,12 @@ class PickClaudeTargetTests(unittest.TestCase):
 
         with (
             patch(
-                "shad.projects.open.sessions.harness.query_claude_sessions",
+                "shad.harness.Claude.recorded",
                 return_value=sessions,
             ),
             patch("shad.projects.open.sessions._run_picker", return_value=None),
         ):
-            target = pick_claude_target(Path("/tmp/project"), "claude")
+            target = pick_target(_CLAUDE, Path("/tmp/project"), "claude")
 
         self.assertIsNone(target)
 

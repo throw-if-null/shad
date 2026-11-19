@@ -23,7 +23,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from shad.config.load import Project
+from shad.config import Project
 from shad.git import apply, discover, refs
 from shad.git.model import BranchInfo, Worktree, WorktreeKept
 from shad.git.panel import snapshot

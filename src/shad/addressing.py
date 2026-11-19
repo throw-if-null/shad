@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from shad.config.load import Config, Project, all_projects
+from shad.config import Config, Project, all_projects
 from shad.errors import ShadError
 
 

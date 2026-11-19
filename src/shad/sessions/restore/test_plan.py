@@ -3,8 +3,9 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
+from shad.harness import Harnesses
 from shad.sessions.live import Running
 from shad.sessions.model import Entry, Snapshot
 from shad.sessions.restore.plan import Step, attach_target, plan, tab_targets
@@ -33,12 +34,13 @@ class PlanTests(unittest.TestCase):
         self.existing: set[str] = set()
         self.tmux = Mock(spec=Tmux)
         self.tmux.session_exists.side_effect = self.existing.__contains__
-        patcher = patch("shad.harness.CLAUDE_PROJECTS_DIR", self.projects)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        self.harnesses = Harnesses(Path("/home"))
+        self.harnesses.claude.projects_dir = self.projects
 
     def _plan(self, *entries: Entry, live: list[Running] | None = None) -> list[Step]:
-        return plan(CFG, Snapshot(saved_at=0, entries=entries), live or [], self.tmux)
+        return plan(
+            CFG, Snapshot(saved_at=0, entries=entries), live or [], self.tmux, self.harnesses
+        )
 
     def test_resumes_a_saved_conversation_that_has_a_transcript(self) -> None:
         (step,) = self._plan(_entry("kb", UUID_A))

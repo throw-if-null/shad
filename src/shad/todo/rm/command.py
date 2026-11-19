@@ -18,7 +18,7 @@ def register(sub: parsers.Subparsers) -> None:
 
 
 def run(args: argparse.Namespace, deps: Deps) -> None:
-    directory = store.todo_dir(deps.config)
+    directory = deps.config.todo_dir
     key = store.resolve_key(directory, args.key)
     path = remove(directory, key)
     deps.out.print(

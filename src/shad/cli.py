@@ -57,10 +57,11 @@ from shad import (
     todo,
 )
 from shad.banner import print_banner
-from shad.config.load import config_path
+from shad.config import config_path, default_data_dir
 from shad.deps import Deps
 from shad.editor import Editor
 from shad.errors import ShadError
+from shad.harness import Harnesses
 from shad.output import Output
 from shad.parsers import DEBUG, JSON
 from shad.tmux import Tmux
@@ -138,7 +139,7 @@ def _dispatch(args: argparse.Namespace, out: Output, trace: Trace) -> int:
     # None means "resolve normally": config_path() applies $SHAD_CONFIG and
     # the per-OS default. Readers and writers get the same answer because
     # they all go through the one Deps.
-    config_file = Path(args.config).expanduser() if args.config else config_path()
+    config_file = Path(args.config).expanduser() if args.config else config_path(os.environ)
     # The crosscuts that read the environment do so here, once, and are
     # handed what they read; no slice reads it.
     deps = Deps(
@@ -146,7 +147,9 @@ def _dispatch(args: argparse.Namespace, out: Output, trace: Trace) -> int:
         trace=trace,
         tmux=Tmux(os.environ),
         editor=Editor.from_env(os.environ),
+        harnesses=Harnesses.from_env(os.environ),
         config_file=config_file,
+        data_dir=default_data_dir(os.environ),
     )
 
     result = args.run(args, deps)

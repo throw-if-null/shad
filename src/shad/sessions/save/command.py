@@ -17,6 +17,7 @@ from collections.abc import Sequence
 from rich.text import Text
 
 from shad import parsers
+from shad.config import Config
 from shad.deps import Deps
 from shad.errors import ShadError
 from shad.sessions import live, render, store
@@ -37,7 +38,7 @@ def register(sub: parsers.Subparsers) -> None:
 def run(args: argparse.Namespace, deps: Deps) -> None:
     cfg = deps.config
     out = deps.out
-    running = live.collect(cfg, deps.tmux)
+    running = live.collect(cfg, deps.tmux, deps.harnesses)
     savable = [item for item in running if item.unsupported is None]
     if not savable:
         if running:
@@ -62,7 +63,7 @@ def run(args: argparse.Namespace, deps: Deps) -> None:
     else:
         picked = pick(
             savable,
-            _previously_saved(savable),
+            _previously_saved(cfg, savable),
             title="save sessions",
             accept="save",
             hint="use `shad sessions save --all` to save every running session",
@@ -73,20 +74,20 @@ def run(args: argparse.Namespace, deps: Deps) -> None:
         chosen = [savable[index] for index in sorted(picked)]
 
     snapshot = Snapshot(saved_at=int(time.time()), entries=tuple(item.entry for item in chosen))
-    path = store.snapshot_path()
+    path = store.snapshot_path(cfg)
     store.write(path, snapshot)
     out.print(render.running_table("saved", chosen, out.width, note_missing_id=True))
     count = f"{len(chosen)} session" if len(chosen) == 1 else f"{len(chosen)} sessions"
     out.print(Text(f"  {count} saved to {path}", style="dim"))
 
 
-def _previously_saved(savable: Sequence[Running]) -> set[int]:
+def _previously_saved(cfg: Config, savable: Sequence[Running]) -> set[int]:
     """
     The rows to check before the picker opens: the sessions whose
     conversation the snapshot already holds, or every row when there is no
     snapshot yet.
     """
-    path = store.snapshot_path()
+    path = store.snapshot_path(cfg)
     if not path.exists():
         return set(range(len(savable)))
     saved = {entry.session_id for entry in store.read(path).entries if entry.session_id}

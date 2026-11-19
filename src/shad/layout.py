@@ -60,7 +60,7 @@ pane depend on the order of the earlier ones.
 
 from __future__ import annotations
 
-from shad.config.load import Defaults, Project
+from shad.config import Defaults, Project
 from shad.tmux import Tmux
 
 

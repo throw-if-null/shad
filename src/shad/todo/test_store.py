@@ -4,9 +4,7 @@ import os
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
 
-from shad.config.load import Config, Defaults
 from shad.errors import ShadError
 from shad.todo import store
 
@@ -18,17 +16,6 @@ class StoreTests(unittest.TestCase):
         self._tmp = TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.dir = Path(self._tmp.name) / "todo"
-
-    # -- paths ------------------------------------------------------------
-
-    def test_todo_dir_defaults_to_todo_under_the_data_dir(self) -> None:
-        with patch("shad.todo.store.default_data_dir", return_value=Path("/data")):
-            self.assertEqual(store.todo_dir(Config(defaults=Defaults())), Path("/data/todo"))
-
-    def test_the_configured_todo_path_replaces_the_data_dir(self) -> None:
-        cfg = Config(defaults=Defaults(), todo_path=Path("/notes/todo"))
-        with patch("shad.todo.store.default_data_dir", return_value=Path("/data")):
-            self.assertEqual(store.todo_dir(cfg), Path("/notes/todo"))
 
     # -- add --------------------------------------------------------------
 

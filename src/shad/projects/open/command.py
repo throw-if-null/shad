@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import argparse
 
-from shad.config.load import HARNESSES, Defaults, Project
+from shad.config import HARNESSES, Defaults, Project
+from shad.harness import Harnesses
 from shad.layout import create_session
-from shad.projects.open.sessions import pick_claude_target, pick_opencode_target
+from shad.projects.open.sessions import pick_target
 from shad.tmux import Tmux, project_session_name
 
 
@@ -27,7 +28,11 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def open_project(
-    project: Project, defaults: Defaults, tmux: Tmux, harness: str | None = None
+    project: Project,
+    defaults: Defaults,
+    tmux: Tmux,
+    harnesses: Harnesses,
+    harness: str | None = None,
 ) -> int | None:
     """Attach to project session, creating it with the configured layout if needed.
 
@@ -38,12 +43,7 @@ def open_project(
     Returns the tmux exit code on success, or None if the user cancelled.
     """
     selected = harness or project.harness
-
-    if selected == "claude":
-        target = pick_claude_target(project.path, selected)
-    else:
-        target = pick_opencode_target(project.path, selected)
-
+    target = pick_target(harnesses.known[selected], project.path, selected)
     if target is None:
         return None
 

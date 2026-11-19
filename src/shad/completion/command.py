@@ -21,7 +21,7 @@ from __future__ import annotations
 import argparse
 
 from shad import parsers
-from shad.config.load import HARNESSES, OC_POSITIONS
+from shad.config import HARNESSES, OC_POSITIONS
 from shad.deps import Deps
 from shad.todo.model import STATUSES
 

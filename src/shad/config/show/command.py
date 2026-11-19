@@ -8,14 +8,12 @@ from dataclasses import dataclass
 from rich.text import Text
 
 from shad import parsers
-from shad.config import store
-from shad.config.load import Config, Project
+from shad.config import Config, Project, store
 from shad.config.render import display
 from shad.deps import Deps
 from shad.errors import ShadError
 from shad.output import Output
 from shad.style import make_table
-from shad.todo.store import todo_dir
 
 DEFAULTS = (
     "oc_position",
@@ -99,7 +97,7 @@ def run(args: argparse.Namespace, deps: Deps) -> ConfigView | ConfigText:
         projects=tuple(ProjectView(project=p, exists=p.path.is_dir()) for p in _ordered(cfg)),
         todo=TodoView(
             labels=tuple(cfg.todo_labels),
-            path=str(todo_dir(cfg)),
+            path=str(cfg.todo_dir),
             path_set=cfg.todo_path is not None,
         ),
     )

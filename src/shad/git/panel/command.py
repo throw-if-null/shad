@@ -10,7 +10,7 @@ from pathlib import Path
 
 from shad import parsers
 from shad.addressing import resolve_target
-from shad.config.load import Config
+from shad.config import Config
 from shad.deps import Deps
 from shad.errors import ShadError
 from shad.git import discover
