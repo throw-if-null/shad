@@ -1,15 +1,36 @@
 from __future__ import annotations
 
+import json
+
 from shad.sessions.testing import UUID_A, UUID_B, SessionsCase, entry
 
 
 class ShowTests(SessionsCase):
     """
     Feature:    sessions/show
-    Boundary:   command. `shad sessions show`, through main(argv) with
-                XDG_DATA_HOME under the test root. Contract: exit code +
-                stdout + stderr.
+    Boundary:   command. `shad sessions show [--json]`, through main(argv)
+                with XDG_DATA_HOME under the test root. Contract: exit code
+                + stdout + stderr.
     """
+
+    def test_show_json_mirrors_the_snapshot(self) -> None:
+        """
+        Criterion:  show-json-mirrors-the-snapshot
+          Given:    the snapshot holds kb (attached, named Netbird, first
+                    prompt "Fix the panel") and tin shad.
+          When:     `shad sessions show --json`.
+          Then:     exit 0, stderr empty, stdout is one JSON object with
+                    integer `saved_at` and `sessions`: the two entries as
+                    the snapshot file spells them.
+        """
+        first = entry("kb", UUID_A, attached=True, name="Netbird", title="Fix the panel")
+        second = entry("shad", UUID_B, group="tin")
+        self.write_snapshot(first, second)
+        result = self.run_shad("sessions", "show", "--json")
+        self.assertEqual((result.code, result.err), (0, ""), result.out)
+        document = json.loads(result.out)
+        self.assertEqual(document["saved_at"], 1)
+        self.assertEqual(document["sessions"], [first, second])
 
     def test_show_prints_the_saved_sessions(self) -> None:
         """

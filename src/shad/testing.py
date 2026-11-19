@@ -33,6 +33,10 @@ from unittest.mock import patch
 
 import shad
 from shad.cli import main
+from shad.deps import Deps
+from shad.output import Output
+from shad.shared.config import Config
+from shad.trace import Trace
 
 # The directory `import shad` resolved to. A shad subprocess gets it as
 # PYTHONPATH so it runs the code under test: an editable install of another
@@ -80,6 +84,22 @@ def run(argv: Sequence[str], *, env: Mapping[str, str | None] | None = None) -> 
                 os.environ[name] = value
         code = main(list(argv))
     return Result(code, out.getvalue(), err.getvalue())
+
+
+def deps(
+    cfg: Config, *, out: Output | None = None, config_file: Path | None = None
+) -> Deps:
+    """
+    The Deps a unit test hands a slice's `run` directly: *cfg* stands in for
+    the file, and *out* captures nothing unless given. `[TEST-3]`.
+    """
+    result = Deps(
+        out=out or Output(stdout=io.StringIO(), stderr=io.StringIO()),
+        trace=Trace(),
+        config_file=config_file or Path(os.devnull),
+    )
+    result.__dict__["config"] = cfg  # seeds the cached_property, so no file is read
+    return result
 
 
 def shad_argv(*args: str) -> list[str]:

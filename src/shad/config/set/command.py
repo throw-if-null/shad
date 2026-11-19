@@ -2,19 +2,37 @@
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
-from rich.console import Console
 from rich.text import Text
 
+from shad import parsers
 from shad.config import store, toml_edit
 from shad.config.schema import PATH, coerce, field_for, infer
+from shad.deps import Deps
 from shad.errors import ShadError
+from shad.output import Output
 
-console = Console()
+
+def register(sub: parsers.Subparsers) -> None:
+    parser = parsers.command(sub, "set", run=run, help="Set a single value")
+    parser.add_argument("key", metavar="KEY", help="Dotted key, e.g. defaults.harness")
+    parser.add_argument("value", metavar="VALUE", help="New value")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Skip key and path checks (still requires the result to be a loadable config)",
+    )
 
 
-def set_config_value(path: Path, key: str, raw_value: str, *, force: bool) -> None:
+def run(args: argparse.Namespace, deps: Deps) -> None:
+    set_config_value(
+        deps.config_file, args.key, args.value, force=getattr(args, "force", False), out=deps.out
+    )
+
+
+def set_config_value(path: Path, key: str, raw_value: str, *, force: bool, out: Output) -> None:
     parts = toml_edit.split_dotted(key)
     field = field_for(parts)
 
@@ -51,7 +69,7 @@ def set_config_value(path: Path, key: str, raw_value: str, *, force: bool) -> No
 
     store.commit(path, updated, hint=project_hint)
 
-    console.print(
+    out.print(
         Text("  ✓ ", style="bold green")
         + Text(key, style="cyan")
         + Text(" = ", style="dim")

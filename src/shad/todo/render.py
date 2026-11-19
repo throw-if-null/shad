@@ -36,9 +36,13 @@ def status_word(status: str) -> Text:
     return Text(status or "?", style=style)
 
 
+def title_style(status: str) -> str:
+    _, style = _STATUS.get(status, _UNKNOWN)
+    return style
+
+
 def title_text(item: Item) -> Text:
-    _, style = _STATUS.get(item.status, _UNKNOWN)
-    return Text(item.title or f"({item.key})", style=style)
+    return Text(item.title or f"({item.key})", style=title_style(item.status))
 
 
 def label_style(label: str, vocabulary: list[str]) -> str:

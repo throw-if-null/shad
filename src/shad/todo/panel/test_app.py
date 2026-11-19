@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import contextlib
 import functools
+import subprocess
 import unittest
 from collections.abc import Iterator
 from pathlib import Path
@@ -20,6 +21,7 @@ from unittest.mock import patch
 from textual.widgets import DataTable, Static
 
 from shad.errors import ShadError
+from shad.output import Output
 from shad.todo import store
 from shad.todo.model import Item
 from shad.todo.panel.app import TodoPanel
@@ -39,7 +41,7 @@ class PanelTests(unittest.IsolatedAsyncioTestCase):
         path.write_text(path.read_text() + "Some body text.\n")
 
     def _app(self) -> TodoPanel:
-        return TodoPanel(self.dir, VOCAB)
+        return TodoPanel(self.dir, VOCAB, Output())
 
     @staticmethod
     def _header(app: TodoPanel) -> str:
@@ -133,14 +135,15 @@ class PanelTests(unittest.IsolatedAsyncioTestCase):
         app = self._app()
         path = store.item_path(self.dir, "active-work")
 
-        def fake_editor(argv: list[str], check: bool) -> None:
+        def fake_editor(argv: list[str], check: bool) -> subprocess.CompletedProcess[bytes]:
             # Simulates a hand edit while the app is suspended.
             self.assertEqual(argv[-1], str(path))
             path.write_text(path.read_text().replace("status: in-progress", "status: done"))
+            return subprocess.CompletedProcess(argv, 0)
 
         with (
-            patch("shad.todo.panel.app.resolve_editor", return_value="fake-editor --wait"),
-            patch("shad.todo.panel.app.subprocess.run", side_effect=fake_editor) as run,
+            patch("shad.todo.edit.command.resolve_editor", return_value="fake-editor --wait"),
+            patch("shad.todo.edit.command.subprocess.run", side_effect=fake_editor) as run,
             patch.object(TodoPanel, "suspend", return_value=contextlib.nullcontext()) as suspend,
         ):
             async with app.run_test(size=(60, 25)) as pilot:
@@ -165,7 +168,9 @@ class PanelTests(unittest.IsolatedAsyncioTestCase):
         app = self._app()
         exits: list[str] = []
 
-        def fake_add(directory: Path, labels: list[str], vocabulary: list[str]) -> Item:
+        def fake_add(
+            directory: Path, labels: list[str], vocabulary: list[str], out: Output
+        ) -> Item:
             self.assertEqual((directory, labels, vocabulary), (self.dir, [], VOCAB))
             return store.add(directory, "Zulu new", [], vocabulary)
 
@@ -207,8 +212,25 @@ class PanelTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(exits, ["resumed"])
                 self.assertIn("no todo created", notify.call_args.args[0])
 
+    async def test_a_failed_key_is_reported_in_the_panel(self) -> None:
+        """
+        The panel is the presentation boundary while it runs: a key whose
+        command raises shows the code and the category, and the panel goes on.
+        """
+        app = self._app()
+        async with app.run_test(size=(60, 25)) as pilot:
+            await pilot.pause()
+            store.item_path(self.dir, "active-work").unlink()
+            with patch.object(TodoPanel, "notify") as notify:
+                await pilot.press("3")
+                await pilot.pause()
+            notify.assert_called_once()
+            self.assertTrue(notify.call_args.args[0].startswith("no_such_todo: "))
+            self.assertEqual(notify.call_args.kwargs["title"], "not_found")
+            self.assertEqual(app.query_one("#items", DataTable).row_count, 1)
+
     async def test_empty_directory_shows_a_hint(self) -> None:
-        app = TodoPanel(Path(self._tmp.name) / "empty", VOCAB)
+        app = TodoPanel(Path(self._tmp.name) / "empty", VOCAB, Output())
         async with app.run_test(size=(60, 25)) as pilot:
             await pilot.pause()
             self.assertIsNone(app.current_key())

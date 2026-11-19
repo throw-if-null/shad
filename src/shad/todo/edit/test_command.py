@@ -29,14 +29,15 @@ class EditTests(TodoCase):
         Criterion:  edit-reports-what-the-saved-file-gets-wrong
           Given:    EDITOR saves the item with an unknown status.
           When:     `shad todo edit fix`.
-          Then:     exit 0, and the output names the unknown status.
+          Then:     exit 0, stdout empty, and stderr names the unknown
+                    status.
         """
         self._run("add", "Fix panel resize")
         path = self._dir() / "fix-panel-resize.md"
         self.editor(path.read_text().replace("status: todo", "status: doing"))
         result = self._result("edit", "fix")
-        self.assertEqual(result.code, 0)
-        self.assertIn("unknown status 'doing'", result.out + result.err)
+        self.assertEqual((result.code, result.out), (0, ""), result.err)
+        self.assertIn("unknown status 'doing'", result.err)
 
     def test_edit_reports_a_failing_editor(self) -> None:
         """

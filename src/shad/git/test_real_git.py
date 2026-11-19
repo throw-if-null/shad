@@ -14,6 +14,7 @@ TemporaryDirectory, so fetch exercises the real code path with no network.
 
 from __future__ import annotations
 
+import io
 import os
 import shutil
 import subprocess
@@ -26,6 +27,7 @@ from shad.git import apply, discover, refs, snapshot
 from shad.git import command as C
 from shad.git import plan as planning
 from shad.git.model import BranchInfo, Worktree, WorktreeKept
+from shad.output import Output
 from shad.shared.config import Project
 
 _ISOLATE = {
@@ -571,8 +573,8 @@ class RepoDedupeTests(unittest.TestCase):
         _git(main, "worktree", "add", "--quiet", str(linked), "feat/login")
 
         projects = [self._project("myproj", main), self._project("login", linked)]
-        with patch.object(C, "report"), patch.object(C, "console"):
-            run = C.sync_projects(projects, yes=True)
+        with patch.object(C, "report"):
+            run = C.sync_projects(projects, Output(stdout=io.StringIO()), yes=True)
 
         # The merged branch and its worktree go exactly once, with no
         # "already gone" noise from a second pass over the same repository.

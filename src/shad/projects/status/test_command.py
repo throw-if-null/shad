@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 from pathlib import Path
 
@@ -10,11 +11,47 @@ from shad.projects.testing import ProjectsCase, git, plain
 class StatusTests(ProjectsCase):
     """
     Feature:    projects/status
-    Boundary:   command. `shad projects [<group>] <name> status` as a process
-                with no terminal, against the test's tmux server and real
-                repositories under the test root. Contract: exit code +
-                stdout + stderr.
+    Boundary:   command. `shad projects [<group>] <name> status [--json]` as
+                a process with no terminal, against the test's tmux server
+                and real repositories under the test root. Contract: exit
+                code + stdout + stderr.
     """
+
+    def test_status_json_reports_session_and_git(self) -> None:
+        """
+        Criterion:  status-json-reports-session-and-git
+          Given:    kb is a repository on main with one commit and the tag
+                    v1.2.3, and no session named kb exists on the server.
+          When:     `shad projects kb status --json`.
+          Then:     exit 0, stderr empty, stdout is one JSON object with
+                    `project.key` "kb", `tmux.sessions` [], `git.branch`
+                    "main", `git.tag` "v1.2.3", `git.changed` and
+                    `git.untracked` 0, and `git.commits` a list of one
+                    object whose `subject` is the commit's.
+        """
+        self.repo("kb", tag="v1.2.3")
+        result = self.run_detached("projects", "kb", "status", "--json")
+        self.assertEqual((result.code, result.err), (0, ""), result.out)
+        document = json.loads(result.out)
+        self.assertEqual(document["project"]["key"], "kb")
+        self.assertEqual(document["project"]["path"], str(self.root / "kb"))
+        self.assertEqual(document["tmux"]["sessions"], [])
+        git_part = document["git"]
+        self.assertEqual(git_part["branch"], "main")
+        self.assertEqual(git_part["tag"], "v1.2.3")
+        self.assertEqual((git_part["changed"], git_part["untracked"]), (0, 0))
+        self.assertEqual([c["subject"] for c in git_part["commits"]], ["Add a thing"])
+
+    def test_status_json_of_a_plain_directory_has_no_git(self) -> None:
+        """
+        Criterion:  status-json-of-a-plain-directory-has-no-git
+          Given:    kb is a plain directory.
+          When:     `shad projects kb status --json`.
+          Then:     exit 0, and the JSON object's `git` is null.
+        """
+        result = self.run_detached("projects", "kb", "status", "--json")
+        self.assertEqual(result.code, 0, result.err)
+        self.assertIsNone(json.loads(result.out)["git"])
 
     def test_status_reports_the_session_and_the_repository(self) -> None:
         """

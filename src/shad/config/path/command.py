@@ -2,8 +2,17 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+import argparse
+
+from shad import parsers
+from shad.deps import Deps
 
 
-def print_config_path(path: Path) -> None:
-    print(path)
+def register(sub: parsers.Subparsers) -> None:
+    parsers.command(
+        sub, "path", run=run, help="Print the config file path (the machine form as it is)"
+    )
+
+
+def run(args: argparse.Namespace, deps: Deps) -> None:
+    deps.out.plain(str(deps.config_file))

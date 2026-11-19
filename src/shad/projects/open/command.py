@@ -6,10 +6,24 @@ Orchestrates: AI session picker → tmux session create/attach.
 
 from __future__ import annotations
 
+import argparse
+
 from shad.projects.open.layout import _create_session
 from shad.projects.open.sessions import pick_claude_target, pick_opencode_target
-from shad.shared.config import Defaults, Project
+from shad.shared.config import HARNESSES, Defaults, Project
 from shad.shared.tmux import _attach, _run, project_session_name, session_exists
+
+
+def add_arguments(parser: argparse.ArgumentParser) -> None:
+    """The options of the `projects` line that open alone reads."""
+    parser.add_argument(
+        "--harness",
+        choices=HARNESSES,
+        help=(
+            "Open with this harness instead of the project's configured one. "
+            "Applies to open only; status ignores it."
+        ),
+    )
 
 
 def open_project(

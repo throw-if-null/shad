@@ -25,7 +25,13 @@ from shad.init.command import (
     _toml_key,
     ensure_dependencies_installed,
 )
+from shad.output import Output
 from shad.testing import Pane, TmuxCase
+
+
+def _out() -> tuple[Output, io.StringIO]:
+    buffer = io.StringIO()
+    return Output(stdout=buffer, stderr=io.StringIO(), color=False), buffer
 
 # ---------------------------------------------------------------------------
 # CLI parser
@@ -53,7 +59,7 @@ class InstallDepsTests(unittest.TestCase):
             patch("shad.init.command._detect_fedora", return_value=False),
             self.assertRaises(ShadError) as ctx,
         ):
-            ensure_dependencies_installed()
+            ensure_dependencies_installed(_out()[0])
         self.assertIn("Fedora", str(ctx.exception))
 
     def test_install_deps_raises_when_not_root(self) -> None:
@@ -66,7 +72,7 @@ class InstallDepsTests(unittest.TestCase):
             patch("shad.init.command._is_root", return_value=False),
             self.assertRaises(ShadError) as ctx,
         ):
-            ensure_dependencies_installed()
+            ensure_dependencies_installed(_out()[0])
         self.assertIn("sudo", str(ctx.exception))
 
     def test_install_deps_installs_missing_packages_and_opencode(self) -> None:
@@ -78,20 +84,20 @@ class InstallDepsTests(unittest.TestCase):
             Dependency(binary="opencode", installer=opencode_installer),
         ]
 
+        out, _buffer = _out()
         with patch("shad.init.command._missing_dependencies", return_value=missing), \
              patch("shad.init.command._detect_fedora", return_value=True), \
-             patch("shad.init.command._is_root", return_value=True), \
-             patch("shad.init.command.console.print"):
-            ensure_dependencies_installed()
+             patch("shad.init.command._is_root", return_value=True):
+            ensure_dependencies_installed(out)
 
-        tmux_installer.assert_called_once_with()
-        opencode_installer.assert_called_once_with()
+        tmux_installer.assert_called_once_with(out)
+        opencode_installer.assert_called_once_with(out)
 
     def test_install_deps_skips_work_when_everything_is_present(self) -> None:
-        with patch("shad.init.command._missing_dependencies", return_value=[]), \
-             patch("shad.init.command.console.print") as print_mock:
-            ensure_dependencies_installed()
-        print_mock.assert_called_once()
+        out, buffer = _out()
+        with patch("shad.init.command._missing_dependencies", return_value=[]):
+            ensure_dependencies_installed(out)
+        self.assertIn("dependencies already installed", buffer.getvalue())
 
 
 # ---------------------------------------------------------------------------
@@ -113,9 +119,9 @@ class InstallOpencodeTests(unittest.TestCase):
         captured: list[tuple[Path, int, bytes]] = []
         run_install_command = init_command._run_install_command
 
-        def run(command: list[str], description: str) -> None:
+        def run(out: Output, command: list[str], description: str) -> None:
             if command[0] != "install":
-                run_install_command(command, description)
+                run_install_command(out, command, description)
                 return
             binary = Path(command[-2])
             mode = stat.S_IMODE(binary.parent.stat().st_mode)
@@ -124,9 +130,8 @@ class InstallOpencodeTests(unittest.TestCase):
         with patch("shad.init.command.urllib.request.urlopen", return_value=io.BytesIO(release)), \
              patch("shad.init.command.OPENCODE_LINUX_X64_SHA256", hashlib.sha256(release).hexdigest()), \
              patch("shad.init.command.platform.machine", return_value="x86_64"), \
-             patch("shad.init.command._run_install_command", side_effect=run), \
-             patch("shad.init.command.console.print"):
-            _install_opencode_systemwide()
+             patch("shad.init.command._run_install_command", side_effect=run):
+            _install_opencode_systemwide(_out()[0])
 
         self.assertEqual(len(captured), 1)
         directory, mode, content = captured[0]
@@ -141,9 +146,8 @@ class InstallOpencodeTests(unittest.TestCase):
         with patch("shad.init.command.urllib.request.urlopen", return_value=io.BytesIO(release)), \
              patch("shad.init.command.platform.machine", return_value="x86_64"), \
              patch("shad.init.command._run_install_command") as run, \
-             patch("shad.init.command.console.print"), \
              self.assertRaises(ShadError) as ctx:
-            _install_opencode_systemwide()
+            _install_opencode_systemwide(_out()[0])
 
         self.assertIn("checksum mismatch", str(ctx.exception))
         run.assert_not_called()
@@ -152,7 +156,7 @@ class InstallOpencodeTests(unittest.TestCase):
         with patch("shad.init.command.urllib.request.urlopen") as urlopen, \
              patch("shad.init.command.platform.machine", return_value="aarch64"), \
              self.assertRaises(ShadError) as ctx:
-            _install_opencode_systemwide()
+            _install_opencode_systemwide(_out()[0])
 
         self.assertIn("aarch64", str(ctx.exception))
         urlopen.assert_not_called()

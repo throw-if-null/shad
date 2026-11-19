@@ -10,33 +10,36 @@ from __future__ import annotations
 
 import argparse
 
-from rich.console import Console
 from rich.text import Text
 
+from shad import parsers
+from shad.deps import Deps
 from shad.sessions import live, render
 from shad.sessions.pick import pick
-from shad.shared.config import Config
 from shad.shared.tmux import current_session, kill_session
 
-console = Console()
+
+def register(sub: parsers.Subparsers) -> None:
+    parsers.command(sub, "stop", run=run, help="Pick running shad sessions and kill them")
 
 
-def stop_sessions(cfg: Config, args: argparse.Namespace) -> None:
-    running = live.collect(cfg)
+def run(args: argparse.Namespace, deps: Deps) -> None:
+    out = deps.out
+    running = live.collect(deps.config)
     current = current_session()
     rows = [item for item in running if item.session != current]
     if not rows:
         message = "no shad sessions are running"
         if running:
             message += " besides this one"
-        console.print(Text(f"  {message}", style="dim"))
+        out.print(Text(f"  {message}", style="dim"))
         return
 
     picked = pick(rows, (), title="stop sessions", accept="stop", hint="stop needs a terminal")
     if not picked:
-        console.print(Text("  nothing stopped", style="dim"))
+        out.print(Text("  nothing stopped", style="dim"))
         return
     stopped = [rows[index] for index in sorted(picked)]
     for item in stopped:
         kill_session(item.session)
-    console.print(render.running_table("stopped", stopped, console.width))
+    out.print(render.running_table("stopped", stopped, out.width))

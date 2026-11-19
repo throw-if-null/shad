@@ -17,8 +17,9 @@ from unittest.mock import patch
 from textual.coordinate import Coordinate
 from textual.widgets import ContentSwitcher, DataTable, ListItem, ListView, Static
 
+from shad.errors import ShadError
 from shad.git.model import BranchRef, Repo, Stash, Worktree
-from shad.git.panel import BRANCHES, STASHES, WORKTREES, GitPanel, _upstream
+from shad.git.panel import BRANCHES, STASHES, WORKTREES, GitPanel, _failure, _upstream
 from shad.git.snapshot import Snapshot
 
 ROOT = Path("/tmp/repo")
@@ -186,3 +187,17 @@ class UpstreamLabelTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FailureHeaderTests(unittest.TestCase):
+    """The panel renders a failed reading's code and category in its own header."""
+
+    def test_a_model_error_shows_its_code_and_category(self) -> None:
+        error = ShadError.infrastructure("git_timeout", "git fetch timed out after 15s")
+        self.assertEqual(
+            _failure(error), "git_timeout (infrastructure): git fetch timed out after 15s"
+        )
+
+    def test_any_other_failure_is_named_as_such(self) -> None:
+        self.assertEqual(_failure(RuntimeError("boom")), "failed: boom")
+        self.assertEqual(_failure(None), "failed")

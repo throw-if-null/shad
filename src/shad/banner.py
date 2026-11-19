@@ -1,8 +1,11 @@
+"""The banner `shad` prints before its help and before it opens a project."""
+
 from __future__ import annotations
 
-from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
+
+from shad.output import Output
 
 LETTER_COLOR = "bright_white"
 
@@ -16,11 +19,6 @@ SHAD_ART = [
 ]
 
 
-def print_banner() -> None:
-    console = Console()
+def print_banner(out: Output) -> None:
     content = Text.from_markup("\n" + "\n".join(SHAD_ART) + "\n")
-    console.print(Panel(content, border_style="white", expand=False))
-
-
-if __name__ == "__main__":
-    print_banner()
+    out.print(Panel(content, border_style="white", expand=False))

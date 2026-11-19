@@ -2,21 +2,46 @@
 
 from __future__ import annotations
 
+import argparse
+from dataclasses import dataclass
 from pathlib import Path
 
-from rich.console import Console
 from rich.text import Text
 
+from shad import parsers
+from shad.deps import Deps
+from shad.output import Output
 from shad.shared.config import load
 
-console = Console()
+
+@dataclass(frozen=True)
+class ConfigValidation:
+    path: str
+    valid: bool  # always True: a file that does not load raises instead
+    projects: int
+    groups: int
 
 
-def validate_config(path: Path) -> None:
+def register(sub: parsers.Subparsers) -> None:
+    parsers.command(
+        sub, "validate", run=run, render=render, help="Check that the config parses and loads"
+    )
+
+
+def run(args: argparse.Namespace, deps: Deps) -> ConfigValidation:
+    return validate(deps.config_file)
+
+
+def validate(path: Path) -> ConfigValidation:
+    """Load *path*, raising as `load` does, and count what it holds."""
     cfg = load(path)
     count = len(cfg.projects) + sum(len(group) for group in cfg.groups.values())
-    console.print(
+    return ConfigValidation(path=str(path), valid=True, projects=count, groups=len(cfg.groups))
+
+
+def render(result: ConfigValidation, out: Output) -> None:
+    out.print(
         Text("  ✓ ", style="bold green")
-        + Text(f"{path} is valid", style="bright_white")
-        + Text(f"  ({count} project(s), {len(cfg.groups)} group(s))", style="dim")
+        + Text(f"{result.path} is valid", style="bright_white")
+        + Text(f"  ({result.projects} project(s), {result.groups} group(s))", style="dim")
     )

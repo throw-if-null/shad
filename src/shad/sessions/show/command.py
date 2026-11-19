@@ -1,28 +1,41 @@
-"""`shad sessions show` — print the saved sessions."""
+"""`shad sessions show` — the saved sessions, as a result."""
 
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 
-from rich.console import Console
 from rich.text import Text
 
+from shad import parsers
+from shad.deps import Deps
+from shad.output import Output
 from shad.sessions import render, store
-from shad.shared.config import Config
+from shad.sessions.model import Entry
 from shad.shared.render import relative_age
 
-console = Console()
+
+@dataclass(frozen=True)
+class SavedSessions:
+    saved_at: int  # unix seconds
+    sessions: tuple[Entry, ...]
 
 
-def show_sessions(cfg: Config, args: argparse.Namespace) -> None:
+def register(sub: parsers.Subparsers) -> None:
+    parsers.command(sub, "show", run=run, render=render_saved, help="Print the saved sessions")
+
+
+def run(args: argparse.Namespace, deps: Deps) -> SavedSessions:
     snapshot = store.read(store.snapshot_path())
+    return SavedSessions(saved_at=snapshot.saved_at, sessions=snapshot.entries)
+
+
+def render_saved(result: SavedSessions, out: Output) -> None:
     rows = [
         (entry, Text("attached" if entry.attached else "", style="dim"))
-        for entry in snapshot.entries
+        for entry in result.sessions
     ]
-    console.print(render.table("sessions", rows, console.width))
-    total = len(snapshot.entries)
+    out.print(render.table("sessions", rows, out.width))
+    total = len(result.sessions)
     count = f"{total} session" if total == 1 else f"{total} sessions"
-    console.print(
-        Text(f"  {count}, saved {relative_age(snapshot.saved_at)} ago", style="dim")
-    )
+    out.print(Text(f"  {count}, saved {relative_age(result.saved_at)} ago", style="dim"))
