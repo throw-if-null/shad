@@ -9,16 +9,11 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from shad.sessions import harness
-from shad.sessions.harness import Conversation, RunningSession
+from shad import harness
+from shad.config.load import Config, Project, all_projects
+from shad.harness import Conversation, RunningSession
 from shad.sessions.model import Entry
-from shad.shared.config import Config, Project, all_projects
-from shad.shared.tmux import (
-    attached_sessions,
-    list_project_sessions,
-    pane_commands,
-    split_session_name,
-)
+from shad.tmux import Tmux, split_session_name
 
 
 @dataclass(frozen=True)
@@ -45,7 +40,7 @@ class Running:
         )
 
 
-def collect(cfg: Config) -> list[Running]:
+def collect(cfg: Config, tmux: Tmux) -> list[Running]:
     """
     Every running shad tmux session, in config order.
 
@@ -55,11 +50,11 @@ def collect(cfg: Config) -> list[Running]:
     the name's key. A session of an unsupported harness has no conversation
     and says why in `unsupported`.
     """
-    attached = attached_sessions()
-    commands = pane_commands()
+    attached = tmux.attached_sessions()
+    commands = tmux.pane_commands()
     found: list[Running] = []
     for project in all_projects(cfg):
-        for session in list_project_sessions(project.session):
+        for session in tmux.list_project_sessions(project.session):
             scoped = split_session_name(project.session, session)
             if scoped is None:
                 name, key = project.harness, None

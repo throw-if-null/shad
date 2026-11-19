@@ -10,15 +10,13 @@ file first, so a failed edit never replaces a working config.
 
 from __future__ import annotations
 
-import os
-import shutil
-import tempfile
 import tomllib
 from pathlib import Path
 
+from shad import atomic
 from shad.config import toml_edit
+from shad.config.load import load
 from shad.errors import ShadError
-from shad.shared.config import load
 
 MISSING = object()  # what lookup() returns for a key the file does not have
 
@@ -74,20 +72,14 @@ def parse_or_fail(text: str) -> dict:
 
 def commit(path: Path, text: str, *, hint: str | None = None) -> None:
     """Validate *text* in a temporary file, then atomically replace *path*."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=".shad.toml.", suffix=".tmp")
-    tmp = Path(tmp_name)
-    try:
-        with os.fdopen(fd, "w") as fh:
-            fh.write(text)
 
+    def check(tmp: Path) -> None:
         try:
             tomllib.loads(text)
         except tomllib.TOMLDecodeError as exc:
             raise ShadError.validation(
                 "invalid_config", f"refusing to write {path}: result is not valid TOML: {exc}"
             ) from None
-
         try:
             load(tmp)
         except ShadError as exc:
@@ -96,13 +88,7 @@ def commit(path: Path, text: str, *, hint: str | None = None) -> None:
                 message = f"{message}; {hint}"
             raise ShadError.validation("invalid_config", message) from None
 
-        if path.exists():
-            shutil.copymode(path, tmp)
-        else:
-            tmp.chmod(0o644)
-        os.replace(tmp, path)
-    finally:
-        tmp.unlink(missing_ok=True)
+    atomic.replace(path, text, check=check)
 
 
 def write_value(path: Path, key: str, value: object) -> None:

@@ -3,6 +3,9 @@ Diagnostics that are off by default and go to stderr under `--debug`.
 
 The root constructs one `Trace` from the flag and injects it; a slice never
 decides on its own whether to print a diagnostic (`[CLI-10]`, `[CLI-11]`).
+
+One Trace per run, constructed by the root from --debug; each note is one
+independent write, so the sync pool shares it; shared-and-safe.
 """
 
 from __future__ import annotations

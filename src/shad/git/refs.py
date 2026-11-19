@@ -173,11 +173,10 @@ def list_worktrees(repo: Path) -> list[Worktree]:
     record: dict[str, str | None] = {}
 
     def flush() -> None:
-        if not record.get("worktree"):
+        raw = record.get("worktree")
+        if not raw:
             record.clear()
             return
-        raw = record.get("worktree")
-        assert raw is not None
         worktrees.append(
             Worktree(
                 path=Path(raw),

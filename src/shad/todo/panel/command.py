@@ -21,4 +21,4 @@ def run(args: argparse.Namespace, deps: Deps) -> None:
     from shad.todo.panel.app import run_panel
 
     cfg = deps.config
-    run_panel(store.todo_dir(cfg), cfg.todo_labels, deps.out)
+    run_panel(store.todo_dir(cfg), cfg.todo_labels, deps.out, deps.editor)

@@ -23,12 +23,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from shad.git import apply, discover, refs, snapshot
-from shad.git import command as C
-from shad.git import plan as planning
+from shad.config.load import Project
+from shad.git import apply, discover, refs
 from shad.git.model import BranchInfo, Worktree, WorktreeKept
+from shad.git.panel import snapshot
+from shad.git.sync import command as C
+from shad.git.sync import plan as planning
 from shad.output import Output
-from shad.shared.config import Project
 
 _ISOLATE = {
     "GIT_CONFIG_GLOBAL": os.devnull,

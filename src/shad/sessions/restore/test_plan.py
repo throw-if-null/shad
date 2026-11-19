@@ -3,12 +3,13 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from shad.sessions.live import Running
 from shad.sessions.model import Entry, Snapshot
 from shad.sessions.restore.plan import Step, attach_target, plan, tab_targets
 from shad.sessions.testing import CFG, KB, SHAD, UUID_A, UUID_B, running
+from shad.tmux import Tmux
 
 
 def _entry(
@@ -30,15 +31,14 @@ class PlanTests(unittest.TestCase):
         (self.projects / "-p-kb").mkdir()
         (self.projects / "-p-kb" / f"{UUID_A}.jsonl").write_text("")
         self.existing: set[str] = set()
-        for patcher in (
-            patch("shad.projects.open.sessions.CLAUDE_PROJECTS_DIR", self.projects),
-            patch("shad.sessions.restore.plan.session_exists", side_effect=self.existing.__contains__),
-        ):
-            patcher.start()
-            self.addCleanup(patcher.stop)
+        self.tmux = Mock(spec=Tmux)
+        self.tmux.session_exists.side_effect = self.existing.__contains__
+        patcher = patch("shad.harness.CLAUDE_PROJECTS_DIR", self.projects)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def _plan(self, *entries: Entry, live: list[Running] | None = None) -> list[Step]:
-        return plan(CFG, Snapshot(saved_at=0, entries=entries), live or [])
+        return plan(CFG, Snapshot(saved_at=0, entries=entries), live or [], self.tmux)
 
     def test_resumes_a_saved_conversation_that_has_a_transcript(self) -> None:
         (step,) = self._plan(_entry("kb", UUID_A))
@@ -46,7 +46,7 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(step.project, KB)
         self.assertEqual(step.session, f"kb--cc-{UUID_A}")
         self.assertEqual(step.command, f"claude --resume {UUID_A}")
-        self.assertTrue(step.creates)
+        self.assertTrue(step.creation is not None)
 
     def test_starts_a_new_conversation_under_an_id_without_a_transcript(self) -> None:
         (step,) = self._plan(_entry("kb", UUID_B))
@@ -69,7 +69,7 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(step.outcome, "running")
         self.assertEqual(step.session, f"kb--cc-{UUID_A}")
         self.assertIsNone(step.command)
-        self.assertFalse(step.creates)
+        self.assertFalse(step.creation is not None)
 
     def test_a_conversation_live_under_another_tmux_name_is_running(self) -> None:
         """A `fresh-` name, or an id superseded by /clear: never a second process."""
@@ -77,7 +77,7 @@ class PlanTests(unittest.TestCase):
         (step,) = self._plan(_entry("kb", UUID_A), live=[live])
         self.assertEqual(step.outcome, "running")
         self.assertEqual(step.session, "kb--cc-fresh-9")
-        self.assertFalse(step.creates)
+        self.assertFalse(step.creation is not None)
 
     def test_a_live_session_holding_another_conversation_does_not_count(self) -> None:
         live = running("kb--cc-fresh-9", session_id=UUID_B)
@@ -137,7 +137,8 @@ class AttachTargetTests(unittest.TestCase):
 
 class TabTargetsTests(unittest.TestCase):
     def _step(self, session: str | None, outcome: str, attached: bool = False) -> Step:
-        return Step(_entry("kb", None, attached=attached), outcome, session=session)  # type: ignore[arg-type]
+        project = KB if session else None
+        return Step(_entry("kb", None, attached=attached), outcome, project=project, session=session)  # type: ignore[arg-type]
 
     def test_the_other_sessions_attached_at_save_in_saved_order(self) -> None:
         steps = [
@@ -146,7 +147,7 @@ class TabTargetsTests(unittest.TestCase):
             self._step("kb--cc-c", "running", attached=True),
         ]
         self.assertEqual(
-            [step.session for step in tab_targets(steps, "kb--cc-a", set())],
+            [session for session, _ in tab_targets(steps, "kb--cc-a", set())],
             ["kb--cc-b", "kb--cc-c"],
         )
 

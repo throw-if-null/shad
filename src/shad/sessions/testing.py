@@ -13,9 +13,9 @@ import re
 import time
 from pathlib import Path
 
-from shad.sessions.harness import Conversation
+from shad.config.load import Config, Defaults, Project
+from shad.harness import Conversation
 from shad.sessions.live import Running
-from shad.shared.config import Config, Defaults, Project
 from shad.testing import TmuxCase
 
 UUID_A = "11111111-1111-4111-8111-111111111111"

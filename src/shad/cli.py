@@ -39,6 +39,7 @@ traceback. This module is the only place that renders an error.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from collections.abc import Callable
 from dataclasses import asdict
@@ -56,11 +57,13 @@ from shad import (
     todo,
 )
 from shad.banner import print_banner
+from shad.config.load import config_path
 from shad.deps import Deps
+from shad.editor import Editor
 from shad.errors import ShadError
 from shad.output import Output
 from shad.parsers import DEBUG, JSON
-from shad.shared.config import config_path
+from shad.tmux import Tmux
 from shad.trace import Trace
 
 # The category to exit code map ([CLI-8]); every category not listed exits 1.
@@ -136,7 +139,15 @@ def _dispatch(args: argparse.Namespace, out: Output, trace: Trace) -> int:
     # the per-OS default. Readers and writers get the same answer because
     # they all go through the one Deps.
     config_file = Path(args.config).expanduser() if args.config else config_path()
-    deps = Deps(out=out, trace=trace, config_file=config_file)
+    # The crosscuts that read the environment do so here, once, and are
+    # handed what they read; no slice reads it.
+    deps = Deps(
+        out=out,
+        trace=trace,
+        tmux=Tmux(os.environ),
+        editor=Editor.from_env(os.environ),
+        config_file=config_file,
+    )
 
     result = args.run(args, deps)
     if result is None:
@@ -146,7 +157,10 @@ def _dispatch(args: argparse.Namespace, out: Output, trace: Trace) -> int:
     if as_json:
         out.json(asdict(result))
         return 0
-    assert render is not None  # a result comes only from a parser registered with one
+    if render is None:
+        raise ShadError.internal(
+            "unexpected", f"{type(result).__name__} was returned by a command with no renderer"
+        )
     render(result, out)
     return 0
 

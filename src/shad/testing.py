@@ -33,9 +33,11 @@ from unittest.mock import patch
 
 import shad
 from shad.cli import main
+from shad.config.load import Config
 from shad.deps import Deps
+from shad.editor import Editor
 from shad.output import Output
-from shad.shared.config import Config
+from shad.tmux import Tmux
 from shad.trace import Trace
 
 # The directory `import shad` resolved to. A shad subprocess gets it as
@@ -87,15 +89,23 @@ def run(argv: Sequence[str], *, env: Mapping[str, str | None] | None = None) -> 
 
 
 def deps(
-    cfg: Config, *, out: Output | None = None, config_file: Path | None = None
+    cfg: Config,
+    *,
+    out: Output | None = None,
+    tmux: Tmux | None = None,
+    editor: Editor | None = None,
+    config_file: Path | None = None,
 ) -> Deps:
     """
     The Deps a unit test hands a slice's `run` directly: *cfg* stands in for
-    the file, and *out* captures nothing unless given. `[TEST-3]`.
+    the file, *out* captures nothing unless given, and *tmux* is the user's
+    unless a fake is given. `[TEST-3]`.
     """
     result = Deps(
         out=out or Output(stdout=io.StringIO(), stderr=io.StringIO()),
         trace=Trace(),
+        tmux=tmux or Tmux(os.environ),
+        editor=editor or Editor(None),
         config_file=config_file or Path(os.devnull),
     )
     result.__dict__["config"] = cfg  # seeds the cached_property, so no file is read

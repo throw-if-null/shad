@@ -1,7 +1,8 @@
 """
-tmux session layout builder for shad.
+The project session layout: the tmux session `projects open` and
+`sessions restore` both create, over the injected Tmux.
 
-Owns _create_session(): constructs the tmux layout for a project.
+Pure functions over Tmux; shared-and-safe.
 
 defaults.git_panel and defaults.todo_panel (both on by default) choose the
 panes; defaults.oc_position chooses where the harness sits.
@@ -59,14 +60,14 @@ pane depend on the order of the earlier ones.
 
 from __future__ import annotations
 
-from shad.shared.config import Defaults, Project
-from shad.shared.tmux import _run
+from shad.config.load import Defaults, Project
+from shad.tmux import Tmux
 
 
-def _create_session(
-    project: Project, defaults: Defaults, oc_command: str, session: str
+def create_session(
+    tmux: Tmux, project: Project, defaults: Defaults, oc_command: str, session: str
 ) -> None:
-    """Create a new tmux session with the configured layout."""
+    """Create the tmux session *session* for *project* with the configured layout."""
     cwd = str(project.path)
     pos = defaults.oc_position
     panel_percent = defaults.panel_percent  # bundle's share of the window
@@ -74,45 +75,23 @@ def _create_session(
 
     # 1. Create session (detached)
     window_title = f"{project.group}|{project.key}" if project.group else project.key
-    _run(["tmux", "new-session", "-d", "-s", session, "-n", window_title, "-c", cwd])
-    _run(["tmux", "set-option", "-t", session, "allow-rename", "off"])
-    _run(["tmux", "set-option", "-t", session, "set-titles", "on"])
-    _run(["tmux", "set-option", "-t", session, "set-titles-string", window_title])
+    tmux.run("new-session", "-d", "-s", session, "-n", window_title, "-c", cwd)
+    tmux.run("set-option", "-t", session, "allow-rename", "off")
+    tmux.run("set-option", "-t", session, "set-titles", "on")
+    tmux.run("set-option", "-t", session, "set-titles-string", window_title)
 
     if defaults.todo_panel:
-        _layout_with_todo(project, defaults, oc_command, session, cwd)
+        _layout_with_todo(tmux, project, defaults, oc_command, session, cwd)
         return
 
     git_pane: str | None = None
 
     if pos == "top":
         # OC top, bundle below — horizontal split within bundle
-        _run(["tmux", "send-keys", "-t", f"{session}:0.0", oc_command + "\n"])
-        _run(
-            [
-                "tmux",
-                "split-window",
-                "-t",
-                f"{session}:0.0",
-                "-v",
-                *_size(panel_percent),
-                "-c",
-                cwd,
-            ]
-        )
+        tmux.run("send-keys", "-t", f"{session}:0.0", oc_command + "\n")
+        tmux.run("split-window", "-t", f"{session}:0.0", "-v", *_size(panel_percent), "-c", cwd)
         if defaults.git_panel:
-            _run(
-                [
-                    "tmux",
-                    "split-window",
-                    "-t",
-                    f"{session}:0.1",
-                    "-h",
-                    *_size(split_percent),
-                    "-c",
-                    cwd,
-                ]
-            )
+            tmux.run("split-window", "-t", f"{session}:0.1", "-h", *_size(split_percent), "-c", cwd)
             git_pane = f"{session}:0.2"
         oc_pane, bash_pane = f"{session}:0.0", f"{session}:0.1"
 
@@ -120,81 +99,37 @@ def _create_session(
         # Bundle on top, OC below.
         # Split the initial pane vertically — OC goes below, bundle stays above.
         oc_percent = 100 - panel_percent
-        _run(
-            [
-                "tmux",
-                "split-window",
-                "-t",
-                f"{session}:0.0",
-                "-v",
-                *_size(oc_percent),
-                "-c",
-                cwd,
-            ]
-        )
+        tmux.run("split-window", "-t", f"{session}:0.0", "-v", *_size(oc_percent), "-c", cwd)
         # pane 0 = bash (top-left of bundle), pane 1 = OC (bottom)
         bash_pane, oc_pane = f"{session}:0.0", f"{session}:0.1"
         if defaults.git_panel:
             # Split pane 0 horizontally to add the git panel on the right of the bundle
-            _run(
-                [
-                    "tmux",
-                    "split-window",
-                    "-t",
-                    f"{session}:0.0",
-                    "-h",
-                    *_size(split_percent),
-                    "-c",
-                    cwd,
-                ]
-            )
+            tmux.run("split-window", "-t", f"{session}:0.0", "-h", *_size(split_percent), "-c", cwd)
             # pane 0 = bash, pane 1 = git, pane 2 = OC
             git_pane, oc_pane = f"{session}:0.1", f"{session}:0.2"
-        _run(["tmux", "send-keys", "-t", oc_pane, oc_command + "\n"])
+        tmux.run("send-keys", "-t", oc_pane, oc_command + "\n")
 
     else:  # left
         # OC on left, bundle on right — vertical split within bundle (bash top, git panel bottom)
-        _run(["tmux", "send-keys", "-t", f"{session}:0.0", oc_command + "\n"])
-        _run(
-            [
-                "tmux",
-                "split-window",
-                "-t",
-                f"{session}:0.0",
-                "-h",
-                *_size(panel_percent),
-                "-c",
-                cwd,
-            ]
-        )
+        tmux.run("send-keys", "-t", f"{session}:0.0", oc_command + "\n")
+        tmux.run("split-window", "-t", f"{session}:0.0", "-h", *_size(panel_percent), "-c", cwd)
         if defaults.git_panel:
-            _run(
-                [
-                    "tmux",
-                    "split-window",
-                    "-t",
-                    f"{session}:0.1",
-                    "-v",
-                    *_size(split_percent),
-                    "-c",
-                    cwd,
-                ]
-            )
+            tmux.run("split-window", "-t", f"{session}:0.1", "-v", *_size(split_percent), "-c", cwd)
             git_pane = f"{session}:0.2"
         oc_pane, bash_pane = f"{session}:0.0", f"{session}:0.1"
 
     # Launch the git panel and shad status
     target = _target(project)
     if git_pane:
-        _run(["tmux", "send-keys", "-t", git_pane, f"shad git panel {target}\n"])
-    _run(["tmux", "send-keys", "-t", bash_pane, f"shad projects {target} status\n"])
+        tmux.run("send-keys", "-t", git_pane, f"shad git panel {target}\n")
+    tmux.run("send-keys", "-t", bash_pane, f"shad projects {target} status\n")
 
     # Focus the OC pane
-    _run(["tmux", "select-pane", "-t", oc_pane])
+    tmux.run("select-pane", "-t", oc_pane)
 
 
 def _layout_with_todo(
-    project: Project, defaults: Defaults, oc_command: str, session: str, cwd: str
+    tmux: Tmux, project: Project, defaults: Defaults, oc_command: str, session: str, cwd: str
 ) -> None:
     """
     The layouts with a todo column on the right edge of the window.
@@ -207,34 +142,32 @@ def _layout_with_todo(
     pp = defaults.panel_percent
     git: str | None = None
 
-    first = _run(
-        ["tmux", "display-message", "-p", "-t", f"{session}:0.0", "#{pane_id}"]
-    ).stdout.strip()
-    todo = _split(first, "-h", defaults.todo_percent, cwd)
+    first = tmux.run("display-message", "-p", "-t", f"{session}:0.0", "#{pane_id}").stdout.strip()
+    todo = _split(tmux, first, "-h", defaults.todo_percent, cwd)
 
     if defaults.oc_position == "top":
         main = first
-        shell = _split(first, "-v", pp, cwd)
+        shell = _split(tmux, first, "-v", pp, cwd)
         if defaults.git_panel:
-            git = _split(todo, "-v", pp, cwd)
+            git = _split(tmux, todo, "-v", pp, cwd)
     elif defaults.oc_position == "bottom":
         # The new, lower panes are the harness and the todo pane.
         shell = first
-        main = _split(first, "-v", 100 - pp, cwd)
+        main = _split(tmux, first, "-v", 100 - pp, cwd)
         if defaults.git_panel:
-            git, todo = todo, _split(todo, "-v", 100 - pp, cwd)
+            git, todo = todo, _split(tmux, todo, "-v", 100 - pp, cwd)
     else:  # left
         main = first
-        shell = _split(first, "-h", pp, cwd)
+        shell = _split(tmux, first, "-h", pp, cwd)
         if defaults.git_panel:
-            git = _split(shell, "-v", defaults.split_percent, cwd)
+            git = _split(tmux, shell, "-v", defaults.split_percent, cwd)
 
-    _run(["tmux", "send-keys", "-t", main, oc_command + "\n"])
+    tmux.run("send-keys", "-t", main, oc_command + "\n")
     if git:
-        _run(["tmux", "send-keys", "-t", git, f"shad git panel {target}\n"])
-    _run(["tmux", "send-keys", "-t", todo, "shad todo panel\n"])
-    _run(["tmux", "send-keys", "-t", shell, f"shad projects {target} status\n"])
-    _run(["tmux", "select-pane", "-t", main])
+        tmux.run("send-keys", "-t", git, f"shad git panel {target}\n")
+    tmux.run("send-keys", "-t", todo, "shad todo panel\n")
+    tmux.run("send-keys", "-t", shell, f"shad projects {target} status\n")
+    tmux.run("select-pane", "-t", main)
 
 
 def _size(percent: int) -> list[str]:
@@ -246,22 +179,10 @@ def _size(percent: int) -> list[str]:
     return ["-l", f"{percent}%"]
 
 
-def _split(pane: str, direction: str, percent: int, cwd: str) -> str:
+def _split(tmux: Tmux, pane: str, direction: str, percent: int, cwd: str) -> str:
     """Split *pane* and return the new pane's id."""
-    result = _run(
-        [
-            "tmux",
-            "split-window",
-            "-t",
-            pane,
-            direction,
-            *_size(percent),
-            "-c",
-            cwd,
-            "-P",
-            "-F",
-            "#{pane_id}",
-        ]
+    result = tmux.run(
+        "split-window", "-t", pane, direction, *_size(percent), "-c", cwd, "-P", "-F", "#{pane_id}"
     )
     return result.stdout.strip()
 

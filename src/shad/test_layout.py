@@ -4,36 +4,41 @@ import itertools
 import unittest
 import unittest.mock
 from pathlib import Path
-from unittest.mock import call, patch
 
-from shad.projects.open.layout import _create_session
-from shad.shared.config import OC_POSITIONS, Defaults, Project
+from shad.config.load import OC_POSITIONS, Defaults, Project
+from shad.layout import create_session
+from shad.tmux import Tmux
 
 
-def _record(
-    project: Project, defaults: Defaults, session: str = "myapp"
-) -> list[list[str]]:
-    """Run _create_session against a fake tmux that hands out pane ids %0, %1, ..."""
+def _fake_tmux() -> unittest.mock.Mock:
+    """A Tmux whose `run` records its calls and hands out pane ids %0, %1, ..."""
     ids = (f"%{n}" for n in itertools.count())
 
-    def fake_run(args: list[str], check: bool = True) -> unittest.mock.Mock:
+    def fake_run(*args: str, check: bool = True) -> unittest.mock.Mock:
         result = unittest.mock.Mock()
-        prints_id = args[1] == "display-message" or "-P" in args
+        prints_id = args[0] == "display-message" or "-P" in args
         result.stdout = f"{next(ids)}\n" if prints_id else ""
         return result
 
-    with patch("shad.projects.open.layout._run", side_effect=fake_run) as run:
-        _create_session(project, defaults, "opencode", session)
-    return [c.args[0] for c in run.call_args_list]
+    tmux = unittest.mock.Mock(spec=Tmux)
+    tmux.run.side_effect = fake_run
+    return tmux
+
+
+def _record(project: Project, defaults: Defaults, session: str = "myapp") -> list[list[str]]:
+    """The tmux commands create_session runs, each without the leading `tmux`."""
+    tmux = _fake_tmux()
+    create_session(tmux, project, defaults, "opencode", session)
+    return [list(c.args) for c in tmux.run.call_args_list]
 
 
 def _sent(calls: list[list[str]]) -> dict[str, str]:
     """Map each command typed into a pane to that pane's target."""
-    return {c[-1]: c[3] for c in calls if c[:2] == ["tmux", "send-keys"]}
+    return {c[-1]: c[2] for c in calls if c[:1] == ["send-keys"]}
 
 
 def _splits(calls: list[list[str]]) -> list[list[str]]:
-    return [c for c in calls if c[:2] == ["tmux", "split-window"]]
+    return [c for c in calls if c[:1] == ["split-window"]]
 
 
 class WindowTitleTests(unittest.TestCase):
@@ -42,25 +47,10 @@ class WindowTitleTests(unittest.TestCase):
             key="shad", group="tin", path=Path("/tmp/shad"), session="tin-shad"
         )
 
-        with patch("shad.projects.open.layout._run") as run:
-            _create_session(project, Defaults(), "opencode", "tin-shad")
-
-        new_session_call = run.call_args_list[0]
+        calls = _record(project, Defaults(), "tin-shad")
         self.assertEqual(
-            new_session_call,
-            call(
-                [
-                    "tmux",
-                    "new-session",
-                    "-d",
-                    "-s",
-                    "tin-shad",
-                    "-n",
-                    "tin|shad",
-                    "-c",
-                    str(project.path),
-                ]
-            ),
+            calls[0],
+            ["new-session", "-d", "-s", "tin-shad", "-n", "tin|shad", "-c", str(project.path)],
         )
 
     def test_ungrouped_project_uses_key_only(self) -> None:
@@ -68,25 +58,9 @@ class WindowTitleTests(unittest.TestCase):
             key="myapp", group=None, path=Path("/tmp/myapp"), session="myapp"
         )
 
-        with patch("shad.projects.open.layout._run") as run:
-            _create_session(project, Defaults(), "opencode", "myapp")
-
-        new_session_call = run.call_args_list[0]
+        calls = _record(project, Defaults(), "myapp")
         self.assertEqual(
-            new_session_call,
-            call(
-                [
-                    "tmux",
-                    "new-session",
-                    "-d",
-                    "-s",
-                    "myapp",
-                    "-n",
-                    "myapp",
-                    "-c",
-                    str(project.path),
-                ]
-            ),
+            calls[0], ["new-session", "-d", "-s", "myapp", "-n", "myapp", "-c", str(project.path)]
         )
 
 
@@ -94,22 +68,14 @@ class GitPaneTests(unittest.TestCase):
     """The third pane runs shad's own panel, not a third-party git client."""
 
     @staticmethod
-    def _sent(run: unittest.mock.MagicMock) -> list[str]:
-        return [
-            c.args[0][-1]
-            for c in run.call_args_list
-            if c.args and c.args[0][:2] == ["tmux", "send-keys"]
-        ]
+    def _sent(calls: list[list[str]]) -> list[str]:
+        return [c[-1] for c in calls if c[:1] == ["send-keys"]]
 
     def test_grouped_project_targets_group_and_key(self) -> None:
         project = Project(
             key="shad", group="tin", path=Path("/tmp/shad"), session="tin-shad"
         )
-
-        with patch("shad.projects.open.layout._run") as run:
-            _create_session(project, Defaults(), "opencode", "tin-shad")
-
-        sent = self._sent(run)
+        sent = self._sent(_record(project, Defaults(), "tin-shad"))
         self.assertIn("shad git panel tin shad\n", sent)
         self.assertIn("shad projects tin shad status\n", sent)
 
@@ -118,10 +84,7 @@ class GitPaneTests(unittest.TestCase):
             key="myapp", group=None, path=Path("/tmp/myapp"), session="myapp"
         )
 
-        with patch("shad.projects.open.layout._run") as run:
-            _create_session(project, Defaults(), "opencode", "myapp")
-
-        sent = self._sent(run)
+        sent = self._sent(_record(project, Defaults(), "myapp"))
         self.assertIn("shad git panel myapp\n", sent)
         self.assertIn("shad projects myapp status\n", sent)
 
@@ -135,7 +98,7 @@ class GitPaneTests(unittest.TestCase):
                 with self.subTest(position=position, todo_panel=todo_panel):
                     defaults = Defaults(oc_position=position, todo_panel=todo_panel)
                     calls = _record(project, defaults)
-                    sent = [c[-1] for c in calls if c[:2] == ["tmux", "send-keys"]]
+                    sent = [c[-1] for c in calls if c[:1] == ["send-keys"]]
                     self.assertEqual(sent.count("shad git panel myapp\n"), 1)
                     # The panel must not land in the pane the harness owns.
                     targets = _sent(calls)
@@ -166,9 +129,9 @@ class GridTests(unittest.TestCase):
 
         splits = _splits(calls)
         # The right column first, then each column at panel_percent.
-        self.assertEqual(splits[0][2:7], ["-t", "%0", "-h", "-l", "30%"])
-        self.assertEqual(splits[1][2:7], ["-t", "%0", "-v", "-l", "35%"])
-        self.assertEqual(splits[2][2:7], ["-t", "%1", "-v", "-l", "35%"])
+        self.assertEqual(splits[0][1:6], ["-t", "%0", "-h", "-l", "30%"])
+        self.assertEqual(splits[1][1:6], ["-t", "%0", "-v", "-l", "35%"])
+        self.assertEqual(splits[2][1:6], ["-t", "%1", "-v", "-l", "35%"])
 
     def test_bottom_puts_the_harness_and_todo_in_the_lower_panes(self) -> None:
         calls = self._calls("bottom")
@@ -179,8 +142,8 @@ class GridTests(unittest.TestCase):
         self.assertEqual(sent["shad todo panel\n"], "%3")
 
         splits = _splits(calls)
-        self.assertEqual(splits[1][2:7], ["-t", "%0", "-v", "-l", "65%"])
-        self.assertEqual(splits[2][2:7], ["-t", "%1", "-v", "-l", "65%"])
+        self.assertEqual(splits[1][1:6], ["-t", "%0", "-v", "-l", "65%"])
+        self.assertEqual(splits[2][1:6], ["-t", "%1", "-v", "-l", "65%"])
 
     def test_left_puts_the_todo_column_right_of_the_bundle(self) -> None:
         calls = self._calls("left")
@@ -193,9 +156,9 @@ class GridTests(unittest.TestCase):
         splits = _splits(calls)
         # The todo column, then the bundle beside the harness, then git
         # inside the bundle at split_percent.
-        self.assertEqual(splits[0][2:7], ["-t", "%0", "-h", "-l", "30%"])
-        self.assertEqual(splits[1][2:7], ["-t", "%0", "-h", "-l", "35%"])
-        self.assertEqual(splits[2][2:7], ["-t", "%2", "-v", "-l", "40%"])
+        self.assertEqual(splits[0][1:6], ["-t", "%0", "-h", "-l", "30%"])
+        self.assertEqual(splits[1][1:6], ["-t", "%0", "-h", "-l", "35%"])
+        self.assertEqual(splits[2][1:6], ["-t", "%2", "-v", "-l", "40%"])
 
     def test_every_split_asks_tmux_for_the_new_pane_id(self) -> None:
         for position in OC_POSITIONS:
@@ -209,7 +172,7 @@ class GridTests(unittest.TestCase):
                 calls = self._calls(position)
                 sent = _sent(calls)
                 self.assertEqual(len(set(sent.values())), 4)
-                focus = next(c[3] for c in calls if c[:2] == ["tmux", "select-pane"])
+                focus = next(c[2] for c in calls if c[:1] == ["select-pane"])
                 self.assertEqual(focus, sent["opencode\n"])
 
     def test_ungrouped_project_passes_a_bare_key_to_the_git_panel(self) -> None:
@@ -264,7 +227,7 @@ class GitPanelOffTests(unittest.TestCase):
                     panes = 3 if todo_panel else 2
                     self.assertEqual(len(_splits(calls)), panes - 1)
                     self.assertEqual(len(set(sent.values())), panes)
-                    focus = next(c[3] for c in calls if c[:2] == ["tmux", "select-pane"])
+                    focus = next(c[2] for c in calls if c[:1] == ["select-pane"])
                     self.assertEqual(focus, sent["opencode\n"])
 
     def test_the_todo_pane_takes_the_full_height_of_its_column(self) -> None:
@@ -273,10 +236,10 @@ class GitPanelOffTests(unittest.TestCase):
             with self.subTest(position=position):
                 calls = self._calls(position, todo_panel=True)
                 splits = _splits(calls)
-                self.assertEqual(splits[0][2:7], ["-t", "%0", "-h", "-l", "30%"])
+                self.assertEqual(splits[0][1:6], ["-t", "%0", "-h", "-l", "30%"])
                 todo = _sent(calls)["shad todo panel\n"]
                 self.assertEqual(todo, "%1")
-                self.assertFalse(any(split[3] == todo for split in splits))
+                self.assertFalse(any(split[2] == todo for split in splits))
 
     def test_without_either_panel_the_harness_and_bash_split_once(self) -> None:
         expected = {
@@ -287,7 +250,7 @@ class GitPanelOffTests(unittest.TestCase):
         for position, (split, harness, shell) in expected.items():
             with self.subTest(position=position):
                 calls = self._calls(position, todo_panel=False)
-                self.assertEqual(_splits(calls)[0][4:7], split)
+                self.assertEqual(_splits(calls)[0][3:6], split)
                 sent = _sent(calls)
                 self.assertEqual(sent["opencode\n"], harness)
                 self.assertEqual(sent["shad projects tin shad status\n"], shell)

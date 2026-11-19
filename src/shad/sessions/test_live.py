@@ -3,12 +3,13 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
-from shad.sessions.harness import _Record
+from shad.harness import _Record
 from shad.sessions.live import collect, duplicates
 from shad.sessions.model import Entry
 from shad.sessions.testing import CFG, KB, SHAD, UUID_A, UUID_B, running
+from shad.tmux import Tmux
 
 
 def _record(session_id: str, **extra: object) -> _Record:
@@ -20,7 +21,7 @@ class CollectTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        patcher = patch("shad.projects.open.sessions.CLAUDE_PROJECTS_DIR", Path(self._tmp.name))
+        patcher = patch("shad.harness.CLAUDE_PROJECTS_DIR", Path(self._tmp.name))
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -32,19 +33,15 @@ class CollectTests(unittest.TestCase):
         commands: dict[str, set[str]] | None = None,
         records: dict[str, _Record] | None = None,
     ):
-        with (
-            patch(
-                "shad.sessions.live.list_project_sessions",
-                side_effect=lambda base: sessions.get(base, []),
-            ),
-            patch("shad.sessions.live.attached_sessions", return_value=attached or set()),
-            patch("shad.sessions.live.pane_commands", return_value=commands or {}),
-            patch(
-                "shad.sessions.harness._claude_process_record",
-                side_effect=lambda name: (records or {}).get(name),
-            ),
+        tmux = Mock(spec=Tmux)
+        tmux.list_project_sessions.side_effect = lambda base: sessions.get(base, [])
+        tmux.attached_sessions.return_value = attached or set()
+        tmux.pane_commands.return_value = commands or {}
+        with patch(
+            "shad.harness._claude_process_record",
+            side_effect=lambda name: (records or {}).get(name),
         ):
-            return collect(CFG)
+            return collect(CFG, tmux)
 
     def test_lists_every_running_session_in_config_order(self) -> None:
         sessions = {"tin-shad": [f"tin-shad--cc-{UUID_A}"], "kb": ["kb--cc-fresh-9"]}

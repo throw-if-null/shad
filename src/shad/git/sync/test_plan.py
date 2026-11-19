@@ -6,7 +6,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 from shad.git import discover, refs
-from shad.git import plan as planning
 from shad.git.model import (
     BranchInfo,
     BranchKept,
@@ -15,6 +14,7 @@ from shad.git.model import (
     WorktreeInfo,
     WorktreeKept,
 )
+from shad.git.sync import plan as planning
 
 REPO = Path("/tmp/repo")
 

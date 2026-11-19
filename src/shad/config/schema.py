@@ -18,9 +18,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from shad.config.load import HARNESSES, OC_POSITIONS
 from shad.config.toml_edit import format_value
 from shad.errors import ShadError
-from shad.shared.config import HARNESSES, OC_POSITIONS
 
 ENUM = "enum"
 BOOL = "bool"

@@ -3,10 +3,12 @@ from __future__ import annotations
 import argparse
 import io
 import tempfile
+import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
+from shad.config.load import Config, Defaults, Project
 from shad.output import Output
 from shad.sessions import store
 from shad.sessions.model import Entry, Snapshot
@@ -21,8 +23,8 @@ from shad.sessions.testing import (
     entry,
     running,
 )
-from shad.shared.config import Config, Defaults, Project
 from shad.testing import deps
+from shad.tmux import Tmux
 
 DOC = Project(key="doc", group=None, path=Path("/p/doc"), session="doc", harness="claude")
 UUID_C = "33333333-3333-4333-8333-333333333333"
@@ -131,10 +133,41 @@ class RestoreTests(SessionsCase):
         self.assertIn("no tab for 1 session(s): the terminal is not kitty", screen)
         self.assertIn(f"tmux attach-session -t =tin-shad--cc-{UUID_B}", screen)
 
+    def test_restore_and_open_build_the_same_layout(self) -> None:
+        """
+        Criterion:  restore-and-open-build-the-same-layout
+          Given:    a snapshot with one entry for kb whose conversation has
+                    no transcript, and a client on a shell session.
+          When:     `shad sessions restore --no-attach`, then `shad projects
+                    kb` typed into the shell.
+          Then:     restore exits 0, and the session kb--cc-<id> it created
+                    has the same pane count and the same pane commands as
+                    the session `shad projects kb` created.
+        """
+        self.write_snapshot(entry("kb", UUID_B))
+        result = self.run_detached("sessions", "restore", "--no-attach")
+        self.assertEqual(result.code, 0, result.err)
+        restored = f"kb--cc-{UUID_B}"
+        self.assertIn("claude", self.wait_for_harness(restored))
+
+        self.shell_with_client()
+        self.type_into_shell("shad projects kb")
+        opened = self.wait_for_client_on(lambda name: name.startswith("kb--cc-") and name != restored)
+        self.assertIn("claude", self.wait_for_harness(opened))
+
+        # The status pane runs `shad projects kb status` and then returns to
+        # the shell, so the commands match once both sessions have settled.
+        deadline = time.monotonic() + 10
+        while True:
+            a, b = sorted(self.pane_commands(restored)), sorted(self.pane_commands(opened))
+            if a == b or time.monotonic() > deadline:
+                break
+            time.sleep(0.1)
+        self.assertEqual(a, b)
+        self.assertEqual(len(a), 4)
+
     def wait_for_harness(self, session: str) -> list[str]:
         """The pane commands of *session* once claude is among them."""
-        import time
-
         deadline = time.monotonic() + 10
         while True:
             commands = self.pane_commands(session)
@@ -159,18 +192,23 @@ class KittyTabTests(unittest.TestCase):
         # The tab report goes to stderr; stdout holds the restored table.
         self.output = io.StringIO()
         self.out = Output(stdout=io.StringIO(), stderr=self.output, width=120, color=False)
+        # A tmux with no session and no client, that attaches cleanly.
+        self.tmux = Mock(spec=Tmux)
+        self.tmux.attached_sessions.return_value = set()
+        self.tmux.session_exists.return_value = False
+        self.tmux.attach.return_value = 0
         for patcher in (
             patch("shad.sessions.store.snapshot_path", return_value=self.path),
-            patch("shad.sessions.restore.command.attached_sessions", return_value=set()),
-            patch("shad.shared.terminal.current", return_value="kitty"),
+            patch("shad.sessions.restore.terminal.current", return_value="kitty"),
             patch("shad.sessions.live.collect", return_value=[]),
-            patch("shad.sessions.restore.plan.session_exists", return_value=False),
-            patch("shad.sessions.harness.Claude.can_resume", return_value=True),
-            patch("shad.sessions.restore.command._create_session"),
-            patch("shad.sessions.restore.command._attach", return_value=0),
+            patch("shad.harness.Claude.can_resume", return_value=True),
+            patch("shad.sessions.restore.command.create_session"),
         ):
             patcher.start()
             self.addCleanup(patcher.stop)
+
+    def _deps(self, cfg: Config = CFG):
+        return deps(cfg, out=self.out, tmux=self.tmux)
 
     def _args(self, *, no_attach: bool = False) -> argparse.Namespace:
         return argparse.Namespace(sessions_action="restore", no_attach=no_attach)
@@ -182,8 +220,8 @@ class KittyTabTests(unittest.TestCase):
         self._write_snapshot(
             _entry("kb", UUID_A, attached=True), _entry("shad", UUID_B, group="tin", attached=True)
         )
-        with patch("shad.shared.terminal.open_tab", return_value=None) as open_tab:
-            restore(self._args(), deps(CFG, out=self.out))
+        with patch("shad.sessions.restore.terminal.open_tab", return_value=None) as open_tab:
+            restore(self._args(), self._deps())
 
         open_tab.assert_called_once_with(
             "kitty",
@@ -194,8 +232,8 @@ class KittyTabTests(unittest.TestCase):
 
     def test_no_tab_for_a_session_detached_at_save(self) -> None:
         self._write_snapshot(_entry("kb", UUID_A, attached=True), _entry("shad", UUID_B, group="tin"))
-        with patch("shad.shared.terminal.open_tab") as open_tab:
-            restore(self._args(), deps(CFG, out=self.out))
+        with patch("shad.sessions.restore.terminal.open_tab") as open_tab:
+            restore(self._args(), self._deps())
 
         open_tab.assert_not_called()
 
@@ -204,15 +242,12 @@ class KittyTabTests(unittest.TestCase):
             _entry("kb", UUID_A, attached=True), _entry("shad", UUID_B, group="tin", attached=True)
         )
         live = running("tin-shad--cc-fresh-1", SHAD, session_id=UUID_B, attached=True)
+        self.tmux.attached_sessions.return_value = {"tin-shad--cc-fresh-1"}
         with (
             patch("shad.sessions.live.collect", return_value=[live]),
-            patch(
-                "shad.sessions.restore.command.attached_sessions",
-                return_value={"tin-shad--cc-fresh-1"},
-            ),
-            patch("shad.shared.terminal.open_tab") as open_tab,
+            patch("shad.sessions.restore.terminal.open_tab") as open_tab,
         ):
-            restore(self._args(), deps(CFG, out=self.out))
+            restore(self._args(), self._deps())
 
         open_tab.assert_not_called()
 
@@ -220,8 +255,8 @@ class KittyTabTests(unittest.TestCase):
         self._write_snapshot(
             _entry("kb", UUID_A, attached=True), _entry("shad", UUID_B, group="tin", attached=True)
         )
-        with patch("shad.shared.terminal.open_tab") as open_tab:
-            restore(self._args(no_attach=True), deps(CFG, out=self.out))
+        with patch("shad.sessions.restore.terminal.open_tab") as open_tab:
+            restore(self._args(no_attach=True), self._deps())
 
         open_tab.assert_not_called()
 
@@ -232,8 +267,8 @@ class KittyTabTests(unittest.TestCase):
             _entry("shad", UUID_B, group="tin", attached=True),
             _entry("doc", UUID_C, attached=True),
         )
-        with patch("shad.shared.terminal.open_tab", return_value="kitty said no") as open_tab:
-            restore(self._args(), deps(cfg, out=self.out))
+        with patch("shad.sessions.restore.terminal.open_tab", return_value="kitty said no") as open_tab:
+            restore(self._args(), self._deps(cfg))
 
         open_tab.assert_called_once()
         output = self.output.getvalue()

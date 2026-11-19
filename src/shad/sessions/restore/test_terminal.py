@@ -5,28 +5,28 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from shad.shared.terminal import current, open_tab
+from shad.sessions.restore.terminal import current, open_tab
 
 
 class CurrentTests(unittest.TestCase):
     def test_kitty_when_its_variable_and_kitten_are_present(self) -> None:
         with (
             patch.dict("os.environ", {"KITTY_WINDOW_ID": "1"}),
-            patch("shad.shared.terminal.shutil.which", return_value="/usr/bin/kitten"),
+            patch("shad.sessions.restore.terminal.shutil.which", return_value="/usr/bin/kitten"),
         ):
             self.assertEqual(current(), "kitty")
 
     def test_none_outside_kitty(self) -> None:
         with (
             patch.dict("os.environ", {}, clear=True),
-            patch("shad.shared.terminal.shutil.which", return_value="/usr/bin/kitten"),
+            patch("shad.sessions.restore.terminal.shutil.which", return_value="/usr/bin/kitten"),
         ):
             self.assertIsNone(current())
 
     def test_none_without_kitten(self) -> None:
         with (
             patch.dict("os.environ", {"KITTY_WINDOW_ID": "1"}),
-            patch("shad.shared.terminal.shutil.which", return_value=None),
+            patch("shad.sessions.restore.terminal.shutil.which", return_value=None),
         ):
             self.assertIsNone(current())
 
@@ -34,7 +34,7 @@ class CurrentTests(unittest.TestCase):
 class OpenTabTests(unittest.TestCase):
     def test_launches_a_kitty_tab_behind_the_current_one(self) -> None:
         done = subprocess.CompletedProcess(args=[], returncode=0, stdout="7\n", stderr="")
-        with patch("shad.shared.terminal.subprocess.run", return_value=done) as run:
+        with patch("shad.sessions.restore.terminal.subprocess.run", return_value=done) as run:
             error = open_tab("kitty", ["tmux", "attach-session", "-t", "=kb"], Path("/p/kb"))
 
         self.assertIsNone(error)
@@ -50,14 +50,14 @@ class OpenTabTests(unittest.TestCase):
         failed = subprocess.CompletedProcess(
             args=[], returncode=1, stdout="", stderr="Remote control is disabled\n"
         )
-        with patch("shad.shared.terminal.subprocess.run", return_value=failed):
+        with patch("shad.sessions.restore.terminal.subprocess.run", return_value=failed):
             error = open_tab("kitty", ["true"], Path("/p"))
 
         self.assertEqual(error, "Remote control is disabled")
 
     def test_reports_no_answer(self) -> None:
         with patch(
-            "shad.shared.terminal.subprocess.run",
+            "shad.sessions.restore.terminal.subprocess.run",
             side_effect=subprocess.TimeoutExpired(cmd="kitten", timeout=10),
         ):
             error = open_tab("kitty", ["true"], Path("/p"))

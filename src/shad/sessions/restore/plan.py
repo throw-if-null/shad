@@ -9,16 +9,25 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 
-from shad.projects.open.sessions import OpencodeTarget
-from shad.sessions import harness
+from shad import harness
+from shad.config.load import Config, Project
 from shad.sessions.live import Running
 from shad.sessions.model import Entry, Snapshot
-from shad.shared.config import Config, Project
-from shad.shared.tmux import SESSION_PREFIXES, project_session_name, session_exists
+from shad.tmux import SESSION_PREFIXES, Tmux, project_session_name
 
 Outcome = Literal["resume", "new", "running", "skipped"]
+
+
+@dataclass(frozen=True)
+class Creation:
+    """What a step that creates a session needs: the project, the name, the harness command."""
+
+    project: Project
+    session: str
+    command: str
 
 
 @dataclass(frozen=True)
@@ -31,11 +40,18 @@ class Step:
     command: str | None = None  # what the harness pane runs
 
     @property
-    def creates(self) -> bool:
-        return self.outcome in ("resume", "new")
+    def creation(self) -> Creation | None:
+        """The session to create, for a resume or new step; None otherwise."""
+        if self.outcome not in ("resume", "new"):
+            return None
+        if self.project is None or self.session is None or self.command is None:
+            raise ValueError(f"a {self.outcome} step needs a project, a session and a command")
+        return Creation(project=self.project, session=self.session, command=self.command)
 
 
-def plan(cfg: Config, snapshot: Snapshot, running: Sequence[Running]) -> list[Step]:
+def plan(
+    cfg: Config, snapshot: Snapshot, running: Sequence[Running], tmux: Tmux
+) -> list[Step]:
     """
     One step per entry, in saved order. *running* is what `live.collect`
     found now.
@@ -46,10 +62,10 @@ def plan(cfg: Config, snapshot: Snapshot, running: Sequence[Running]) -> list[St
                 would use, exists; it is left alone
       skipped   nothing can be created; the reason says why
     """
-    return [_step(cfg, entry, running) for entry in snapshot.entries]
+    return [_step(cfg, entry, running, tmux) for entry in snapshot.entries]
 
 
-def _step(cfg: Config, entry: Entry, running: Sequence[Running]) -> Step:
+def _step(cfg: Config, entry: Entry, running: Sequence[Running], tmux: Tmux) -> Step:
     project = _find_project(cfg, entry)
     if project is None:
         return Step(entry, "skipped", reason="project is no longer configured")
@@ -80,13 +96,8 @@ def _step(cfg: Config, entry: Entry, running: Sequence[Running]) -> Step:
             else "no conversation id was saved"
         )
 
-    target = OpencodeTarget(
-        command=command,
-        session_key=session_id,
-        session_prefix=SESSION_PREFIXES[entry.harness],
-    )
-    session = project_session_name(project.session, target)
-    if session_exists(session):
+    session = project_session_name(project.session, SESSION_PREFIXES[entry.harness], session_id)
+    if tmux.session_exists(session):
         return Step(entry, "running", project=project, session=session)
     return Step(
         entry, outcome, reason=reason, project=project, session=session, command=command
@@ -132,17 +143,21 @@ def attach_target(steps: list[Step]) -> str | None:
     return present[0].session if present else None
 
 
-def tab_targets(steps: list[Step], attach: str, attached_now: set[str]) -> list[Step]:
+def tab_targets(
+    steps: list[Step], attach: str, attached_now: set[str]
+) -> list[tuple[str, Path]]:
     """
-    The steps whose session gets a terminal tab of its own, in saved order:
-    attached when the snapshot was saved, other than *attach*, which the
-    current terminal takes. A session in *attached_now* already has a
-    client, and a second one would mirror it, so it gets no tab.
+    The sessions that get a terminal tab of their own, each with its
+    project directory, in saved order: attached when the snapshot was
+    saved, other than *attach*, which the current terminal takes. A session
+    in *attached_now* already has a client, and a second one would mirror
+    it, so it gets no tab.
     """
     return [
-        step
+        (step.session, step.project.path)
         for step in steps
         if step.session
+        and step.project is not None
         and step.outcome != "skipped"
         and step.entry.attached
         and step.session != attach

@@ -8,6 +8,8 @@ error in every position, never argparse's. Both default to SUPPRESS, not
 False: argparse applies a subparser's defaults after the root parsed, so a
 False default on the subcommand would overwrite a flag given before it. The
 root reads each flag with getattr.
+
+The parents are built once at import and only read; shared-and-safe.
 """
 
 from __future__ import annotations

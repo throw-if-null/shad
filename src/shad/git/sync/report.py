@@ -2,7 +2,7 @@
 Rendering for `shad git sync`.
 
 Nothing here runs git or decides anything — it prints the plans and outcomes
-that shad.git.command produces, on the Output the root injected. Sections
+that shad.git.sync.command produces, on the Output the root injected. Sections
 with nothing to show are omitted entirely, and projects with nothing to
 report collapse to a single line, so a seven-project run stays readable.
 """
@@ -13,7 +13,7 @@ from rich.text import Text
 
 from shad.git.model import ProjectOutcome, ProjectPlan, SyncRun
 from shad.output import Output
-from shad.shared.render import make_table
+from shad.style import make_table
 
 
 def _plural(count: int, noun: str, plural: str | None = None) -> str:

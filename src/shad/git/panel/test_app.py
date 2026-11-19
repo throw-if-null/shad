@@ -19,8 +19,15 @@ from textual.widgets import ContentSwitcher, DataTable, ListItem, ListView, Stat
 
 from shad.errors import ShadError
 from shad.git.model import BranchRef, Repo, Stash, Worktree
-from shad.git.panel import BRANCHES, STASHES, WORKTREES, GitPanel, _failure, _upstream
-from shad.git.snapshot import Snapshot
+from shad.git.panel.app import (
+    BRANCHES,
+    STASHES,
+    WORKTREES,
+    GitPanel,
+    _failure,
+    _upstream,
+)
+from shad.git.panel.snapshot import Snapshot
 
 ROOT = Path("/tmp/repo")
 REPO = Repo(root=ROOT, common_dir=ROOT / ".git")
@@ -61,7 +68,7 @@ class PanelTests(unittest.IsolatedAsyncioTestCase):
         app = GitPanel(REPO, fetch=False)
         # collect() is exercised by test_snapshot; the panel is fed directly so
         # these tests never touch a repository or the network.
-        self._patch = patch("shad.git.panel.collect", return_value=snapshot)
+        self._patch = patch("shad.git.panel.app.collect", return_value=snapshot)
         self._patch.start()
         self.addCleanup(self._patch.stop)
         return app

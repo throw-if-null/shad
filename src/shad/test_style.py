@@ -4,7 +4,7 @@ import unittest
 
 from rich import box
 
-from shad.shared.render import make_table, relative_age
+from shad.style import make_table, relative_age
 
 
 class MakeTableTests(unittest.TestCase):

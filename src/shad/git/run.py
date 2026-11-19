@@ -12,6 +12,9 @@ otherwise operate on an ancestor repository.
 Callers decide from exit codes and plumbing formats, never from message text:
 git messages are gettext-translated, `fetch.output = compact` rewrites ref
 names, and `git branch` layout depends on terminal width.
+
+Stateless functions that build each call's environment afresh, so `git sync`
+shares them across its worker threads; shared-and-safe.
 """
 
 from __future__ import annotations

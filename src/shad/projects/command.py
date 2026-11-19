@@ -16,7 +16,9 @@ from __future__ import annotations
 import argparse
 
 from shad import parsers
+from shad.addressing import resolve_prefix
 from shad.banner import print_banner
+from shad.config.load import Config, Project
 from shad.deps import Deps
 from shad.errors import ShadError
 from shad.output import Output
@@ -25,7 +27,6 @@ from shad.projects.list.command import render as render_list
 from shad.projects.open.command import add_arguments, open_project
 from shad.projects.status.command import Status, status
 from shad.projects.status.command import render as render_status
-from shad.shared.config import Config, Project, resolve_prefix
 
 ACTIONS = ("status",)
 
@@ -131,13 +132,13 @@ def _act(
 ) -> Status | int | None:
     """Status, or open: the banner, then the tmux exit status, or None on cancel."""
     if action == "status":
-        return status(project, deps.trace)
+        return status(project, deps.tmux, deps.trace)
     if getattr(args, "json", False):
         raise ShadError.usage(
             "no_json", "shad projects <name> opens a session; --json applies to the list and status"
         )
     print_banner(deps.out)
-    return open_project(project, cfg.defaults, harness=args.harness)
+    return open_project(project, cfg.defaults, deps.tmux, harness=args.harness)
 
 
 def render(result: ProjectList | Status, out: Output) -> None:

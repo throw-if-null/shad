@@ -11,7 +11,7 @@ from shad import parsers
 from shad.deps import Deps
 from shad.errors import ShadError
 from shad.output import Output
-from shad.shared.render import make_table
+from shad.style import make_table
 from shad.todo import store
 from shad.todo.model import problems
 from shad.todo.render import labels_text, status_glyph, status_word, title_style

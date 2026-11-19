@@ -7,10 +7,11 @@ The todo dir is the [todo] path from shad.toml, or <data dir>/todo when it is
 not set. There is one list, and no item belongs to a project: the todo pane
 in every project session shows the same files.
 
-Every write touches one file. A new item is created with O_EXCL, so two adds
-of the same key cannot both succeed, and a status change goes through a
-temporary file and os.replace, so a reader never sees a partial file. Nothing
-here holds a lock, because nothing here reads one file to write another.
+Every write touches one file, through `shad.atomic`: a new item is an
+exclusive create, so two adds of the same key cannot both succeed, and a
+status change is a replacement, so a reader never sees a partial file.
+Nothing here holds a lock, because nothing here reads one file to write
+another.
 
 This module is synchronous and does no rendering: the panel calls it from the
 UI thread (a directory of tens of files reads in well under a millisecond)
@@ -19,12 +20,12 @@ and the tests drive it without a terminal.
 
 from __future__ import annotations
 
-import os
-import tempfile
 from pathlib import Path
 
+from shad import atomic
+from shad.addressing import resolve_prefix
+from shad.config.load import Config, default_data_dir
 from shad.errors import ShadError
-from shad.shared.config import Config, default_data_dir, resolve_prefix
 from shad.todo.model import (
     STATUSES,
     Item,
@@ -139,14 +140,11 @@ def add(
         extra=extra,
     )
 
-    directory.mkdir(parents=True, exist_ok=True)
     path = item_path(directory, key)
     try:
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+        atomic.create(path, serialize(item))
     except FileExistsError:
         raise ShadError.conflict("todo_exists", f"todo '{key}' already exists: {path}") from None
-    with os.fdopen(fd, "w") as fh:
-        fh.write(serialize(item))
     return item
 
 
@@ -197,12 +195,4 @@ def _read(path: Path) -> Item:
 
 
 def _write(path: Path, text: str) -> None:
-    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.stem}.", suffix=".tmp")
-    tmp = Path(tmp_name)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(text)
-        tmp.chmod(0o644)
-        os.replace(tmp, path)
-    finally:
-        tmp.unlink(missing_ok=True)
+    atomic.replace(path, text)

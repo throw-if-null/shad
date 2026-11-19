@@ -30,16 +30,13 @@ from textual.binding import Binding
 from textual.containers import VerticalScroll
 from textual.widgets import DataTable, Footer, Static
 
+from shad.editor import Editor
 from shad.errors import ShadError
 from shad.output import Output
-from shad.shared.render import relative_age
-from shad.todo import store
-from shad.todo.add.command import add_in_editor
-from shad.todo.edit.command import edit_in_editor
+from shad.style import relative_age
+from shad.todo import add_in_editor, edit_in_editor, remove, set_status, store
 from shad.todo.model import Item, Status, problems
 from shad.todo.render import labels_text, status_glyph, status_word, title_text
-from shad.todo.rm.command import remove
-from shad.todo.status.command import set_status
 
 POLL_SECONDS = 1.0
 
@@ -73,11 +70,12 @@ class TodoPanel(App[None]):
         Binding("k", "cursor_up", "up", show=False),
     ]
 
-    def __init__(self, directory: Path, labels: list[str], out: Output) -> None:
+    def __init__(self, directory: Path, labels: list[str], out: Output, editor: Editor) -> None:
         super().__init__()
         self._directory = directory
         self._labels = labels
         self._out = out
+        self._editor = editor
         self._items: dict[str, Item] = {}
         self._signature = store.signature(directory)
         self._pending_delete: str | None = None
@@ -228,7 +226,7 @@ class TodoPanel(App[None]):
         # because the terminal is in cooked mode while the app is suspended.
         with self.suspend():
             try:
-                item = add_in_editor(self._directory, [], self._labels, self._out)
+                item = add_in_editor(self._directory, [], self._labels, self._out, self._editor)
             except ShadError as exc:
                 failure = exc
             except (KeyboardInterrupt, EOFError):
@@ -252,7 +250,7 @@ class TodoPanel(App[None]):
         # Caught inside the block for the reason action_add gives.
         with self.suspend():
             try:
-                edit_in_editor(self._directory, key)
+                edit_in_editor(self._directory, key, self._editor)
             except ShadError as exc:
                 failure = exc
         if failure is not None:
@@ -277,5 +275,5 @@ class TodoPanel(App[None]):
         self.query_one("#items", DataTable).action_cursor_up()
 
 
-def run_panel(directory: Path, labels: list[str], out: Output) -> None:
-    TodoPanel(directory, labels, out).run()
+def run_panel(directory: Path, labels: list[str], out: Output, editor: Editor) -> None:
+    TodoPanel(directory, labels, out, editor).run()

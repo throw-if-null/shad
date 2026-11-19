@@ -37,7 +37,7 @@ def register(sub: parsers.Subparsers) -> None:
 def run(args: argparse.Namespace, deps: Deps) -> None:
     cfg = deps.config
     out = deps.out
-    running = live.collect(cfg)
+    running = live.collect(cfg, deps.tmux)
     savable = [item for item in running if item.unsupported is None]
     if not savable:
         if running:
