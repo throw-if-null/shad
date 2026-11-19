@@ -317,7 +317,13 @@ _shad_complete() {
         return
         ;;
     init)
-        _shad_offer "$cur" "$(_shad_unused "--install-deps" "${flags[@]}")"
+        if [[ "$prev" == "--path" ]] ||
+            { [[ "$prev" == "=" ]] && ((COMP_CWORD > 1)) && [[ "${COMP_WORDS[COMP_CWORD - 2]}" == "--path" ]]; }; then
+            _shad_offer_dirs
+            return
+        fi
+        _shad_offer "$cur" \
+            "$(_shad_unused "--path --group --key --session --harness --wizard --install-deps" "${flags[@]}")"
         return
         ;;
     config)
@@ -379,9 +385,9 @@ _shad_complete() {
         # Two names is the longest valid `projects` line; past that the
         # command itself errors, so offer nothing.
         ((${#args[@]} > 2)) && return
-        # A name opens a project, which has no --json; with no name the
-        # line lists, which has.
-        extra="--harness"
+        # Opening a project takes --harness and the open options --resume
+        # and --pick; with no name the line lists, which has --json instead.
+        extra="--harness --resume --pick"
         ((${#args[@]} == 0)) && extra="--json --harness"
     fi
 
