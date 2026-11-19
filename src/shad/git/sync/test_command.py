@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import Mock, patch
 
-from shad.config.load import Project
+from shad.config import Project
 from shad.errors import ShadError
 from shad.git import apply, refs
 from shad.git.model import BranchInfo, ProjectOutcome, ProjectPlan, Repo, WorktreeInfo

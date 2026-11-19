@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from shad.addressing import resolve_prefix, resolve_target
-from shad.config.load import Config, Defaults, Project
+from shad.config import Config, Defaults, Project
 from shad.errors import ShadError
 
 

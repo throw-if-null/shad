@@ -46,7 +46,7 @@ def register(sub: parsers.Subparsers) -> None:
 
 def run(args: argparse.Namespace, deps: Deps) -> TodoList | None:
     cfg = deps.config
-    directory = store.todo_dir(cfg)
+    directory = cfg.todo_dir
     if getattr(args, "keys", False):
         if getattr(args, "json", False):
             raise ShadError.usage("no_json", "--keys prints the keys as they are; drop --json")

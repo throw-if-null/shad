@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from shad.config.load import Project
+from shad.config import Project
 
 # ── one repository ────────────────────────────────────────────────
 

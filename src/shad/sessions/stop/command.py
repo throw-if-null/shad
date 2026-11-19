@@ -25,7 +25,7 @@ def register(sub: parsers.Subparsers) -> None:
 def run(args: argparse.Namespace, deps: Deps) -> None:
     out = deps.out
     tmux = deps.tmux
-    running = live.collect(deps.config, tmux)
+    running = live.collect(deps.config, tmux, deps.harnesses)
     current = tmux.current_session()
     rows = [item for item in running if item.session != current]
     if not rows:

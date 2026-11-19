@@ -6,7 +6,6 @@ import argparse
 
 from shad import parsers
 from shad.deps import Deps
-from shad.todo import store
 
 
 def register(sub: parsers.Subparsers) -> None:
@@ -21,4 +20,4 @@ def run(args: argparse.Namespace, deps: Deps) -> None:
     from shad.todo.panel.app import run_panel
 
     cfg = deps.config
-    run_panel(store.todo_dir(cfg), cfg.todo_labels, deps.out, deps.editor)
+    run_panel(cfg.todo_dir, cfg.todo_labels, deps.out, deps.editor)

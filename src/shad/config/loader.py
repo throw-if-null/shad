@@ -1,8 +1,10 @@
 """
 Loading `shad.toml`: where the file and the data directory are, and the
-file parsed and validated into a Config.
+file parsed and validated against `schema.py` into a Config.
 
-Pure functions over the file and the environment; shared-and-safe.
+The functions that read the environment take it as an argument; the root
+passes its own once per run, and a test passes what it wants. Pure
+functions over the file and that mapping; shared-and-safe.
 
 Schema (shad.toml):
 
@@ -36,12 +38,13 @@ Maximum supported depth: group → project  (2 levels).
 from __future__ import annotations
 
 import os
-import re
 import sys
 import tomllib
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from shad.config.schema import DEFAULTS_FIELDS, HARNESSES, check, check_labels
 from shad.errors import ShadError
 
 # ── where the config lives ────────────────────────────────────────────────
@@ -55,18 +58,27 @@ CONFIG_ENV = "SHAD_CONFIG"
 
 
 
-def legacy_config_dir() -> Path:
+def _env(env: Mapping[str, str] | None) -> Mapping[str, str]:
+    return os.environ if env is None else env
+
+
+def _home(env: Mapping[str, str]) -> Path:
+    """HOME as *env* has it, else the account's home directory."""
+    home = env.get("HOME")
+    return Path(home) if home else Path.home()
+
+
+def legacy_config_dir(env: Mapping[str, str] | None = None) -> Path:
     """
     The pre-1.0 location, used on every OS.
 
     Kept as a fallback so an existing install is not silently orphaned when the
-    per-OS default moves out from under it. Resolved at call time, like every
-    other path here, so HOME is read from the running process.
+    per-OS default moves out from under it.
     """
-    return Path.home() / ".config" / APP_NAME
+    return _home(_env(env)) / ".config" / APP_NAME
 
 
-def default_config_dir() -> Path:
+def default_config_dir(env: Mapping[str, str] | None = None) -> Path:
     """
     The per-OS directory shad stores its config in, before any override.
 
@@ -82,19 +94,20 @@ def default_config_dir() -> Path:
     os.name, so a test that patched it could not construct a path at all.
     Cygwin reports "cygwin" and is POSIX-shaped, so it takes the XDG branch.
     """
+    env = _env(env)
     if sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support" / APP_NAME
+        return _home(env) / "Library" / "Application Support" / APP_NAME
     if sys.platform == "win32":
-        appdata = os.environ.get("APPDATA")
-        base = Path(appdata) if appdata else Path.home() / "AppData" / "Roaming"
+        appdata = env.get("APPDATA")
+        base = Path(appdata) if appdata else _home(env) / "AppData" / "Roaming"
         return base / APP_NAME
 
-    xdg = os.environ.get("XDG_CONFIG_HOME")
-    base = Path(xdg) if xdg and Path(xdg).is_absolute() else Path.home() / ".config"
+    xdg = env.get("XDG_CONFIG_HOME")
+    base = Path(xdg) if xdg and Path(xdg).is_absolute() else _home(env) / ".config"
     return base / APP_NAME
 
 
-def default_data_dir() -> Path:
+def default_data_dir(env: Mapping[str, str] | None = None) -> Path:
     """
     The per-OS directory shad stores its data in: today, the todo files.
 
@@ -107,19 +120,20 @@ def default_data_dir() -> Path:
     default. The XDG rule is the same as default_config_dir(): the variable is
     honoured only when it is absolute.
     """
+    env = _env(env)
     if sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support" / APP_NAME
+        return _home(env) / "Library" / "Application Support" / APP_NAME
     if sys.platform == "win32":
-        local = os.environ.get("LOCALAPPDATA")
-        base = Path(local) if local else Path.home() / "AppData" / "Local"
+        local = env.get("LOCALAPPDATA")
+        base = Path(local) if local else _home(env) / "AppData" / "Local"
         return base / APP_NAME
 
-    xdg = os.environ.get("XDG_DATA_HOME")
-    base = Path(xdg) if xdg and Path(xdg).is_absolute() else Path.home() / ".local" / "share"
+    xdg = env.get("XDG_DATA_HOME")
+    base = Path(xdg) if xdg and Path(xdg).is_absolute() else _home(env) / ".local" / "share"
     return base / APP_NAME
 
 
-def config_path() -> Path:
+def config_path(env: Mapping[str, str] | None = None) -> Path:
     """
     Resolve the config file to use. Precedence, highest first:
 
@@ -138,11 +152,12 @@ def config_path() -> Path:
     Resolved on every call rather than at import, so the environment a process
     actually starts with is the one that decides.
     """
-    override = os.environ.get(CONFIG_ENV)
+    env = _env(env)
+    override = env.get(CONFIG_ENV)
     if override:
         return Path(override).expanduser()
 
-    preferred = default_config_dir() / CONFIG_NAME
+    preferred = default_config_dir(env) / CONFIG_NAME
     if preferred.exists():
         return preferred
 
@@ -152,23 +167,17 @@ def config_path() -> Path:
         # default, which makes the fallback either redundant (XDG_CONFIG_HOME
         # unset, so it is already `preferred`) or wrong — silently ignoring a
         # directory the user explicitly chose.
-        legacy = legacy_config_dir() / CONFIG_NAME
+        legacy = legacy_config_dir(env) / CONFIG_NAME
         if legacy.exists():
             return legacy
 
     return preferred
 
 
-OC_POSITIONS = ("top", "bottom", "left")
-HARNESSES = ("opencode", "claude")
-
-# A todo label is also a header value and a CLI argument, so it is kept to the
-# characters that need no quoting anywhere: lowercase, digits, and hyphens.
-LABEL_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
-
-
 @dataclass
 class Defaults:
+    """The [defaults] settings; the defaults here are the schema's."""
+
     oc_position: str = "top"
     panel_percent: int = 35
     split_percent: int = 20
@@ -203,8 +212,16 @@ class Config:
     groups: dict[str, dict[str, Project]] = field(default_factory=dict)
     # [todo] labels, in file order; the vocabulary every todo item is checked against
     todo_labels: list[str] = field(default_factory=list)
-    # [todo] path, expanded; None means the per-OS data dir (see shad.todo.store.todo_dir)
+    # [todo] path, expanded; None means the todo files are under the data dir
     todo_path: Path | None = None
+    # The per-OS data directory, resolved by the root; the snapshot and, by
+    # default, the todo files live under it
+    data_dir: Path = Path(".")
+
+    @property
+    def todo_dir(self) -> Path:
+        """Where the todo files are: [todo] path, else <data dir>/todo."""
+        return self.todo_path if self.todo_path is not None else self.data_dir / "todo"
 
 
 def _parse_project(
@@ -236,9 +253,16 @@ def _parse_project(
     )
 
 
-def load(path: Path | None = None) -> Config:
+def load(path: Path | None = None, *, data_dir: Path | None = None) -> Config:
+    """
+    The file at *path* (the resolved one when None), validated against the
+    schema. *data_dir* is where the snapshot and the default todo files
+    live; the root resolves it once, and None resolves it here.
+    """
     if path is None:
         path = config_path()
+    if data_dir is None:
+        data_dir = default_data_dir()
     if not path.exists():
         raise ShadError.not_found(
             "no_config_file",
@@ -255,55 +279,23 @@ def load(path: Path | None = None) -> Config:
 
     # --- defaults ---
     d = raw.get("defaults", {})
-    oc_position = d.get("oc_position", "top")
-    if oc_position not in OC_POSITIONS:
-        raise ShadError.validation(
-            "invalid_config",
-            f"invalid oc_position '{oc_position}'; must be one of: {', '.join(OC_POSITIONS)}"
-        )
-    harness = d.get("harness", "opencode")
-    if harness not in HARNESSES:
-        raise ShadError.validation(
-            "invalid_config",
-            f"invalid harness '{harness}' in [defaults]; must be one of: {', '.join(HARNESSES)}"
-        )
-
-    def _int_setting(name: str, default: int) -> int:
-        raw_val = d.get(name, default)
+    if not isinstance(d, dict):
+        raise ShadError.validation("invalid_config", "[defaults] must be a TOML table")
+    settings: dict[str, object] = {}
+    for spec in DEFAULTS_FIELDS:
+        if spec.name not in d:
+            settings[spec.name] = spec.default
+            continue
         try:
-            return int(raw_val)
-        except (TypeError, ValueError):
+            settings[spec.name] = check(spec, d[spec.name], spec.name)
+        except ShadError as exc:
+            if spec.name != "todo_percent":
+                raise
             raise ShadError.validation(
-                "invalid_config",
-                f"invalid value for '{name}' in [defaults]: expected an integer, got {raw_val!r}"
-            )
-
-    def _bool_setting(name: str, default: bool) -> bool:
-        raw_val = d.get(name, default)
-        if not isinstance(raw_val, bool):
-            raise ShadError.validation(
-                "invalid_config",
-                f"invalid value for '{name}' in [defaults]: expected true or false, got {raw_val!r}"
-            )
-        return raw_val
-
-    todo_percent = _int_setting("todo_percent", 20)
-    if not 1 <= todo_percent <= 99:
-        raise ShadError.validation(
-            "invalid_config",
-            f"invalid todo_percent {todo_percent}; must be between 1 and 99 "
-            "(set todo_panel = false to hide the todo pane)"
-        )
-
-    defaults = Defaults(
-        oc_position=oc_position,
-        panel_percent=_int_setting("panel_percent", 35),
-        split_percent=_int_setting("split_percent", 20),
-        harness=harness,
-        git_panel=_bool_setting("git_panel", True),
-        todo_panel=_bool_setting("todo_panel", True),
-        todo_percent=todo_percent,
-    )
+                "invalid_config", f"{exc.message} (set todo_panel = false to hide the todo pane)"
+            ) from None
+    harness = str(settings["harness"])
+    defaults = Defaults(**settings)  # type: ignore[arg-type]
 
     # --- projects ---
     projects: dict[str, Project] = {}
@@ -331,35 +323,18 @@ def load(path: Path | None = None) -> Config:
             groups[key] = group_projects
 
     todo = raw.get("todo", {})
+    if not isinstance(todo, dict):
+        raise ShadError.validation("invalid_config", "[todo] must be a TOML table")
     cfg = Config(
         defaults=defaults,
         projects=projects,
         groups=groups,
-        todo_labels=_parse_labels(todo),
+        todo_labels=check_labels(todo.get("labels", []), "[todo] labels"),
         todo_path=_parse_todo_path(todo),
+        data_dir=data_dir,
     )
     _reject_duplicate_paths(cfg)
     return cfg
-
-
-def _parse_labels(todo: object) -> list[str]:
-    """The [todo] labels array, validated: an array of unique label names."""
-    if not isinstance(todo, dict):
-        raise ShadError.validation("invalid_config", "[todo] must be a TOML table")
-    labels = todo.get("labels", [])
-    if not isinstance(labels, list) or not all(isinstance(label, str) for label in labels):
-        raise ShadError.validation("invalid_config", "[todo] labels must be an array of strings")
-    seen: set[str] = set()
-    for label in labels:
-        if not LABEL_RE.match(label):
-            raise ShadError.validation(
-                "invalid_config",
-                f"invalid todo label {label!r}; use lowercase letters, digits and hyphens"
-            )
-        if label in seen:
-            raise ShadError.validation("invalid_config", f"duplicate todo label {label!r}")
-        seen.add(label)
-    return list(labels)
 
 
 def _parse_todo_path(todo: dict) -> Path | None:

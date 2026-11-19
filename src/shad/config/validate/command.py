@@ -9,7 +9,7 @@ from pathlib import Path
 from rich.text import Text
 
 from shad import parsers
-from shad.config.load import load
+from shad.config import load
 from shad.deps import Deps
 from shad.output import Output
 

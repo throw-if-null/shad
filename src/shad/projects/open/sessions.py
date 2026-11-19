@@ -16,9 +16,8 @@ from pathlib import Path
 from rich.panel import Panel
 from rich.text import Text
 
-from shad import harness
 from shad.harness import (
-    KNOWN,
+    Harness,
     Recorded,
     Target,
     Unreadable,
@@ -55,7 +54,7 @@ def _render_picker(
     sessions: list[Recorded],
     selected: int,
     project_name: str,
-    harness: str,
+    label: str,
     note: str | None = None,
 ) -> Panel:
     """The picker frame for *selected*. *note* is a problem shown above the key help."""
@@ -98,7 +97,7 @@ def _render_picker(
 
     return Panel(
         lines,
-        title=f"[bold cyan]{harness} session[/bold cyan]  [dim]─[/dim]  [bright_white]{project_name}[/bright_white]",
+        title=f"[bold cyan]{label} session[/bold cyan]  [dim]─[/dim]  [bright_white]{project_name}[/bright_white]",
         border_style="cyan",
         padding=(0, 1),
     )
@@ -107,7 +106,7 @@ def _render_picker(
 def _run_picker(
     sessions: list[Recorded],
     project_name: str,
-    harness: str = "opencode",
+    label: str,
     note: str | None = None,
 ) -> int | None:
     """
@@ -120,7 +119,7 @@ def _run_picker(
 
     def render(selected: int) -> bytes:
         return render_bytes(
-            _render_picker(sessions, selected, project_name, harness, note), term_width
+            _render_picker(sessions, selected, project_name, label, note), term_width
         )
 
     try:
@@ -132,46 +131,24 @@ def _run_picker(
 # ── Public API ─────────────────────────────────────────────────────────────
 
 
-def pick_opencode_target(project_path: Path, base_cmd: str) -> Target | None:
+def pick_target(harness: Harness, project_path: Path, base_cmd: str) -> Target | None:
     """
-    Show an interactive session picker and return the opencode target to run.
+    Show the session picker for *harness* and return the target to run.
 
     Returns None if the user explicitly cancelled (q / Esc). With no
-    recorded session the target is a fresh one without a picker. A session
-    store that cannot be read is reported in the picker instead.
+    recorded conversation the target is a fresh one without a picker. A
+    session store that cannot be read is reported in the picker instead.
     """
-    opencode = KNOWN["opencode"]
-    sessions, note = _query_or_note(harness.query_opencode_sessions, project_path)
+    sessions, note = _query_or_note(harness.recorded, project_path)
     if not sessions and note is None:
-        return fresh_target(opencode, base_cmd)
+        return fresh_target(harness, base_cmd)
 
-    chosen = _run_picker(sessions, project_path.name, note=note)
+    chosen = _run_picker(sessions, project_path.name, label=harness.name, note=note)
     if chosen is None:
         return None  # user cancelled — caller should abort
     if chosen == 0:
-        return fresh_target(opencode, base_cmd)
-    return resume_target(opencode, base_cmd, sessions[chosen - 1].id)
-
-
-def pick_claude_target(project_path: Path, base_cmd: str = "claude") -> Target | None:
-    """
-    Show an interactive session picker and return the Claude Code target to run.
-
-    Returns None if the user explicitly cancelled (q / Esc). With no
-    recorded session the target is a fresh one without a picker. A session
-    store that cannot be read is reported in the picker instead.
-    """
-    claude = KNOWN["claude"]
-    sessions, note = _query_or_note(harness.query_claude_sessions, project_path)
-    if not sessions and note is None:
-        return fresh_target(claude, base_cmd)
-
-    chosen = _run_picker(sessions, project_path.name, harness="claude", note=note)
-    if chosen is None:
-        return None  # user cancelled — caller should abort
-    if chosen == 0:
-        return fresh_target(claude, base_cmd)
-    return resume_target(claude, base_cmd, sessions[chosen - 1].id)
+        return fresh_target(harness, base_cmd)
+    return resume_target(harness, base_cmd, sessions[chosen - 1].id)
 
 
 def _query_or_note(

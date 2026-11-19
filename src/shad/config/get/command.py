@@ -8,14 +8,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from shad import parsers
-from shad.config import store, toml_edit
-from shad.config.load import Config
+from shad.config import Config, store, toml_edit
 from shad.config.render import display
 from shad.config.schema import field_for
 from shad.deps import Deps
 from shad.errors import ShadError
 from shad.output import Output
-from shad.todo.store import todo_dir
 
 
 @dataclass(frozen=True)
@@ -83,7 +81,7 @@ def _effective(path: Path, parts: list[str], config: Callable[[], Config]) -> ob
         return getattr(cfg.defaults, parts[1], store.MISSING)
 
     if parts[0] == "todo":
-        return str(todo_dir(cfg))
+        return str(cfg.todo_dir)
 
     if len(parts) == 3:
         project = cfg.projects.get(parts[1])

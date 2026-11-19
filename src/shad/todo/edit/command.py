@@ -24,7 +24,7 @@ def register(sub: parsers.Subparsers) -> None:
 
 def run(args: argparse.Namespace, deps: Deps) -> None:
     cfg = deps.config
-    item = edit_in_editor(store.todo_dir(cfg), args.key, deps.editor)
+    item = edit_in_editor(cfg.todo_dir, args.key, deps.editor)
     for problem in problems(item, cfg.todo_labels):
         deps.out.note(Text("  ! ", style="bold yellow") + Text(f"{item.key}: {problem}"))
 

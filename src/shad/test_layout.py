@@ -5,7 +5,7 @@ import unittest
 import unittest.mock
 from pathlib import Path
 
-from shad.config.load import OC_POSITIONS, Defaults, Project
+from shad.config import OC_POSITIONS, Defaults, Project
 from shad.layout import create_session
 from shad.tmux import Tmux
 

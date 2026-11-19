@@ -3,8 +3,8 @@ Where todo files live, and every read and write of them.
 
     <todo dir>/<item key>.md
 
-The todo dir is the [todo] path from shad.toml, or <data dir>/todo when it is
-not set. There is one list, and no item belongs to a project: the todo pane
+The todo dir is `Config.todo_dir`: the [todo] path from shad.toml, or
+<data dir>/todo when it is not set. There is one list, and no item belongs to a project: the todo pane
 in every project session shows the same files.
 
 Every write touches one file, through `shad.atomic`: a new item is an
@@ -24,7 +24,6 @@ from pathlib import Path
 
 from shad import atomic
 from shad.addressing import resolve_prefix
-from shad.config.load import Config, default_data_dir
 from shad.errors import ShadError
 from shad.todo.model import (
     STATUSES,
@@ -39,12 +38,6 @@ from shad.todo.model import (
 )
 
 SUFFIX = ".md"
-
-
-def todo_dir(cfg: Config) -> Path:
-    if cfg.todo_path is not None:
-        return cfg.todo_path
-    return default_data_dir() / "todo"
 
 
 def item_path(directory: Path, key: str) -> Path:

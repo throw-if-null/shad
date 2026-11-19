@@ -12,11 +12,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 from shad.cli import build_parser
+from shad.config import store
+from shad.config.loader import load
 from shad.errors import ShadError
 from shad.init import command as init_command
 from shad.init.command import (
     Dependency,
-    _append_toml,
     _detect_fedora,
     _expand,
     _install_opencode_systemwide,
@@ -305,40 +306,49 @@ class KeyExistsTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# _append_toml
+# store.add_project (init writes through it)
 # ---------------------------------------------------------------------------
 
-class AppendTomlTests(unittest.TestCase):
+class AddProjectTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
-        self.tmp_path = Path(self._tmp.name)
+        self.addCleanup(self._tmp.cleanup)
+        self.cfg = Path(self._tmp.name) / "shad.toml"
 
-    def tearDown(self) -> None:
-        self._tmp.cleanup()
+    def _read(self) -> str:
+        return self.cfg.read_text()
 
-    def test_top_level_project_appended_correctly(self) -> None:
-        cfg = self.tmp_path / "shad.toml"
-        cfg.write_text("")
-        _append_toml(cfg, None, "myapp", Path("/home/user/myapp"), "myapp")
-        content = cfg.read_text()
-        self.assertIn("[projects.myapp]", content)
-        self.assertIn('path    = "/home/user/myapp"', content)
-        self.assertIn('session = "myapp"', content)
+    def test_a_new_file_starts_with_the_defaults_block(self) -> None:
+        store.add_project(
+            self.cfg, key="myapp", group=None, project_path=Path("/home/user/myapp"), session="myapp"
+        )
+        text = self._read()
+        self.assertTrue(text.startswith("# ~/.config/shad/shad.toml\n\n[defaults]\n"), text[:60])
+        self.assertIn("[projects.myapp]", text)
+        self.assertIn('path    = "/home/user/myapp"', text)
+        self.assertIn('session = "myapp"', text)
 
-    def test_grouped_project_uses_two_level_header(self) -> None:
-        cfg = self.tmp_path / "shad.toml"
-        cfg.write_text("")
-        _append_toml(cfg, "tin", "shad", Path("/tmp/shad"), "tin-shad")
-        content = cfg.read_text()
-        self.assertIn("[projects.tin.shad]", content)
+    def test_a_grouped_project_uses_a_two_level_header(self) -> None:
+        store.add_project(
+            self.cfg, key="shad", group="tin", project_path=Path("/tmp/shad"), session="tin-shad"
+        )
+        self.assertIn("[projects.tin.shad]", self._read())
 
-    def test_appends_to_existing_content(self) -> None:
-        cfg = self.tmp_path / "shad.toml"
-        cfg.write_text("[projects.existing]\npath = \"/tmp/x\"\n")
-        _append_toml(cfg, None, "newapp", Path("/tmp/newapp"), "newapp")
-        content = cfg.read_text()
-        self.assertIn("[projects.existing]", content)
-        self.assertIn("[projects.newapp]", content)
+    def test_it_appends_to_an_existing_file(self) -> None:
+        self.cfg.write_text('[projects.existing]\npath = "/tmp/x"\n')
+        store.add_project(
+            self.cfg, key="newapp", group=None, project_path=Path("/tmp/newapp"), session="newapp"
+        )
+        text = self._read()
+        self.assertIn("[projects.existing]", text)
+        self.assertIn("[projects.newapp]", text)
+
+    def test_a_path_with_a_quote_is_escaped_and_reads_back(self) -> None:
+        # The old raw writer produced invalid TOML for such a path (§ 10 item 4).
+        weird = Path('/tmp/a"b\\c')
+        store.add_project(self.cfg, key="q", group=None, project_path=weird, session="q")
+        cfg = load(self.cfg, data_dir=Path("/d"))
+        self.assertEqual(cfg.projects["q"].path, weird)
 
 
 # ---------------------------------------------------------------------------

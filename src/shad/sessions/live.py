@@ -9,9 +9,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from shad import harness
-from shad.config.load import Config, Project, all_projects
-from shad.harness import Conversation, RunningSession
+from shad.config import Config, Project, all_projects
+from shad.harness import Conversation, Harnesses, RunningSession, harness_for_prefix
 from shad.sessions.model import Entry
 from shad.tmux import Tmux, split_session_name
 
@@ -40,7 +39,7 @@ class Running:
         )
 
 
-def collect(cfg: Config, tmux: Tmux) -> list[Running]:
+def collect(cfg: Config, tmux: Tmux, harnesses: Harnesses) -> list[Running]:
     """
     Every running shad tmux session, in config order.
 
@@ -61,7 +60,7 @@ def collect(cfg: Config, tmux: Tmux) -> list[Running]:
             else:
                 prefix, key = scoped
                 name = _harness_for_prefix(prefix)
-            support = harness.for_harness(name)
+            support = harnesses.for_harness(name)
             conversation = None
             unsupported = None
             if support is None:
@@ -95,7 +94,7 @@ def duplicates(running: Sequence[Running]) -> set[str]:
 
 
 def _harness_for_prefix(prefix: str) -> str:
-    name = harness.harness_for_prefix(prefix)
+    name = harness_for_prefix(prefix)
     if name is None:
         # list_project_sessions filters on the same table, so this is unreachable.
         raise ValueError(f"no harness uses the session prefix {prefix!r}")

@@ -9,26 +9,40 @@ from pathlib import Path
 from unittest.mock import patch
 
 from shad.harness import (
-    KNOWN,
     Claude,
     Conversation,
+    Harnesses,
     Opencode,
     Recorded,
     RunningSession,
     Target,
     Unreadable,
-    claude_project_dir,
-    for_harness,
     fresh_target,
     harness_for_prefix,
     is_uuid,
-    query_claude_sessions,
-    query_opencode_sessions,
     resume_target,
 )
 
 _UUID_A = "11111111-1111-4111-8111-111111111111"
 _UUID_B = "22222222-2222-4222-8222-222222222222"
+
+
+def _harnesses() -> Harnesses:
+    return Harnesses(Path("/home"))
+
+
+def _claude_at(projects_dir: Path) -> Claude:
+    """A Claude whose transcript directory is *projects_dir* itself."""
+    claude = Claude(Path("/home"))
+    claude.projects_dir = projects_dir
+    return claude
+
+
+def _opencode_at(db_path: Path) -> Opencode:
+    """An Opencode whose database is *db_path*."""
+    opencode = Opencode(Path("/home"))
+    opencode.db_path = db_path
+    return opencode
 
 
 def _record(
@@ -41,24 +55,21 @@ def _record(
 
 
 class ClaudeProcessRecordTests(unittest.TestCase):
-    """live_conversation reads ~/.claude/sessions/<pid>.json."""
+    """live_conversation reads <home>/.claude/sessions/<pid>.json."""
 
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        root = Path(self._tmp.name)
-        self.sessions_dir = root / "sessions"
-        self.sessions_dir.mkdir()
-        self.projects_dir = root / "projects"
-        self.projects_dir.mkdir()
+        self.home = Path(self._tmp.name)
+        self.claude = Claude(self.home)
+        self.sessions_dir = self.claude.sessions_dir
+        self.projects_dir = self.claude.projects_dir
+        self.sessions_dir.mkdir(parents=True)
+        self.projects_dir.mkdir(parents=True)
         self.alive: set[int] = set()
-        for patcher in (
-            patch("shad.harness.CLAUDE_SESSIONS_DIR", self.sessions_dir),
-            patch("shad.harness._alive", side_effect=self.alive.__contains__),
-            patch("shad.harness.CLAUDE_PROJECTS_DIR", self.projects_dir),
-        ):
-            patcher.start()
-            self.addCleanup(patcher.stop)
+        patcher = patch("shad.harness._alive", side_effect=self.alive.__contains__)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def _write(self, record: dict) -> None:
         (self.sessions_dir / f"{record['pid']}.json").write_text(json.dumps(record))
@@ -67,7 +78,7 @@ class ClaudeProcessRecordTests(unittest.TestCase):
         return RunningSession(tmux_session=tmux_session, key=key, project_path=Path("/p/kb"))
 
     def _live(self, tmux_session: str, key: str | None = "fresh-1") -> Conversation | None:
-        return Claude().live_conversation(self._running(tmux_session, key))
+        return self.claude.live_conversation(self._running(tmux_session, key))
 
     def test_reads_the_conversation_of_the_process_in_the_tmux_session(self) -> None:
         self._write(
@@ -157,32 +168,33 @@ class ClaudeProcessRecordTests(unittest.TestCase):
         self.assertIsNone(self._live("kb", key=None))
 
     def test_a_missing_sessions_dir_is_empty(self) -> None:
-        with patch("shad.harness.CLAUDE_SESSIONS_DIR", self.sessions_dir / "absent"):
-            self.assertIsNone(self._live("kb--cc-fresh-1"))
+        claude = Claude(self.home / "absent")
+        self.assertIsNone(claude.live_conversation(self._running("kb--cc-fresh-1")))
 
 
 class ClaudeCommandTests(unittest.TestCase):
     def test_can_resume_requires_the_transcript(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            projects = Path(tmp)
-            (projects / "-p-kb").mkdir()
-            (projects / "-p-kb" / f"{_UUID_A}.jsonl").write_text("")
-            with patch("shad.harness.CLAUDE_PROJECTS_DIR", projects):
-                self.assertTrue(Claude().can_resume(Path("/p/kb"), _UUID_A))
-                self.assertFalse(Claude().can_resume(Path("/p/kb"), _UUID_B))
-                self.assertFalse(Claude().can_resume(Path("/p/other"), _UUID_A))
+            claude = Claude(Path(tmp))
+            directory = claude.project_dir(Path("/p/kb"))
+            directory.mkdir(parents=True)
+            (directory / f"{_UUID_A}.jsonl").write_text("")
+            self.assertTrue(claude.can_resume(Path("/p/kb"), _UUID_A))
+            self.assertFalse(claude.can_resume(Path("/p/kb"), _UUID_B))
+            self.assertFalse(claude.can_resume(Path("/p/other"), _UUID_A))
 
     def test_resume_command(self) -> None:
-        self.assertEqual(Claude().resume_command("claude", _UUID_A), f"claude --resume {_UUID_A}")
+        claude = Claude(Path("/home"))
+        self.assertEqual(claude.resume_command("claude", _UUID_A), f"claude --resume {_UUID_A}")
 
     def test_fresh_command_passes_a_chosen_id(self) -> None:
-        self.assertEqual(
-            Claude().fresh_command("claude", _UUID_A), f"claude --session-id {_UUID_A}"
-        )
-        self.assertEqual(Claude().fresh_command("claude", None), "claude")
+        claude = Claude(Path("/home"))
+        self.assertEqual(claude.fresh_command("claude", _UUID_A), f"claude --session-id {_UUID_A}")
+        self.assertEqual(claude.fresh_command("claude", None), "claude")
 
     def test_new_session_ids_are_distinct_uuids(self) -> None:
-        first, second = Claude().new_session_id(), Claude().new_session_id()
+        claude = Claude(Path("/home"))
+        first, second = claude.new_session_id(), claude.new_session_id()
         assert first is not None and second is not None
         self.assertTrue(is_uuid(first))
         self.assertNotEqual(first, second)
@@ -191,29 +203,33 @@ class ClaudeCommandTests(unittest.TestCase):
 class TargetTests(unittest.TestCase):
     """The one place a harness's command lines are written."""
 
+    def setUp(self) -> None:
+        self.harnesses = _harnesses()
+
     def test_a_resumed_claude_conversation(self) -> None:
         self.assertEqual(
-            resume_target(KNOWN["claude"], "claude", _UUID_A),
+            resume_target(self.harnesses.known["claude"], "claude", _UUID_A),
             Target(command=f"claude --resume {_UUID_A}", session_key=_UUID_A, session_prefix="cc"),
         )
 
     def test_a_fresh_claude_conversation_runs_under_an_id_shad_chose(self) -> None:
-        target = fresh_target(KNOWN["claude"], "claude")
+        claude = self.harnesses.known["claude"]
+        target = fresh_target(claude, "claude")
         assert target.session_key is not None
         self.assertTrue(is_uuid(target.session_key))
         self.assertEqual(target.command, f"claude --session-id {target.session_key}")
         self.assertTrue(target.fresh)
         self.assertEqual(target.session_prefix, "cc")
-        self.assertNotEqual(target.session_key, fresh_target(KNOWN["claude"], "claude").session_key)
+        self.assertNotEqual(target.session_key, fresh_target(claude, "claude").session_key)
 
     def test_a_resumed_opencode_session(self) -> None:
         self.assertEqual(
-            resume_target(KNOWN["opencode"], "opencode", "sess-1"),
+            resume_target(self.harnesses.known["opencode"], "opencode", "sess-1"),
             Target(command="opencode -s sess-1", session_key="sess-1", session_prefix="oc"),
         )
 
     def test_a_fresh_opencode_session_is_keyed_by_the_moment(self) -> None:
-        target = fresh_target(KNOWN["opencode"], "opencode")
+        target = fresh_target(self.harnesses.known["opencode"], "opencode")
         self.assertEqual(target.command, "opencode")
         assert target.session_key is not None
         self.assertTrue(target.session_key.startswith("fresh-"))
@@ -223,9 +239,10 @@ class TargetTests(unittest.TestCase):
 
 class RegistryTests(unittest.TestCase):
     def test_claude_is_supported_and_opencode_is_not(self) -> None:
-        self.assertIsInstance(for_harness("claude"), Claude)
-        self.assertIsNone(for_harness("opencode"))
-        self.assertIsInstance(KNOWN["opencode"], Opencode)
+        harnesses = _harnesses()
+        self.assertIsInstance(harnesses.for_harness("claude"), Claude)
+        self.assertIsNone(harnesses.for_harness("opencode"))
+        self.assertIsInstance(harnesses.known["opencode"], Opencode)
 
     def test_prefixes_map_back_to_harness_names(self) -> None:
         self.assertEqual(harness_for_prefix("cc"), "claude")
@@ -234,29 +251,34 @@ class RegistryTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# query_opencode_sessions
+# Opencode.recorded
 # ---------------------------------------------------------------------------
 
 
-class QuerySessionsTests(unittest.TestCase):
+def _opencode_schema(path: Path) -> None:
+    con = sqlite3.connect(str(path))
+    con.execute("CREATE TABLE project (id TEXT PRIMARY KEY, worktree TEXT)")
+    con.execute(
+        "CREATE TABLE session "
+        "(id TEXT PRIMARY KEY, project_id TEXT, title TEXT, "
+        "time_updated INTEGER, time_archived INTEGER)"
+    )
+    con.commit()
+    con.close()
+
+
+class OpencodeRecordedTests(unittest.TestCase):
     def test_returns_empty_list_when_db_does_not_exist(self) -> None:
-        with patch(
-            "shad.harness.DB_PATH", Path("/nonexistent/path/opencode.db")
-        ):
-            result = query_opencode_sessions(Path("/tmp/project"))
+        result = _opencode_at(Path("/nonexistent/path/opencode.db")).recorded(Path("/tmp/project"))
         self.assertEqual(result, [])
 
     def test_raises_unreadable_on_db_error(self) -> None:
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
             f.write(b"not a valid sqlite database")
             bad_db = Path(f.name)
-
         try:
-            with (
-                patch("shad.harness.DB_PATH", bad_db),
-                self.assertRaises(Unreadable) as ctx,
-            ):
-                query_opencode_sessions(Path("/tmp/project"))
+            with self.assertRaises(Unreadable) as ctx:
+                _opencode_at(bad_db).recorded(Path("/tmp/project"))
             self.assertIn("could not read the opencode session database", str(ctx.exception))
         finally:
             bad_db.unlink(missing_ok=True)
@@ -264,23 +286,15 @@ class QuerySessionsTests(unittest.TestCase):
     def test_returns_sessions_from_sqlite_db(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "opencode.db"
+            _opencode_schema(db_path)
             con = sqlite3.connect(str(db_path))
-            con.execute("CREATE TABLE project (id TEXT PRIMARY KEY, worktree TEXT)")
-            con.execute(
-                "CREATE TABLE session "
-                "(id TEXT PRIMARY KEY, project_id TEXT, title TEXT, "
-                "time_updated INTEGER, time_archived INTEGER)"
-            )
             con.execute("INSERT INTO project VALUES ('proj-1', '/tmp/myproject')")
             con.execute(
-                "INSERT INTO session VALUES "
-                "('sess-1', 'proj-1', 'My session', 1000000, NULL)"
+                "INSERT INTO session VALUES ('sess-1', 'proj-1', 'My session', 1000000, NULL)"
             )
             con.commit()
             con.close()
-
-            with patch("shad.harness.DB_PATH", db_path):
-                result = query_opencode_sessions(Path("/tmp/myproject"))
+            result = _opencode_at(db_path).recorded(Path("/tmp/myproject"))
 
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0].id, "sess-1")
@@ -290,27 +304,16 @@ class QuerySessionsTests(unittest.TestCase):
     def test_archived_sessions_excluded(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "opencode.db"
+            _opencode_schema(db_path)
             con = sqlite3.connect(str(db_path))
-            con.execute("CREATE TABLE project (id TEXT PRIMARY KEY, worktree TEXT)")
-            con.execute(
-                "CREATE TABLE session "
-                "(id TEXT PRIMARY KEY, project_id TEXT, title TEXT, "
-                "time_updated INTEGER, time_archived INTEGER)"
-            )
             con.execute("INSERT INTO project VALUES ('proj-1', '/tmp/myproject')")
+            con.execute("INSERT INTO session VALUES ('sess-active', 'proj-1', 'Active', 2000, NULL)")
             con.execute(
-                "INSERT INTO session VALUES "
-                "('sess-active', 'proj-1', 'Active', 2000, NULL)"
-            )
-            con.execute(
-                "INSERT INTO session VALUES "
-                "('sess-archived', 'proj-1', 'Archived', 1000, 9999)"
+                "INSERT INTO session VALUES ('sess-archived', 'proj-1', 'Archived', 1000, 9999)"
             )
             con.commit()
             con.close()
-
-            with patch("shad.harness.DB_PATH", db_path):
-                result = query_opencode_sessions(Path("/tmp/myproject"))
+            result = _opencode_at(db_path).recorded(Path("/tmp/myproject"))
 
         ids = [s.id for s in result]
         self.assertIn("sess-active", ids)
@@ -318,7 +321,7 @@ class QuerySessionsTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# claude_project_dir / query_claude_sessions
+# Claude.project_dir / Claude.recorded
 # ---------------------------------------------------------------------------
 
 
@@ -340,27 +343,17 @@ def _user_entry(text: str, *, meta: bool = False) -> dict:
 
 class ClaudeProjectDirTests(unittest.TestCase):
     def test_path_separators_become_hyphens(self) -> None:
-        with patch(
-            "shad.harness.CLAUDE_PROJECTS_DIR", Path("/projects")
-        ):
-            result = claude_project_dir(Path("/var/home/me/src/tin/shad"))
+        result = Claude(Path("/home")).project_dir(Path("/var/home/me/src/tin/shad"))
         self.assertEqual(result.name, "-var-home-me-src-tin-shad")
 
     def test_dots_become_hyphens(self) -> None:
-        with patch(
-            "shad.harness.CLAUDE_PROJECTS_DIR", Path("/projects")
-        ):
-            result = claude_project_dir(Path("/home/me/.local/share/chezmoi"))
+        result = Claude(Path("/home")).project_dir(Path("/home/me/.local/share/chezmoi"))
         self.assertEqual(result.name, "-home-me--local-share-chezmoi")
 
 
-class QueryClaudeSessionsTests(unittest.TestCase):
+class ClaudeRecordedTests(unittest.TestCase):
     def test_returns_empty_list_when_directory_does_not_exist(self) -> None:
-        with patch(
-            "shad.harness.CLAUDE_PROJECTS_DIR",
-            Path("/nonexistent/claude/projects"),
-        ):
-            result = query_claude_sessions(Path("/tmp/project"))
+        result = _claude_at(Path("/nonexistent/claude/projects")).recorded(Path("/tmp/project"))
         self.assertEqual(result, [])
 
     def test_titles_sessions_with_the_first_real_user_prompt(self) -> None:
@@ -379,10 +372,7 @@ class QueryClaudeSessionsTests(unittest.TestCase):
                 ],
                 mtime=1000,
             )
-            with patch(
-                "shad.harness.CLAUDE_PROJECTS_DIR", Path(tmp)
-            ):
-                result = query_claude_sessions(Path("/tmp/project"))
+            result = _claude_at(Path(tmp)).recorded(Path("/tmp/project"))
 
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0].id, "sess-a")
@@ -395,10 +385,7 @@ class QueryClaudeSessionsTests(unittest.TestCase):
             directory.mkdir()
             _write_transcript(directory, "old", [_user_entry("older")], mtime=1000)
             _write_transcript(directory, "new", [_user_entry("newer")], mtime=2000)
-            with patch(
-                "shad.harness.CLAUDE_PROJECTS_DIR", Path(tmp)
-            ):
-                result = query_claude_sessions(Path("/tmp/project"))
+            result = _claude_at(Path(tmp)).recorded(Path("/tmp/project"))
 
         self.assertEqual([s.id for s in result], ["new", "old"])
 
@@ -406,17 +393,9 @@ class QueryClaudeSessionsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp) / "-tmp-project"
             directory.mkdir()
-            _write_transcript(
-                directory,
-                "empty",
-                [{"type": "mode", "mode": "normal"}],
-                mtime=2000,
-            )
+            _write_transcript(directory, "empty", [{"type": "mode", "mode": "normal"}], mtime=2000)
             _write_transcript(directory, "real", [_user_entry("a prompt")], mtime=1000)
-            with patch(
-                "shad.harness.CLAUDE_PROJECTS_DIR", Path(tmp)
-            ):
-                result = query_claude_sessions(Path("/tmp/project"))
+            result = _claude_at(Path(tmp)).recorded(Path("/tmp/project"))
 
         self.assertEqual([s.id for s in result], ["real"])
 
@@ -425,13 +404,8 @@ class QueryClaudeSessionsTests(unittest.TestCase):
             directory = Path(tmp) / "-tmp-project"
             directory.mkdir()
             for i in range(4):
-                _write_transcript(
-                    directory, f"sess-{i}", [_user_entry(f"p{i}")], mtime=1000 + i
-                )
-            with patch(
-                "shad.harness.CLAUDE_PROJECTS_DIR", Path(tmp)
-            ):
-                result = query_claude_sessions(Path("/tmp/project"), limit=2)
+                _write_transcript(directory, f"sess-{i}", [_user_entry(f"p{i}")], mtime=1000 + i)
+            result = _claude_at(Path(tmp)).recorded(Path("/tmp/project"), limit=2)
 
         self.assertEqual([s.id for s in result], ["sess-3", "sess-2"])
 
@@ -456,10 +430,7 @@ class QueryClaudeSessionsTests(unittest.TestCase):
                 ],
                 mtime=1000,
             )
-            with patch(
-                "shad.harness.CLAUDE_PROJECTS_DIR", Path(tmp)
-            ):
-                result = query_claude_sessions(Path("/tmp/project"))
+            result = _claude_at(Path(tmp)).recorded(Path("/tmp/project"))
 
         self.assertEqual(result[0].title, "describe this image")
 
@@ -468,10 +439,7 @@ class QueryClaudeSessionsTests(unittest.TestCase):
             directory = Path(tmp) / "-tmp-project"
             directory.mkdir()
             _write_transcript(directory, "sess-a", entries, mtime=1000)
-            with patch(
-                "shad.harness.CLAUDE_PROJECTS_DIR", Path(tmp)
-            ):
-                [session] = query_claude_sessions(Path("/tmp/project"))
+            [session] = _claude_at(Path(tmp)).recorded(Path("/tmp/project"))
         return session
 
     def test_names_a_session_with_its_last_custom_title(self) -> None:
@@ -516,8 +484,7 @@ class QueryClaudeSessionsTests(unittest.TestCase):
             with path.open("a") as handle:
                 handle.write('["ai-title"]\n')
             os.utime(path, (1000, 1000))
-            with patch("shad.harness.CLAUDE_PROJECTS_DIR", Path(tmp)):
-                [session] = query_claude_sessions(Path("/tmp/project"))
+            [session] = _claude_at(Path(tmp)).recorded(Path("/tmp/project"))
         self.assertIsNone(session.name)
 
     def test_a_prompt_that_quotes_a_title_entry_is_not_a_name(self) -> None:
@@ -525,3 +492,7 @@ class QueryClaudeSessionsTests(unittest.TestCase):
             _user_entry('why is there a "custom-title" entry in my transcript?'),
         ])
         self.assertIsNone(session.name)
+
+
+if __name__ == "__main__":
+    unittest.main()

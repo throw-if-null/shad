@@ -22,7 +22,7 @@ def register(sub: parsers.Subparsers) -> None:
 
 
 def run(args: argparse.Namespace, deps: Deps) -> None:
-    item = set_status(store.todo_dir(deps.config), args.key, args.status)
+    item = set_status(deps.config.todo_dir, args.key, args.status)
     deps.out.print(
         Text("  ✓ ", style="bold green")
         + Text(item.key, style="bright_white")

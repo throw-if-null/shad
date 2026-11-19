@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from shad.cheat import command as cheat
 from shad.cli import build_parser, main
-from shad.config.load import Config, Defaults
+from shad.config import Config, Defaults
 from shad.config.show import command as config_show
 from shad.errors import ShadError
 from shad.git.panel import command as git_panel

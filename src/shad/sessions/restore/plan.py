@@ -12,8 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from shad import harness
-from shad.config.load import Config, Project
+from shad.config import Config, Project
+from shad.harness import Harnesses
 from shad.sessions.live import Running
 from shad.sessions.model import Entry, Snapshot
 from shad.tmux import SESSION_PREFIXES, Tmux, project_session_name
@@ -50,7 +50,11 @@ class Step:
 
 
 def plan(
-    cfg: Config, snapshot: Snapshot, running: Sequence[Running], tmux: Tmux
+    cfg: Config,
+    snapshot: Snapshot,
+    running: Sequence[Running],
+    tmux: Tmux,
+    harnesses: Harnesses,
 ) -> list[Step]:
     """
     One step per entry, in saved order. *running* is what `live.collect`
@@ -62,14 +66,20 @@ def plan(
                 would use, exists; it is left alone
       skipped   nothing can be created; the reason says why
     """
-    return [_step(cfg, entry, running, tmux) for entry in snapshot.entries]
+    return [_step(cfg, entry, running, tmux, harnesses) for entry in snapshot.entries]
 
 
-def _step(cfg: Config, entry: Entry, running: Sequence[Running], tmux: Tmux) -> Step:
+def _step(
+    cfg: Config,
+    entry: Entry,
+    running: Sequence[Running],
+    tmux: Tmux,
+    harnesses: Harnesses,
+) -> Step:
     project = _find_project(cfg, entry)
     if project is None:
         return Step(entry, "skipped", reason="project is no longer configured")
-    support = harness.for_harness(entry.harness)
+    support = harnesses.for_harness(entry.harness)
     if support is None:
         return Step(entry, "skipped", reason=f"the {entry.harness} harness is not supported")
 

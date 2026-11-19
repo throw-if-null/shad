@@ -13,7 +13,7 @@ import re
 import time
 from pathlib import Path
 
-from shad.config.load import Config, Defaults, Project
+from shad.config import Config, Defaults, Project
 from shad.harness import Conversation
 from shad.sessions.live import Running
 from shad.testing import TmuxCase

@@ -936,7 +936,7 @@ shad/
         │   └── command.py
         ├── config/
         │   ├── command.py
-        │   ├── load.py
+        │   ├── loader.py
         │   ├── render.py
         │   ├── schema.py
         │   ├── store.py

@@ -44,8 +44,9 @@ def run(args: argparse.Namespace, deps: Deps) -> int | None:
     cfg = deps.config
     out = deps.out
     tmux = deps.tmux
-    snapshot = store.read(store.snapshot_path())
-    steps = plan.plan(cfg, snapshot, live.collect(cfg, tmux), tmux)
+    harnesses = deps.harnesses
+    snapshot = store.read(store.snapshot_path(cfg))
+    steps = plan.plan(cfg, snapshot, live.collect(cfg, tmux, harnesses), tmux, harnesses)
     for step in steps:
         creation = step.creation
         if creation is not None:

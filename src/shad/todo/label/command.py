@@ -12,7 +12,7 @@ import argparse
 from rich.text import Text
 
 from shad import parsers
-from shad.config.load import LABEL_RE
+from shad.config import LABEL_RE
 from shad.config.store import write_value
 from shad.deps import Deps
 from shad.errors import ShadError
@@ -60,7 +60,7 @@ def run_rm(args: argparse.Namespace, deps: Deps) -> None:
         raise ShadError.not_found(
             "no_such_label", f"label '{name}' is not configured; configured labels: {known}"
         )
-    usage = store.label_usage(store.todo_dir(cfg), name)
+    usage = store.label_usage(cfg.todo_dir, name)
     if usage and not getattr(args, "force", False):
         raise ShadError.conflict(
             "label_in_use",

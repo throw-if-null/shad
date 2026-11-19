@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from shad.harness import _Record
+from shad.harness import Claude, Harnesses, _Record
 from shad.sessions.live import collect, duplicates
 from shad.sessions.model import Entry
 from shad.sessions.testing import CFG, KB, SHAD, UUID_A, UUID_B, running
@@ -21,9 +21,8 @@ class CollectTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        patcher = patch("shad.harness.CLAUDE_PROJECTS_DIR", Path(self._tmp.name))
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        self.harnesses = Harnesses(Path("/home"))
+        self.harnesses.claude.projects_dir = Path(self._tmp.name)
 
     def _collect(
         self,
@@ -37,11 +36,11 @@ class CollectTests(unittest.TestCase):
         tmux.list_project_sessions.side_effect = lambda base: sessions.get(base, [])
         tmux.attached_sessions.return_value = attached or set()
         tmux.pane_commands.return_value = commands or {}
-        with patch(
-            "shad.harness._claude_process_record",
-            side_effect=lambda name: (records or {}).get(name),
+        with patch.object(
+            Claude, "_process_record", autospec=True,
+            side_effect=lambda self, name: (records or {}).get(name),
         ):
-            return collect(CFG, tmux)
+            return collect(CFG, tmux, self.harnesses)
 
     def test_lists_every_running_session_in_config_order(self) -> None:
         sessions = {"tin-shad": [f"tin-shad--cc-{UUID_A}"], "kb": ["kb--cc-fresh-9"]}

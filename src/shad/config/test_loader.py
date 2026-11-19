@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from shad.config.load import (
+from shad.config.loader import (
     CONFIG_ENV,
     Config,
     Defaults,
@@ -225,11 +225,11 @@ class AllProjectsTests(unittest.TestCase):
 
 
 class TodoConfigTests(unittest.TestCase):
-    def _load(self, text: str) -> Config:
+    def _load(self, text: str, *, data_dir: Path | None = None) -> Config:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "shad.toml"
             path.write_text(textwrap.dedent(text))
-            return load(path)
+            return load(path, data_dir=data_dir)
 
     def test_defaults_to_both_panels_and_no_labels(self) -> None:
         cfg = self._load("[projects.kb]\npath = '/tmp/kb'\n")
@@ -298,6 +298,24 @@ class TodoConfigTests(unittest.TestCase):
     def test_todo_path_is_unset_by_default(self) -> None:
         self.assertIsNone(self._load("[todo]\nlabels = []\n").todo_path)
 
+    def test_the_todo_dir_is_the_todo_path_or_todo_under_the_data_dir(self) -> None:
+        self.assertEqual(
+            Config(defaults=Defaults(), data_dir=Path("/data")).todo_dir, Path("/data/todo")
+        )
+        cfg = Config(defaults=Defaults(), todo_path=Path("/notes/todo"), data_dir=Path("/data"))
+        self.assertEqual(cfg.todo_dir, Path("/notes/todo"))
+
+    def test_load_carries_the_data_dir_it_was_given(self) -> None:
+        self.assertEqual(self._load("[todo]\n", data_dir=Path("/d")).todo_dir, Path("/d/todo"))
+
+    def test_the_example_config_matches_the_schema_defaults(self) -> None:
+        """shad.example.toml is one of the schema's derived texts: its [defaults]
+        are the schema's defaults, so the file never drifts from what load accepts."""
+        example = Path(__file__).resolve().parents[3] / "shad.example.toml"
+        cfg = load(example, data_dir=Path("/d"))
+        self.assertEqual(cfg.defaults, Defaults())
+        self.assertTrue(cfg.projects or cfg.groups)
+
     def test_todo_path_keeps_an_absolute_path(self) -> None:
         cfg = self._load('[todo]\npath = "/notes/todo"\n')
         self.assertEqual(cfg.todo_path, Path("/notes/todo"))
@@ -323,8 +341,8 @@ class DefaultDataDirTests(unittest.TestCase):
 
     def _dir(self, *, platform: str, env: dict[str, str]) -> Path:
         with (
-            patch("shad.config.load.sys.platform", platform),
-            patch.dict("shad.config.load.os.environ", env, clear=True),
+            patch("shad.config.loader.sys.platform", platform),
+            patch.dict("shad.config.loader.os.environ", env, clear=True),
             patch.object(Path, "home", return_value=Path("/home/u")),
         ):
             return default_data_dir()
@@ -359,8 +377,8 @@ class DefaultConfigDirTests(unittest.TestCase):
 
     def _dir(self, *, platform: str, env: dict[str, str]) -> Path:
         with (
-            patch("shad.config.load.sys.platform", platform),
-            patch.dict("shad.config.load.os.environ", env, clear=True),
+            patch("shad.config.loader.sys.platform", platform),
+            patch.dict("shad.config.loader.os.environ", env, clear=True),
             patch.object(Path, "home", return_value=Path("/home/u")),
         ):
             return default_config_dir()
@@ -412,36 +430,36 @@ class ConfigPathTests(unittest.TestCase):
 
     def test_the_env_var_wins_outright(self) -> None:
         explicit = self.root / "scratch" / "custom.toml"
-        with patch.dict("shad.config.load.os.environ", {CONFIG_ENV: str(explicit)}):
+        with patch.dict("shad.config.loader.os.environ", {CONFIG_ENV: str(explicit)}):
             self.assertEqual(config_path(), explicit)
 
     def test_the_env_var_expands_a_tilde(self) -> None:
         env = {CONFIG_ENV: "~/scratch.toml", "HOME": "/home/u"}
-        with patch.dict("shad.config.load.os.environ", env):
+        with patch.dict("shad.config.loader.os.environ", env):
             self.assertEqual(config_path(), Path("/home/u/scratch.toml"))
 
     def test_the_env_var_need_not_exist(self) -> None:
         # `shad init` must be able to create it, and `load` reports a missing
         # file with a better message than this function could.
         missing = self.root / "nope.toml"
-        with patch.dict("shad.config.load.os.environ", {CONFIG_ENV: str(missing)}):
+        with patch.dict("shad.config.loader.os.environ", {CONFIG_ENV: str(missing)}):
             self.assertEqual(config_path(), missing)
 
     def test_the_per_os_default_is_used_when_it_exists(self) -> None:
         preferred = self._touch(self.root / "os" / "shad.toml")
         with (
-            patch.dict("shad.config.load.os.environ", {}, clear=True),
-            patch("shad.config.load.default_config_dir", return_value=self.root / "os"),
-            patch("shad.config.load.legacy_config_dir", return_value=self.root / "legacy"),
+            patch.dict("shad.config.loader.os.environ", {}, clear=True),
+            patch("shad.config.loader.default_config_dir", return_value=self.root / "os"),
+            patch("shad.config.loader.legacy_config_dir", return_value=self.root / "legacy"),
         ):
             self.assertEqual(config_path(), preferred)
 
     def _resolve(self, platform: str = "darwin") -> Path:
         with (
-            patch("shad.config.load.sys.platform", platform),
-            patch.dict("shad.config.load.os.environ", {}, clear=True),
-            patch("shad.config.load.default_config_dir", return_value=self.root / "os"),
-            patch("shad.config.load.legacy_config_dir", return_value=self.root / "legacy"),
+            patch("shad.config.loader.sys.platform", platform),
+            patch.dict("shad.config.loader.os.environ", {}, clear=True),
+            patch("shad.config.loader.default_config_dir", return_value=self.root / "os"),
+            patch("shad.config.loader.legacy_config_dir", return_value=self.root / "legacy"),
         ):
             return config_path()
 
@@ -476,7 +494,7 @@ class LoadUsesTheResolverTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as name:
             target = Path(name) / "shad.toml"
             target.write_text('[projects.kb]\npath = "/tmp/kb"\n')
-            with patch("shad.config.load.config_path", return_value=target):
+            with patch("shad.config.loader.config_path", return_value=target):
                 cfg = load()
         self.assertEqual(list(cfg.projects), ["kb"])
 

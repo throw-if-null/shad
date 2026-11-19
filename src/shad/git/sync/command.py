@@ -32,7 +32,7 @@ from rich.text import Text
 
 from shad import parsers
 from shad.addressing import resolve_target
-from shad.config.load import Project
+from shad.config import Project
 from shad.deps import Deps
 from shad.errors import ShadError
 from shad.git import apply, discover, refs
