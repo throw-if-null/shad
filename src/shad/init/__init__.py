@@ -1,3 +1,13 @@
-from shad.init.command import register
+"""The `init` package: `register` is what the root calls."""
 
-__all__ = ["register"]
+from __future__ import annotations
+
+from shad import parsers
+
+
+def register(sub: parsers.Subparsers) -> None:
+    """Add this package's parsers to *sub*. Imported on call, so that a module
+    of this package can be imported without the whole command tree."""
+    from shad.init.command import register as add
+
+    add(sub)

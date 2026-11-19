@@ -12,10 +12,10 @@ import argparse
 from rich.text import Text
 
 from shad import parsers
+from shad.config.load import LABEL_RE
 from shad.config.store import write_value
 from shad.deps import Deps
 from shad.errors import ShadError
-from shad.shared.config import LABEL_RE
 from shad.todo import store
 
 

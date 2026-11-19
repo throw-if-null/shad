@@ -21,8 +21,8 @@ from __future__ import annotations
 import argparse
 
 from shad import parsers
+from shad.config.load import HARNESSES, OC_POSITIONS
 from shad.deps import Deps
-from shad.shared.config import HARNESSES, OC_POSITIONS
 from shad.todo.model import STATUSES
 
 # Helper functions read `cur`, `args`, `flags`, `_shad_cmd` and the project

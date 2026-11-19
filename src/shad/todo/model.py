@@ -27,8 +27,8 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import StrEnum
 
+from shad.config.load import LABEL_RE
 from shad.errors import ShadError
-from shad.shared.config import LABEL_RE
 
 
 class Status(StrEnum):

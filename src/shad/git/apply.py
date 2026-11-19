@@ -5,7 +5,7 @@ Everything here mutates: fetching, fast-forwarding, deleting branches, and
 removing worktrees. Each returns an error string rather than raising, so one
 failure never aborts the rest of a run.
 
-Nothing here decides *whether* an action is safe — shad.git.plan does that.
+Nothing here decides *whether* an action is safe — shad.git.sync.plan does that.
 """
 
 from __future__ import annotations

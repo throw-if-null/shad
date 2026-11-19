@@ -12,7 +12,7 @@ from shad.deps import Deps
 from shad.output import Output
 from shad.sessions import render, store
 from shad.sessions.model import Entry
-from shad.shared.render import relative_age
+from shad.style import relative_age
 
 
 @dataclass(frozen=True)

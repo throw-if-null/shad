@@ -10,7 +10,7 @@ The pane is about 17 rows by 40 to 50 columns at shad's default panel_percent
 and todo_percent, so the header is one line rather than a table and the nav
 column is fixed narrow.
 
-textual is imported by this module only, and shad.git.command imports this
+textual is imported by this module only, and shad.git.panel.command imports this
 module lazily, so `shad projects` and `shad git sync` never pay for it.
 """
 
@@ -33,8 +33,8 @@ from textual.widgets import (
 
 from shad.errors import ShadError
 from shad.git.model import BranchRef, Repo, short_branch
-from shad.git.snapshot import Snapshot, collect
-from shad.shared.render import relative_age
+from shad.git.panel.snapshot import Snapshot, collect
+from shad.style import relative_age
 
 # Nav entries, in display order. The id is also the DataTable/ContentSwitcher id.
 BRANCHES = "branches"

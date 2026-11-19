@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -18,9 +17,9 @@ from rich.text import Text
 
 from shad import parsers
 from shad.deps import Deps
+from shad.editor import Editor
 from shad.errors import ShadError
 from shad.output import Output
-from shad.shared.editor import resolve_editor
 from shad.todo import store
 from shad.todo.model import Item, check_labels, parse, template
 
@@ -46,7 +45,7 @@ def run(args: argparse.Namespace, deps: Deps) -> None:
     directory = store.todo_dir(cfg)
     labels = list(args.label or [])
     if args.title is None:
-        item = add_in_editor(directory, labels, cfg.todo_labels, deps.out)
+        item = add_in_editor(directory, labels, cfg.todo_labels, deps.out, deps.editor)
     else:
         item = store.add(directory, args.title, labels, cfg.todo_labels)
     deps.out.print(
@@ -56,7 +55,9 @@ def run(args: argparse.Namespace, deps: Deps) -> None:
     )
 
 
-def add_in_editor(directory: Path, labels: list[str], vocabulary: list[str], out: Output) -> Item:
+def add_in_editor(
+    directory: Path, labels: list[str], vocabulary: list[str], out: Output, editor: Editor
+) -> Item:
     """
     Open the editor on a draft of a new item, create the item from it, and
     return the item.
@@ -83,7 +84,7 @@ def add_in_editor(directory: Path, labels: list[str], vocabulary: list[str], out
     keep = False
     try:
         while True:
-            _open_in_editor(draft)
+            editor.open(draft)
             fields = parse(draft.read_text(encoding="utf-8", errors="replace"), key="")
             if not fields.title and not fields.body.strip():
                 raise ShadError.validation("empty_todo", "empty title and body; no todo created")
@@ -108,12 +109,3 @@ def add_in_editor(directory: Path, labels: list[str], vocabulary: list[str], out
     finally:
         if not keep:
             draft.unlink(missing_ok=True)
-
-
-def _open_in_editor(path: Path) -> None:
-    editor = resolve_editor()
-    result = subprocess.run([*editor.split(), str(path)], check=False)
-    if result.returncode != 0:
-        raise ShadError.infrastructure(
-            "editor_failed", f"editor exited with status {result.returncode}"
-        )

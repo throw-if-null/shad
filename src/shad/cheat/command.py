@@ -11,8 +11,6 @@ Outside tmux → prints the cheat sheet to stdout
 from __future__ import annotations
 
 import argparse
-import os
-import subprocess
 
 from rich import box
 from rich.console import Console
@@ -22,6 +20,7 @@ from rich.text import Text
 from shad import parsers
 from shad.deps import Deps
 from shad.output import Output
+from shad.tmux import Tmux
 
 _SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
     ("PANES", [
@@ -128,14 +127,12 @@ def register(sub: parsers.Subparsers) -> None:
 
 
 def run(args: argparse.Namespace, deps: Deps) -> int:
-    return cheat(deps.out)
+    return cheat(deps.out, deps.tmux)
 
 
-def cheat(out: Output) -> int:
+def cheat(out: Output, tmux: Tmux) -> int:
     """The sheet on *out*, or in a tmux popup; returns the popup's exit status."""
-    inside_tmux = os.environ.get("TMUX") is not None
-
-    if not inside_tmux:
+    if not tmux.inside:
         out.print(_build_table())
         return 0
 
@@ -149,8 +146,4 @@ def cheat(out: Output) -> int:
     escaped = rendered.replace("'", "'\\''")
     shell_cmd = f"printf '%s' '{escaped}' | less -R"
 
-    result = subprocess.run(
-        ["tmux", "display-popup", "-E", "-w", "88", "-h", "40", shell_cmd],
-        check=False,
-    )
-    return result.returncode
+    return tmux.popup(shell_cmd, width=88, height=40)

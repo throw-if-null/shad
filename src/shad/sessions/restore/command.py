@@ -12,18 +12,17 @@ from __future__ import annotations
 
 import argparse
 import shlex
+from pathlib import Path
 
 from rich.text import Text
 
 from shad import parsers
 from shad.deps import Deps
+from shad.layout import create_session
 from shad.output import Output
-from shad.projects.open.layout import _create_session
 from shad.sessions import live, render, store
-from shad.sessions.restore import plan
-from shad.sessions.restore.plan import Step
-from shad.shared import terminal
-from shad.shared.tmux import _attach, attach_command, attached_sessions
+from shad.sessions.restore import plan, terminal
+from shad.tmux import Tmux
 
 
 def register(sub: parsers.Subparsers) -> None:
@@ -44,14 +43,13 @@ def run(args: argparse.Namespace, deps: Deps) -> int | None:
     """Returns the tmux exit code when a session was attached, else None."""
     cfg = deps.config
     out = deps.out
+    tmux = deps.tmux
     snapshot = store.read(store.snapshot_path())
-    steps = plan.plan(cfg, snapshot, live.collect(cfg))
+    steps = plan.plan(cfg, snapshot, live.collect(cfg, tmux), tmux)
     for step in steps:
-        if step.creates:
-            assert step.project is not None
-            assert step.command is not None
-            assert step.session is not None
-            _create_session(step.project, cfg.defaults, step.command, step.session)
+        creation = step.creation
+        if creation is not None:
+            create_session(tmux, creation.project, cfg.defaults, creation.command, creation.session)
 
     out.print(
         render.table("restored", [(step.entry, _outcome(step)) for step in steps], out.width)
@@ -62,38 +60,36 @@ def run(args: argparse.Namespace, deps: Deps) -> int | None:
     target = plan.attach_target(steps)
     if target is None:
         return None
-    _open_tabs(plan.tab_targets(steps, target, attached_sessions()), out)
-    return _attach(target)
+    _open_tabs(plan.tab_targets(steps, target, tmux.attached_sessions()), out)
+    return tmux.attach(target)
 
 
-def _open_tabs(steps: list[Step], out: Output) -> None:
+def _open_tabs(tabs: list[tuple[str, Path]], out: Output) -> None:
     """
-    One terminal tab per step, running the attach. After the first failure
-    the rest are not tried, because the cause is the terminal and each try
-    can wait out the timeout. Every session that got no tab is reported on
-    stderr with the command that attaches it.
+    One terminal tab per (session, directory), running the attach. After
+    the first failure the rest are not tried, because the cause is the
+    terminal and each try can wait out the timeout. Every session that got
+    no tab is reported on stderr with the command that attaches it.
     """
-    if not steps:
+    if not tabs:
         return
     term = terminal.current()
     reason = "the terminal is not kitty" if term is None else None
     left: list[str] = []
-    for step in steps:
-        assert step.session is not None
-        assert step.project is not None
+    for session, cwd in tabs:
         if term is not None and reason is None:
-            reason = terminal.open_tab(term, attach_command(step.session), step.project.path)
+            reason = terminal.open_tab(term, Tmux.attach_command(session), cwd)
         if reason is not None:
-            left.append(step.session)
+            left.append(session)
     if not left:
         return
     out.note(Text(f"no tab for {len(left)} session(s): {reason}", style="yellow"))
     out.note(Text("attach them with:"))
     for session in left:
-        out.note(Text(f"  {shlex.join(attach_command(session))}"))
+        out.note(Text(f"  {shlex.join(Tmux.attach_command(session))}"))
 
 
-def _outcome(step: Step) -> Text:
+def _outcome(step: plan.Step) -> Text:
     if step.outcome == "resume":
         return Text("resumed", style="bold green")
     if step.outcome == "new":

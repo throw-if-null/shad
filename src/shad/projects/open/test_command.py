@@ -3,12 +3,13 @@ from __future__ import annotations
 import unittest
 import uuid
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
+from shad.config.load import Defaults, Project
+from shad.harness import Target
 from shad.projects.open.command import open_project
-from shad.projects.open.sessions import OpencodeTarget
 from shad.projects.testing import UUID_A, ProjectsCase
-from shad.shared.config import Defaults, Project
+from shad.tmux import Tmux
 
 
 class OpenTests(ProjectsCase):
@@ -173,20 +174,20 @@ class FreshTargetTests(unittest.TestCase):
 
     def test_open_project_fresh_kills_existing_session_and_recreates(self) -> None:
         project = Project(key="shad", group="tin", path=Path("/tmp/shad"), session="tin-shad")
-        target = OpencodeTarget(command="opencode", session_key="fresh-123", fresh=True)
+        target = Target(command="opencode", session_key="fresh-123", fresh=True)
 
+        tmux = Mock(spec=Tmux)
+        tmux.session_exists.return_value = True
+        tmux.attach.return_value = 0
         with (
             patch("shad.projects.open.command.pick_opencode_target", return_value=target),
-            patch("shad.projects.open.command.session_exists", return_value=True),
-            patch("shad.projects.open.command._run") as run,
-            patch("shad.projects.open.command._create_session") as create_session,
-            patch("shad.projects.open.command._attach"),
+            patch("shad.projects.open.command.create_session") as create_session,
         ):
-            open_project(project, Defaults())
+            open_project(project, Defaults(), tmux)
 
-        run.assert_called_once_with(
-            ["tmux", "kill-session", "-t", "tin-shad--oc-fresh-123"], check=False
+        tmux.run.assert_called_once_with(
+            "kill-session", "-t", "tin-shad--oc-fresh-123", check=False
         )
         create_session.assert_called_once_with(
-            project, Defaults(), "opencode", "tin-shad--oc-fresh-123"
+            tmux, project, Defaults(), "opencode", "tin-shad--oc-fresh-123"
         )

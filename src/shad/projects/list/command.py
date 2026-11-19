@@ -6,8 +6,8 @@ from dataclasses import dataclass
 
 from rich.text import Text
 
+from shad.config.load import Config, Project
 from shad.output import Output
-from shad.shared.config import Config, Project
 
 
 @dataclass(frozen=True)

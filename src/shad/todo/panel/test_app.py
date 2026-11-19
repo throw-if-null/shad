@@ -20,6 +20,7 @@ from unittest.mock import patch
 
 from textual.widgets import DataTable, Static
 
+from shad.editor import Editor
 from shad.errors import ShadError
 from shad.output import Output
 from shad.todo import store
@@ -41,7 +42,7 @@ class PanelTests(unittest.IsolatedAsyncioTestCase):
         path.write_text(path.read_text() + "Some body text.\n")
 
     def _app(self) -> TodoPanel:
-        return TodoPanel(self.dir, VOCAB, Output())
+        return TodoPanel(self.dir, VOCAB, Output(), Editor(None))
 
     @staticmethod
     def _header(app: TodoPanel) -> str:
@@ -132,7 +133,7 @@ class PanelTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("unknown label 'nope'", self._detail(app))
 
     async def test_e_suspends_the_app_around_the_editor_and_reloads(self) -> None:
-        app = self._app()
+        app = TodoPanel(self.dir, VOCAB, Output(), Editor("fake-editor --wait"))
         path = store.item_path(self.dir, "active-work")
 
         def fake_editor(argv: list[str], check: bool) -> subprocess.CompletedProcess[bytes]:
@@ -142,8 +143,7 @@ class PanelTests(unittest.IsolatedAsyncioTestCase):
             return subprocess.CompletedProcess(argv, 0)
 
         with (
-            patch("shad.todo.edit.command.resolve_editor", return_value="fake-editor --wait"),
-            patch("shad.todo.edit.command.subprocess.run", side_effect=fake_editor) as run,
+            patch("shad.editor.subprocess.run", side_effect=fake_editor) as run,
             patch.object(TodoPanel, "suspend", return_value=contextlib.nullcontext()) as suspend,
         ):
             async with app.run_test(size=(60, 25)) as pilot:
@@ -169,7 +169,7 @@ class PanelTests(unittest.IsolatedAsyncioTestCase):
         exits: list[str] = []
 
         def fake_add(
-            directory: Path, labels: list[str], vocabulary: list[str], out: Output
+            directory: Path, labels: list[str], vocabulary: list[str], out: Output, editor: Editor
         ) -> Item:
             self.assertEqual((directory, labels, vocabulary), (self.dir, [], VOCAB))
             return store.add(directory, "Zulu new", [], vocabulary)
@@ -230,7 +230,7 @@ class PanelTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(app.query_one("#items", DataTable).row_count, 1)
 
     async def test_empty_directory_shows_a_hint(self) -> None:
-        app = TodoPanel(Path(self._tmp.name) / "empty", VOCAB, Output())
+        app = TodoPanel(Path(self._tmp.name) / "empty", VOCAB, Output(), Editor(None))
         async with app.run_test(size=(60, 25)) as pilot:
             await pilot.pause()
             self.assertIsNone(app.current_key())

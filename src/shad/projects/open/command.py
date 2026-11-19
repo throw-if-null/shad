@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import argparse
 
-from shad.projects.open.layout import _create_session
+from shad.config.load import HARNESSES, Defaults, Project
+from shad.layout import create_session
 from shad.projects.open.sessions import pick_claude_target, pick_opencode_target
-from shad.shared.config import HARNESSES, Defaults, Project
-from shad.shared.tmux import _attach, _run, project_session_name, session_exists
+from shad.tmux import Tmux, project_session_name
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -27,7 +27,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def open_project(
-    project: Project, defaults: Defaults, harness: str | None = None
+    project: Project, defaults: Defaults, tmux: Tmux, harness: str | None = None
 ) -> int | None:
     """Attach to project session, creating it with the configured layout if needed.
 
@@ -47,13 +47,13 @@ def open_project(
     if target is None:
         return None
 
-    session = project_session_name(project.session, target)
+    session = project_session_name(project.session, target.session_prefix, target.session_key)
 
-    if session_exists(session):
+    if tmux.session_exists(session):
         if target.fresh:
-            _run(["tmux", "kill-session", "-t", session], check=False)
+            tmux.run("kill-session", "-t", session, check=False)
         else:
-            return _attach(session)
+            return tmux.attach(session)
 
-    _create_session(project, defaults, target.command, session)
-    return _attach(session)
+    create_session(tmux, project, defaults, target.command, session)
+    return tmux.attach(session)

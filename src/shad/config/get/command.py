@@ -9,12 +9,12 @@ from pathlib import Path
 
 from shad import parsers
 from shad.config import store, toml_edit
+from shad.config.load import Config
 from shad.config.render import display
 from shad.config.schema import field_for
 from shad.deps import Deps
 from shad.errors import ShadError
 from shad.output import Output
-from shad.shared.config import Config
 from shad.todo.store import todo_dir
 
 

@@ -9,12 +9,12 @@ from rich.text import Text
 
 from shad import parsers
 from shad.config import store
+from shad.config.load import Config, Project
 from shad.config.render import display
 from shad.deps import Deps
 from shad.errors import ShadError
 from shad.output import Output
-from shad.shared.config import Config, Project
-from shad.shared.render import make_table
+from shad.style import make_table
 from shad.todo.store import todo_dir
 
 DEFAULTS = (

@@ -16,7 +16,6 @@ from shad import parsers
 from shad.deps import Deps
 from shad.sessions import live, render
 from shad.sessions.pick import pick
-from shad.shared.tmux import current_session, kill_session
 
 
 def register(sub: parsers.Subparsers) -> None:
@@ -25,8 +24,9 @@ def register(sub: parsers.Subparsers) -> None:
 
 def run(args: argparse.Namespace, deps: Deps) -> None:
     out = deps.out
-    running = live.collect(deps.config)
-    current = current_session()
+    tmux = deps.tmux
+    running = live.collect(deps.config, tmux)
+    current = tmux.current_session()
     rows = [item for item in running if item.session != current]
     if not rows:
         message = "no shad sessions are running"
@@ -41,5 +41,5 @@ def run(args: argparse.Namespace, deps: Deps) -> None:
         return
     stopped = [rows[index] for index in sorted(picked)]
     for item in stopped:
-        kill_session(item.session)
+        tmux.kill_session(item.session)
     out.print(render.running_table("stopped", stopped, out.width))

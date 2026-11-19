@@ -4,7 +4,7 @@ import io
 import unittest
 from pathlib import Path
 
-from shad.git import report
+from shad.config.load import Project
 from shad.git.model import (
     BranchInfo,
     BranchKept,
@@ -15,8 +15,8 @@ from shad.git.model import (
     WorktreeInfo,
     WorktreeKept,
 )
+from shad.git.sync import report
 from shad.output import Output
-from shad.shared.config import Project
 
 
 def _project(key: str = "shad", group: str | None = "tin") -> Project:

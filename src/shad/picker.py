@@ -14,6 +14,9 @@ frame and clears from there, instead of saving and restoring the cursor
 position: a saved position is a screen row, and it points into the old
 frame once the frame has scrolled the screen. The frame must therefore be
 shorter than the terminal; `render` callers window their rows to make it so.
+
+`pick_one` and `pick_many` hold /dev/tty for the duration of one call, so
+one picker runs at a time (per call); the key loops are pure.
 """
 
 from __future__ import annotations

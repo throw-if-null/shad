@@ -20,10 +20,10 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from shad.picker import render_bytes
 from shad.sessions.live import Running, duplicates
 from shad.sessions.model import Entry
-from shad.shared.picker import render_bytes
-from shad.shared.render import make_table, relative_age
+from shad.style import make_table, relative_age
 
 ID_WIDTH = 8
 NAME_WIDTH = 24

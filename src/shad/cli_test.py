@@ -5,13 +5,14 @@ from unittest.mock import patch
 
 from shad.cheat import command as cheat
 from shad.cli import build_parser, main
+from shad.config.load import Config, Defaults
 from shad.config.show import command as config_show
 from shad.errors import ShadError
-from shad.git import command as git
+from shad.git.panel import command as git_panel
+from shad.git.sync import command as git_sync
 from shad.projects import command as projects
 from shad.sessions.restore import command as restore
 from shad.sessions.show import command as sessions_show
-from shad.shared.config import Config, Defaults
 from shad.testing import TmuxCase, run
 from shad.todo.label import command as label
 from shad.todo.list import command as todo_list
@@ -24,8 +25,8 @@ class ParserRegistrationTests(unittest.TestCase):
         parser = build_parser()
         for argv, expected in (
             (["projects"], projects.run),
-            (["git", "sync"], git.run_sync),
-            (["git", "panel"], git.run_panel),
+            (["git", "sync"], git_sync.run),
+            (["git", "panel"], git_panel.run),
             (["config"], config_show.run),
             (["config", "show"], config_show.run),
             (["todo", "list"], todo_list.run),
@@ -271,7 +272,7 @@ class GitCliTests(unittest.TestCase):
         cfg = Config(defaults=Defaults())
         with (
             patch("shad.deps.load", return_value=cfg) as load,
-            patch("shad.git.command.run_sync", return_value=None) as run_sync,
+            patch("shad.git.sync.command.run", return_value=None) as run_sync,
         ):
             self.assertEqual(main(["git", "sync"]), 0)
             run_sync.assert_called_once()
@@ -281,7 +282,7 @@ class GitCliTests(unittest.TestCase):
 
     def test_git_errors_exit_one(self) -> None:
         with (
-            patch("shad.git.command.run_sync", side_effect=ShadError.internal("boom", "boom")),
+            patch("shad.git.sync.command.run", side_effect=ShadError.internal("boom", "boom")),
             patch("sys.stderr"),
         ):
             self.assertEqual(main(["git", "sync"]), 1)

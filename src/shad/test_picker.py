@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from collections.abc import Iterator
 
-from shad.shared.picker import erase, select_many, select_one
+from shad.picker import erase, select_many, select_one
 
 ESC_UP, ESC_DOWN, ENTER, ESC = "\x1b[A", "\x1b[B", "\r", "\x1b"
 

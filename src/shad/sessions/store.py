@@ -9,13 +9,12 @@ repository, and a file that changes on every save does not belong in one.
 
 from __future__ import annotations
 
-import os
-import tempfile
 from pathlib import Path
 
+from shad import atomic
+from shad.config.load import default_data_dir
 from shad.errors import ShadError
 from shad.sessions.model import Snapshot, parse, serialize
-from shad.shared.config import default_data_dir
 
 FILENAME = "sessions.json"
 
@@ -36,13 +35,4 @@ def read(path: Path) -> Snapshot:
 
 def write(path: Path, snapshot: Snapshot) -> None:
     """Replace the file in one step, so a reader never sees a partial snapshot."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.stem}.", suffix=".tmp")
-    tmp = Path(tmp_name)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(serialize(snapshot))
-        tmp.chmod(0o644)
-        os.replace(tmp, path)
-    finally:
-        tmp.unlink(missing_ok=True)
+    atomic.replace(path, serialize(snapshot))

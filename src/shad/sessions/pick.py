@@ -2,7 +2,7 @@
 The multi-select picker over running sessions, as `save` and `stop` use it.
 
 One function: the terminal size, the frame, and the error when there is no
-terminal to draw in. The key handling is `shad.shared.picker`.
+terminal to draw in. The key handling is `shad.picker`.
 """
 
 from __future__ import annotations
@@ -11,9 +11,9 @@ import shutil
 from collections.abc import Iterable, Sequence
 
 from shad.errors import ShadError
+from shad.picker import NoTerminal, pick_many
 from shad.sessions import render
 from shad.sessions.live import Running
-from shad.shared.picker import NoTerminal, pick_many
 
 
 def pick(

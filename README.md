@@ -916,11 +916,19 @@ shad/
         ├── __init__.py
         ├── __main__.py
         ├── cli.py
+        ├── addressing.py
+        ├── atomic.py
         ├── banner.py
         ├── deps.py
+        ├── editor.py
         ├── errors.py
+        ├── harness.py
+        ├── layout.py
         ├── output.py
         ├── parsers.py
+        ├── picker.py
+        ├── style.py
+        ├── tmux.py
         ├── trace.py
         ├── cheat/
         │   └── command.py
@@ -928,6 +936,7 @@ shad/
         │   └── command.py
         ├── config/
         │   ├── command.py
+        │   ├── load.py
         │   ├── render.py
         │   ├── schema.py
         │   ├── store.py
@@ -953,10 +962,16 @@ shad/
         │   ├── command.py
         │   ├── discover.py
         │   ├── model.py
-        │   ├── plan.py
         │   ├── refs.py
-        │   ├── report.py
-        │   └── run.py
+        │   ├── run.py
+        │   ├── panel/
+        │   │   ├── app.py
+        │   │   ├── command.py
+        │   │   └── snapshot.py
+        │   └── sync/
+        │       ├── command.py
+        │       ├── plan.py
+        │       └── report.py
         ├── init/
         │   └── command.py
         ├── projects/
@@ -965,13 +980,11 @@ shad/
         │   │   └── command.py
         │   ├── open/
         │   │   ├── command.py
-        │   │   ├── layout.py
         │   │   └── sessions.py
         │   └── status/
         │       └── command.py
         ├── sessions/
         │   ├── command.py
-        │   ├── harness.py
         │   ├── live.py
         │   ├── model.py
         │   ├── pick.py
@@ -979,20 +992,14 @@ shad/
         │   ├── store.py
         │   ├── restore/
         │   │   ├── command.py
-        │   │   └── plan.py
+        │   │   ├── plan.py
+        │   │   └── terminal.py
         │   ├── save/
         │   │   └── command.py
         │   ├── show/
         │   │   └── command.py
         │   └── stop/
         │       └── command.py
-        ├── shared/
-        │   ├── config.py
-        │   ├── editor.py
-        │   ├── picker.py
-        │   ├── render.py
-        │   ├── terminal.py
-        │   └── tmux.py
         └── todo/
             ├── command.py
             ├── model.py

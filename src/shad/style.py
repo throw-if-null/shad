@@ -1,8 +1,8 @@
 """
-Shared rich rendering helpers for shad.
+The two presentation invariants every command must agree on: the table
+style, and the age format `projects status` and the git panel both show.
 
-Owns only presentation primitives that more than one command slice needs.
-Command-specific layout stays in the slice that prints it.
+Pure functions; shared-and-safe.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from rich.table import Table
 
 
 def make_table(title: str) -> Table:
-    """Return the standard borderless-header table used by every shad command."""
+    """The borderless-header table every shad command prints."""
     return Table(
         title=title,
         box=box.ROUNDED,

@@ -21,13 +21,18 @@ from pathlib import Path
 
 from rich.text import Text
 
-from shad.git import refs
-from shad.git.discover import head_branch, is_clean
-from shad.git.model import Commit, short_branch
+from shad.config.load import Project
+from shad.git import (
+    Commit,
+    head_branch,
+    is_clean,
+    latest_tag,
+    recent_commits,
+    short_branch,
+)
 from shad.output import Output
-from shad.shared.config import Project
-from shad.shared.render import make_table, relative_age
-from shad.shared.tmux import list_project_sessions, tmux_server_running
+from shad.style import make_table, relative_age
+from shad.tmux import Tmux as TmuxClient
 from shad.trace import Trace
 
 RECENT_COMMITS = 3
@@ -141,10 +146,10 @@ _LATEST_FETCHERS: dict[str, Callable[[], str | None]] = {
 # ── the readings ──────────────────────────────────────────────────────────
 
 
-def _tmux(project: Project) -> Tmux:
-    running = list_project_sessions(project.session)
+def _tmux(project: Project, tmux: TmuxClient) -> Tmux:
+    running = tmux.list_project_sessions(project.session)
     if not running:
-        return Tmux(server=tmux_server_running(), sessions=())
+        return Tmux(server=tmux.server_running(), sessions=())
     return Tmux(
         server=True,
         sessions=tuple(Session(name=name, base=name == project.session) for name in running),
@@ -164,7 +169,7 @@ def _git(path: Path) -> Git | None:
     if not (path / ".git").exists():
         return None
     head = head_branch(path)
-    tag = refs.latest_tag(path)
+    tag = latest_tag(path)
     # Counts every untracked file, where `status --short` collapsed an
     # untracked directory into a single entry. An untracked directory holding
     # two files reads as two, which is what the "file(s)" label claims.
@@ -174,7 +179,7 @@ def _git(path: Path) -> Git | None:
         tag=tag or None,
         changed=changed,
         untracked=untracked,
-        commits=tuple(refs.recent_commits(path, RECENT_COMMITS)),
+        commits=tuple(recent_commits(path, RECENT_COMMITS)),
     )
 
 
@@ -249,11 +254,11 @@ def _opencode() -> str | None:
     return version.splitlines()[0] if version else None
 
 
-def status(project: Project, trace: Trace) -> Status:
+def status(project: Project, tmux: TmuxClient, trace: Trace) -> Status:
     """The project's state now. *trace* receives the version-fetch failures."""
     return Status(
         project=project,
-        tmux=_tmux(project),
+        tmux=_tmux(project, tmux),
         git=_git(project.path),
         runtimes=_runtimes(project.path, trace),
         opencode=_opencode(),

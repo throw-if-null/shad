@@ -5,8 +5,8 @@ from pathlib import Path
 from typing import Self
 from unittest.mock import patch
 
-from shad.git import snapshot
 from shad.git.model import BranchRef, FetchResult, Repo, Stash, Worktree
+from shad.git.panel import snapshot
 
 ROOT = Path("/tmp/repo")
 REPO = Repo(root=ROOT, common_dir=ROOT / ".git")

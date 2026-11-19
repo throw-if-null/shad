@@ -4,6 +4,8 @@ The error model: one `ShadError` with a category, a code and a message.
 A slice raises through one of the six constructors and owns the `code` it
 passes. The root renders: it maps the category to an exit code and prints
 `<code>: <message>` on stderr. No other module prints an error.
+
+Pure values and constructors; shared-and-safe.
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""The banner `shad` prints before its help and before it opens a project."""
+"""The banner `shad` prints before its help and before it opens a project. Pure; shared-and-safe."""
 
 from __future__ import annotations
 
