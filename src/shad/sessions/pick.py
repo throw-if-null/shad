@@ -10,9 +10,9 @@ from __future__ import annotations
 import shutil
 from collections.abc import Iterable, Sequence
 
+from shad.errors import ShadError
 from shad.sessions import render
 from shad.sessions.live import Running
-from shad.shared.errors import ShadError
 from shad.shared.picker import NoTerminal, pick_many
 
 
@@ -33,4 +33,4 @@ def pick(
     try:
         return pick_many(draw, len(rows), checked)
     except NoTerminal:
-        raise ShadError(f"no terminal to pick in; {hint}") from None
+        raise ShadError.infrastructure("no_terminal", f"no terminal to pick in; {hint}") from None

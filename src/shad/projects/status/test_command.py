@@ -96,10 +96,12 @@ class StatusTests(ProjectsCase):
         """
         Criterion:  status-of-an-unknown-project-fails
           When:     `shad projects nope status`.
-          Then:     exit 1, stdout empty, stderr names nope.
+          Then:     exit 1, stdout empty, stderr one line `no_such_project:
+                    <non-empty>` naming nope.
         """
         result = self.run_detached("projects", "nope", "status")
         self.assertEqual((result.code, result.out), (1, ""), result.err)
+        self.assertRegex(result.err, r"^no_such_project: .+\n$")
         self.assertIn("nope", result.err)
 
     def test_status_ignores_an_inherited_git_dir(self) -> None:

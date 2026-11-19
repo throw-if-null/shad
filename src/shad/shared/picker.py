@@ -22,7 +22,6 @@ import os
 import select
 import termios
 import tty
-import warnings
 from collections.abc import Callable, Iterable, Iterator
 from io import StringIO
 from typing import Self
@@ -41,7 +40,7 @@ _ESCAPE_SETTLE = 0.05  # seconds a lone Escape waits for the rest of a sequence
 
 
 class NoTerminal(Exception):
-    """/dev/tty could not be opened: there is no terminal to draw a picker in."""
+    """There is no terminal to draw a picker in: /dev/tty could not be opened or driven."""
 
 
 def render_bytes(renderable: RenderableType, width: int) -> bytes:
@@ -127,8 +126,7 @@ def pick_one(render: Callable[[int], bytes], total: int) -> int | None:
         with _Terminal() as term:
             return select_one(term.keys(), total, lambda cursor: term.draw(render(cursor)))
     except (OSError, termios.error) as exc:
-        warnings.warn(f"shad: picker failed: {exc}", stacklevel=2)
-        return None
+        raise NoTerminal(str(exc)) from None
 
 
 def pick_many(
@@ -147,8 +145,7 @@ def pick_many(
                 lambda cursor, chosen: term.draw(render(cursor, chosen)),
             )
     except (OSError, termios.error) as exc:
-        warnings.warn(f"shad: picker failed: {exc}", stacklevel=2)
-        return None
+        raise NoTerminal(str(exc)) from None
 
 
 class _Terminal:

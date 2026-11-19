@@ -23,8 +23,8 @@ import os
 import tempfile
 from pathlib import Path
 
+from shad.errors import ShadError
 from shad.shared.config import Config, default_data_dir, resolve_prefix
-from shad.shared.errors import ShadError
 from shad.todo.model import (
     STATUSES,
     Item,
@@ -90,8 +90,10 @@ def resolve_key(directory: Path, token: str) -> str:
     match = resolve_prefix(known, token)
     if match is None:
         if not known:
-            raise ShadError(f"no todo matching '{token}'; the list is empty")
-        raise ShadError(f"no todo matching '{token}'")
+            raise ShadError.not_found(
+                "no_such_todo", f"no todo matching '{token}'; the list is empty"
+            )
+        raise ShadError.not_found("no_such_todo", f"no todo matching '{token}'")
     return match
 
 
@@ -100,7 +102,7 @@ def read_item(directory: Path, key: str) -> Item:
     try:
         return _read(path)
     except FileNotFoundError:
-        raise ShadError(f"no todo '{key}' in {directory}") from None
+        raise ShadError.not_found("no_such_todo", f"no todo '{key}' in {directory}") from None
 
 
 def add(
@@ -119,9 +121,11 @@ def add(
     """
     title = " ".join(title.split())
     if not title:
-        raise ShadError("title must not be empty")
+        raise ShadError.validation("empty_title", "title must not be empty")
     if status not in STATUSES:
-        raise ShadError(f"unknown status '{status}'; must be one of: {', '.join(STATUSES)}")
+        raise ShadError.validation(
+            "invalid_status", f"unknown status '{status}'; must be one of: {', '.join(STATUSES)}"
+        )
     check_labels(labels, vocabulary)
     key = slugify(title)
     body = body.strip("\n")
@@ -140,7 +144,7 @@ def add(
     try:
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
     except FileExistsError:
-        raise ShadError(f"todo '{key}' already exists: {path}") from None
+        raise ShadError.conflict("todo_exists", f"todo '{key}' already exists: {path}") from None
     with os.fdopen(fd, "w") as fh:
         fh.write(serialize(item))
     return item
@@ -149,7 +153,9 @@ def add(
 def set_status(directory: Path, key: str, status: str) -> Item:
     """Rewrite the headers of one item; the body is copied byte for byte."""
     if status not in STATUSES:
-        raise ShadError(f"unknown status '{status}'; must be one of: {', '.join(STATUSES)}")
+        raise ShadError.validation(
+            "invalid_status", f"unknown status '{status}'; must be one of: {', '.join(STATUSES)}"
+        )
     item = read_item(directory, key).with_status(status)
     _write(item_path(directory, key), serialize(item))
     return item
@@ -160,7 +166,7 @@ def remove(directory: Path, key: str) -> Path:
     try:
         path.unlink()
     except FileNotFoundError:
-        raise ShadError(f"no todo '{key}' in {directory}") from None
+        raise ShadError.not_found("no_such_todo", f"no todo '{key}' in {directory}") from None
     return path
 
 

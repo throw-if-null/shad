@@ -17,17 +17,17 @@ import tomllib
 from pathlib import Path
 
 from shad.config import toml_edit
+from shad.errors import ShadError
 from shad.shared.config import load
-from shad.shared.errors import ShadError
 
 MISSING = object()  # what lookup() returns for a key the file does not have
 
 
 def read_text(path: Path) -> str:
     if not path.exists():
-        raise ShadError(
-            f"config file not found: {path}\n"
-            f"       run 'shad init' to create it."
+        raise ShadError.not_found(
+            "no_config_file",
+            f"config file not found: {path}; run 'shad init' to create it"
         )
     return path.read_text()
 
@@ -36,7 +36,7 @@ def read_raw(path: Path) -> dict:
     try:
         return tomllib.loads(read_text(path))
     except tomllib.TOMLDecodeError as exc:
-        raise ShadError(f"{path} is not valid TOML: {exc}") from None
+        raise ShadError.validation("invalid_config", f"{path} is not valid TOML: {exc}") from None
 
 
 def lookup(raw: dict, parts: list[str]) -> object:
@@ -67,7 +67,9 @@ def parse_or_fail(text: str) -> dict:
     try:
         return tomllib.loads(text)
     except tomllib.TOMLDecodeError as exc:
-        raise ShadError(f"refusing to write: result is not valid TOML: {exc}") from None
+        raise ShadError.validation(
+            "invalid_config", f"refusing to write: result is not valid TOML: {exc}"
+        ) from None
 
 
 def commit(path: Path, text: str, *, hint: str | None = None) -> None:
@@ -82,15 +84,17 @@ def commit(path: Path, text: str, *, hint: str | None = None) -> None:
         try:
             tomllib.loads(text)
         except tomllib.TOMLDecodeError as exc:
-            raise ShadError(f"refusing to write {path}: result is not valid TOML: {exc}") from None
+            raise ShadError.validation(
+                "invalid_config", f"refusing to write {path}: result is not valid TOML: {exc}"
+            ) from None
 
         try:
             load(tmp)
         except ShadError as exc:
             message = f"refusing to write {path}: resulting config is invalid — {exc}"
             if hint:
-                message = f"{message}\n       {hint}"
-            raise ShadError(message) from None
+                message = f"{message}; {hint}"
+            raise ShadError.validation("invalid_config", message) from None
 
         if path.exists():
             shutil.copymode(path, tmp)

@@ -24,8 +24,8 @@ from tempfile import TemporaryDirectory
 import shad
 from shad.cli import build_parser
 from shad.completion.command import BASH_COMPLETION, print_completion
+from shad.errors import ShadError
 from shad.shared.config import HARNESSES
-from shad.shared.errors import ShadError
 from shad.testing import run
 from shad.todo import store
 from shad.todo.model import STATUSES

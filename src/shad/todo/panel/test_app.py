@@ -19,7 +19,7 @@ from unittest.mock import patch
 
 from textual.widgets import DataTable, Static
 
-from shad.shared.errors import ShadError
+from shad.errors import ShadError
 from shad.todo import store
 from shad.todo.model import Item
 from shad.todo.panel.app import TodoPanel
@@ -184,7 +184,8 @@ class PanelTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exits, ["resumed"])
 
     async def test_a_that_creates_nothing_notifies_and_resumes(self) -> None:
-        for failure in (ShadError("empty title and body; no todo created"), KeyboardInterrupt()):
+        empty = ShadError.validation("empty_todo", "empty title and body; no todo created")
+        for failure in (empty, KeyboardInterrupt()):
             with self.subTest(failure=type(failure).__name__):
                 app = self._app()
                 exits: list[str] = []

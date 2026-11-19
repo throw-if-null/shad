@@ -31,12 +31,13 @@ from rich.console import Console
 from rich.prompt import Confirm
 from rich.text import Text
 
+from shad.errors import ShadError
 from shad.git import apply, discover, refs, report
 from shad.git import plan as planning
 from shad.git.model import ProjectOutcome, ProjectPlan, Repo, SyncRun
 from shad.git.run import GitMissing, require_git
 from shad.shared.config import Config, Project, resolve_target
-from shad.shared.errors import ShadError
+from shad.trace import Trace
 
 console = Console()
 
@@ -323,8 +324,13 @@ def sync_projects(
     yes: bool = False,
     dry_run: bool = False,
     switch: bool = False,
+    trace: Trace | None = None,
 ) -> SyncRun:
-    """Run the full sync over *projects* and return what happened."""
+    """
+    Run the full sync over *projects* and return what happened. *trace*
+    receives the traceback of every per-project failure the run recorded.
+    """
+    trace = trace or Trace()
     if not projects:
         console.print(Text("no projects configured", style="dim"))
         return SyncRun(dry_run=dry_run)
@@ -332,7 +338,7 @@ def sync_projects(
     require_git()
 
     report.render_header(len(projects))
-    plans = _inspect(projects, dry_run=dry_run, switch=switch)
+    plans = _inspect(projects, dry_run=dry_run, switch=switch, trace=trace)
 
     report.render_applied(plans, dry_run=dry_run)
 
@@ -369,7 +375,7 @@ def sync_projects(
         report.render_summary(run)
         return run
 
-    outcomes = [_apply_one(p) for p in plans]
+    outcomes = [_apply_one(p, trace) for p in plans]
     run = SyncRun(outcomes=outcomes)
     report.render_results(outcomes)
     report.render_summary(run)
@@ -377,7 +383,7 @@ def sync_projects(
     return run
 
 
-def _apply_one(plan: ProjectPlan) -> ProjectOutcome:
+def _apply_one(plan: ProjectPlan, trace: Trace) -> ProjectOutcome:
     """
     Apply one plan, converting an unexpected escape into a recorded failure.
 
@@ -391,11 +397,12 @@ def _apply_one(plan: ProjectPlan) -> ProjectOutcome:
     try:
         return apply_plan(plan)
     except Exception as exc:  # noqa: BLE001 — one bad project must not abort the rest
+        trace.exception(exc)
         return ProjectOutcome(plan=plan, failures=[str(exc)])
 
 
 def _inspect(
-    projects: list[Project], *, dry_run: bool, switch: bool = False
+    projects: list[Project], *, dry_run: bool, switch: bool = False, trace: Trace | None = None
 ) -> list[ProjectPlan]:
     """
     Resolve every project, drop repositories already covered, then fan out.
@@ -403,8 +410,9 @@ def _inspect(
     Results are collected by index because as_completed scrambles order, and a
     worker failure lands on the plan rather than aborting the batch.
     """
+    trace = trace or Trace()
     plans: list[ProjectPlan | None] = [None] * len(projects)
-    jobs = _resolve(projects, plans)
+    jobs = _resolve(projects, plans, trace)
 
     if jobs:
         with ThreadPoolExecutor(max_workers=min(MAX_WORKERS, len(jobs))) as pool:
@@ -419,6 +427,7 @@ def _inspect(
                 try:
                     plans[index] = future.result()
                 except Exception as exc:  # noqa: BLE001 — one bad project must not abort the rest
+                    trace.exception(exc)
                     plans[index] = ProjectPlan(
                         project=projects[index], status="failed", detail=str(exc)
                     )
@@ -427,7 +436,7 @@ def _inspect(
 
 
 def _resolve(
-    projects: list[Project], plans: list[ProjectPlan | None]
+    projects: list[Project], plans: list[ProjectPlan | None], trace: Trace | None = None
 ) -> list[tuple[int, Project, Repo]]:
     """
     Resolve each project to its repository and drop the ones already covered.
@@ -448,6 +457,7 @@ def _resolve(
     second connection. It is local-only — a couple of rev-parse calls per
     project, no network.
     """
+    trace = trace or Trace()
     resolved: list[tuple[int, Project, Repo]] = []
 
     for index, project in enumerate(projects):
@@ -466,6 +476,7 @@ def _resolve(
             # on the main thread, outside the pool's per-future guard, so an
             # escape here would abort the whole run before any other project
             # was even inspected.
+            trace.exception(exc)
             plans[index] = ProjectPlan(
                 project=project, status="failed", detail=str(exc)
             )
@@ -504,15 +515,16 @@ def _resolve(
 def _raise_if_all_failed(run: SyncRun) -> None:
     """A run where every project failed is a real failure; a partial one is not."""
     if run.outcomes and all(o.plan.status == "failed" for o in run.outcomes):
-        raise ShadError(f"all {len(run.outcomes)} project(s) failed")
+        raise ShadError.infrastructure("sync_failed", f"all {len(run.outcomes)} project(s) failed")
 
 
-def cmd_git(cfg: Config, args: argparse.Namespace) -> None:
+def cmd_git(cfg: Config, args: argparse.Namespace, trace: Trace | None = None) -> None:
     action = getattr(args, "git_action", None)
     if action is None:
-        raise ShadError(f"no git action given; available: {', '.join(ACTIONS)}")
+        raise ShadError.usage("no_action", f"no git action given; available: {', '.join(ACTIONS)}")
     if action not in ACTIONS:
-        raise ShadError(
+        raise ShadError.usage(
+            "unknown_action",
             f"unknown git action '{action}'; available: {', '.join(ACTIONS)}"
         )
 
@@ -526,6 +538,7 @@ def cmd_git(cfg: Config, args: argparse.Namespace) -> None:
         yes=getattr(args, "yes", False),
         dry_run=getattr(args, "dry_run", False),
         switch=getattr(args, "switch", False),
+        trace=trace,
     )
 
 
@@ -555,7 +568,8 @@ def _resolve_one(cfg: Config, name: list[str]) -> Repo:
         target = resolve_target(cfg, name, usage="shad git panel")
         if len(target.projects) != 1:
             names = ", ".join(p.display_name for p in target.projects)
-            raise ShadError(
+            raise ShadError.usage(
+                "ambiguous_target",
                 f"'{' '.join(name)}' matches {len(target.projects)} projects "
                 f"({names}); shad git panel shows one repository"
             )
@@ -564,6 +578,9 @@ def _resolve_one(cfg: Config, name: list[str]) -> Repo:
     try:
         return discover.discover(path)
     except discover.NotUsable as exc:
-        raise ShadError(str(exc)) from None
+        # The sync report prints a NotUsable hint on its own line; the error
+        # line is one line.
+        reason = "; ".join(line.strip() for line in str(exc).splitlines())
+        raise ShadError.not_found("no_repository", reason) from None
     except GitMissing as exc:
-        raise ShadError(str(exc)) from None
+        raise ShadError.infrastructure("git_missing", str(exc)) from None

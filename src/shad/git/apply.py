@@ -12,10 +12,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from shad.errors import ShadError
 from shad.git import discover, refs
 from shad.git.model import FastForward, FetchResult, Switch, short_branch
 from shad.git.run import T_FETCH, T_MUTATE, first_line, git
-from shad.shared.errors import ShadError
 
 
 def _run(repo: Path, args: list[str], *, timeout: float, fallback: str) -> str | None:

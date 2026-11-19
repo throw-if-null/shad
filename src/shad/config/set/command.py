@@ -9,7 +9,7 @@ from rich.text import Text
 
 from shad.config import store, toml_edit
 from shad.config.schema import PATH, coerce, field_for, infer
-from shad.shared.errors import ShadError
+from shad.errors import ShadError
 
 console = Console()
 
@@ -20,7 +20,8 @@ def set_config_value(path: Path, key: str, raw_value: str, *, force: bool) -> No
 
     if field is None:
         if not force:
-            raise ShadError(
+            raise ShadError.validation(
+                "unknown_key",
                 f"unknown key '{key}'; run 'shad config keys' to list settable keys, "
                 f"or pass --force to write it anyway"
             )
@@ -28,9 +29,9 @@ def set_config_value(path: Path, key: str, raw_value: str, *, force: bool) -> No
     else:
         value, literal = coerce(field, raw_value, key)
         if field.kind == PATH and not force and not Path(str(value)).is_dir():
-            raise ShadError(
-                f"path does not exist: {value}\n"
-                f"       pass --force to set it anyway."
+            raise ShadError.validation(
+                "path_missing",
+                f"path does not exist: {value}; pass --force to set it anyway"
             )
 
     text = store.read_text(path) if path.exists() else ""
@@ -38,7 +39,8 @@ def set_config_value(path: Path, key: str, raw_value: str, *, force: bool) -> No
 
     written = store.lookup(store.parse_or_fail(updated), parts)
     if written != value:
-        raise ShadError(
+        raise ShadError.conflict(
+            "unsafe_edit",
             f"failed to set '{key}': the file could not be edited safely; "
             f"use 'shad config edit'"
         )

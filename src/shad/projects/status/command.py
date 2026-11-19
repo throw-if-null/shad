@@ -15,9 +15,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
-import urllib.error
 import urllib.request
-import warnings
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -31,6 +29,7 @@ from shad.git.model import short_branch
 from shad.shared.config import Project
 from shad.shared.render import make_table, relative_age
 from shad.shared.tmux import list_project_sessions, tmux_server_running
+from shad.trace import Trace
 
 console = Console()
 
@@ -50,12 +49,9 @@ def _capture(args: list[str], *, cwd: Path | None = None) -> str:
 
 
 def _fetch_json(url: str, timeout: int = 4) -> object:
-    try:
-        with urllib.request.urlopen(url, timeout=timeout) as resp:
-            return json.loads(resp.read())
-    except (urllib.error.URLError, json.JSONDecodeError, OSError) as exc:
-        warnings.warn(f"shad: version fetch failed ({url}): {exc}", stacklevel=2)
-        return None
+    """The JSON at *url*. A network or decoding failure propagates to the caller."""
+    with urllib.request.urlopen(url, timeout=timeout) as resp:
+        return json.loads(resp.read())
 
 
 # ── latest version fetchers ───────────────────────────────────────────────
@@ -193,7 +189,7 @@ def _print_git(path: Path) -> None:
     console.print(t)
 
 
-def _print_runtimes(path: Path) -> None:
+def _print_runtimes(path: Path, trace: Trace) -> None:
     checks: list[tuple[str, list[str], list[str]]] = [
         (
             "python",
@@ -238,9 +234,7 @@ def _print_runtimes(path: Path) -> None:
             try:
                 latest[lbl] = future.result()
             except Exception as exc:  # noqa: BLE001 — one failed fetch must not abort the rest
-                warnings.warn(
-                    f"shad: latest version fetch failed for {lbl}: {exc}", stacklevel=2
-                )
+                trace.note(f"latest {lbl} version unknown: {exc}")
                 latest[lbl] = None
 
     def _semver(v: str) -> str:
@@ -303,7 +297,9 @@ def _print_opencode() -> None:
 # ── public entry point ────────────────────────────────────────────────────
 
 
-def print_status(project: Project) -> None:
+def print_status(project: Project, trace: Trace | None = None) -> None:
+    """The status tables on stdout. *trace* receives the version-fetch failures."""
+    trace = trace or Trace()
     console.print()
     console.print(
         Text(project.display_name, style="bold bright_white")
@@ -314,6 +310,6 @@ def print_status(project: Project) -> None:
     console.print()
     _print_git(project.path)
     console.print()
-    _print_runtimes(project.path)
+    _print_runtimes(project.path, trace)
     _print_opencode()
     console.print()

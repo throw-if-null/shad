@@ -41,6 +41,7 @@ class StatusTests(TodoCase):
         Criterion:  status-of-an-unknown-key-fails
           Given:    no item exists.
           When:     `shad todo status nothing done`.
-          Then:     exit 1, stdout empty, stderr names the key.
+          Then:     exit 1, stdout empty, stderr one line `no_such_todo:
+                    <non-empty>` naming the key.
         """
-        self.assertIn("nothing", self._fail("status", "nothing", "done"))
+        self.assertIn("nothing", self._fail("status", "nothing", "done", code="no_such_todo"))

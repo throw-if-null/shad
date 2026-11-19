@@ -7,8 +7,8 @@ from pathlib import Path
 from shad.config import store, toml_edit
 from shad.config.render import display
 from shad.config.schema import field_for
+from shad.errors import ShadError
 from shad.shared.config import load
-from shad.shared.errors import ShadError
 from shad.todo.store import todo_dir
 
 
@@ -20,7 +20,7 @@ def get_config_value(path: Path, key: str) -> None:
         value = _effective(path, parts)
 
     if value is store.MISSING:
-        raise ShadError(f"key not found: {key}")
+        raise ShadError.not_found("no_such_key", f"key not found: {key}")
 
     if isinstance(value, dict):
         for dotted, leaf in _flatten(key, value):

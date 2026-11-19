@@ -13,8 +13,10 @@ from shad.cli import (
     cmd_todo,
     main,
 )
+from shad.errors import ShadError
 from shad.shared.config import Config, Defaults, Project
-from shad.shared.errors import ShadError
+from shad.testing import TmuxCase, run
+from shad.trace import Trace
 
 
 def _make_project(
@@ -143,7 +145,8 @@ class ProjectsListTests(unittest.TestCase):
         with patch("shad.cli.print_status") as mock_status:
             cmd_projects(cfg, args)
 
-        mock_status.assert_called_once_with(project)
+        mock_status.assert_called_once()
+        self.assertIs(mock_status.call_args.args[0], project)
 
     def test_group_token_resolves_to_top_level_project_raises_helpful_error(
         self,
@@ -217,7 +220,7 @@ class ProjectsListTests(unittest.TestCase):
         cfg = Config(defaults=Defaults(), projects={"shad": project})
 
         with self.assertRaises(ShadError) as ctx:
-            _run_action(cfg, project, "restart", None)
+            _run_action(cfg, project, "restart", None, Trace())
 
         self.assertIn("unknown action", str(ctx.exception))
 
@@ -266,7 +269,8 @@ class ProjectsHarnessOverrideTests(unittest.TestCase):
         ):
             cmd_projects(cfg, args)
 
-        print_status.assert_called_once_with(project)
+        print_status.assert_called_once()
+        self.assertIs(print_status.call_args.args[0], project)
         open_project.assert_not_called()
 
     def test_parser_accepts_harness_on_the_projects_subcommand(self) -> None:
@@ -345,25 +349,128 @@ class TodoCommandTests(unittest.TestCase):
             cmd_todo(Config(defaults=Defaults()), argparse.Namespace(todo_action=None))
 
 
+class ErrorContractTests(TmuxCase):
+    """
+    Feature:    the root error contract
+    Boundary:   any command, run through main(argv) or in a terminal pane.
+                Contract: exit code + the one stderr line.
+    Assumes:    the ERR-5 taxonomy; usage -> 2, every other category -> 1.
+    """
+
+    def test_usage_error_exits_2(self) -> None:
+        """
+        Criterion:  usage-error-exits-2
+          When:     `shad projects a b c d`.
+          Then:     exit 2, stdout empty, stderr is one line
+                    `too_many_arguments: <non-empty>`.
+        """
+        self.write_config("[projects.kb]\npath = '/tmp/kb'\n")
+        result = self.run_shad("projects", "a", "b", "c", "d")
+        self.assertEqual((result.code, result.out), (2, ""), result.err)
+        self.assertRegex(result.err, r"^too_many_arguments: .+\n$")
+
+    def test_unknown_project_is_not_found(self) -> None:
+        """
+        Criterion:  unknown-project-is-not-found
+          Given:    the config has projects `kb` and `alvr db`.
+          When:     `shad projects nope status`.
+          Then:     exit 1, stdout empty, stderr is one line
+                    `no_such_project: <non-empty>`.
+        """
+        self.write_config("[projects.kb]\npath = '/tmp/kb'\n[projects.alvr.db]\npath = '/tmp/db'\n")
+        result = self.run_shad("projects", "nope", "status")
+        self.assertEqual((result.code, result.out), (1, ""), result.err)
+        self.assertRegex(result.err, r"^no_such_project: .+\n$")
+
+    def test_invalid_config_is_validation(self) -> None:
+        """
+        Criterion:  invalid-config-is-validation
+          Given:    the config file is not valid TOML.
+          When:     `shad projects`.
+          Then:     exit 1, stdout empty, stderr is one line
+                    `invalid_config: <non-empty>`, and no traceback.
+        """
+        self.write_config("[projects\n")
+        result = self.run_shad("projects")
+        self.assertEqual((result.code, result.out), (1, ""), result.err)
+        self.assertRegex(result.err, r"^invalid_config: .+\n$")
+        self.assertNotIn("Traceback", result.err)
+
+    def test_debug_adds_traceback_to_stderr_only(self) -> None:
+        """
+        Criterion:  debug-adds-traceback-to-stderr-only
+          Given:    the config file is not valid TOML.
+          When:     `shad --debug projects`, and `shad projects --debug`.
+          Then:     each exits 1, stdout empty, stderr starts with
+                    `invalid_config:` and contains `Traceback`.
+        """
+        self.write_config("[projects\n")
+        for argv in (("--debug", "projects"), ("projects", "--debug")):
+            with self.subTest(argv=argv):
+                result = self.run_shad(*argv)
+                self.assertEqual((result.code, result.out), (1, ""), result.err)
+                self.assertTrue(result.err.startswith("invalid_config: "), result.err)
+                self.assertIn("Traceback", result.err)
+
+    def test_interrupt_exits_130(self) -> None:
+        """
+        Criterion:  interrupt-exits-130
+          When:     `shad init` in a pane, then Ctrl-C at its first prompt.
+          Then:     the pane's exit status is 130 and the last line shad
+                    printed is `Aborted.`
+        """
+        pane = self.pane("init")
+        pane.wait_for("e.g. ~/gh/myproject")
+        pane.send("C-c")
+        self.assertEqual(pane.wait_exit(), 130)
+        # tmux adds its own "Pane is dead" marker under the output.
+        printed = [
+            line for line in pane.screen().splitlines()
+            if line.strip() and not line.startswith("Pane is dead")
+        ]
+        self.assertEqual(printed[-1], "Aborted.", pane.screen())
+
+
 class MainErrorHandlingTests(unittest.TestCase):
+    """
+    The paths a boundary cannot provoke: an exception of a type the model does
+    not declare, and the exit code a slice hands back. `[TEST-3]` unit tests.
+    """
+
+    def test_an_undeclared_exception_is_internal(self) -> None:
+        with patch("shad.cli.load", side_effect=RuntimeError("boom")):
+            result = run(["projects"])
+        self.assertEqual((result.code, result.out), (1, ""), result.err)
+        self.assertEqual(result.err, "unexpected: RuntimeError: boom\n")
+
+    def test_the_error_line_carries_the_code_and_the_debug_traceback(self) -> None:
+        boom = ShadError.conflict("todo_exists", "todo 'x' already exists")
+        with patch("shad.cli.load", side_effect=boom):
+            plain = run(["projects"])
+            debug = run(["--debug", "projects"])
+        self.assertEqual((plain.code, plain.err), (1, "todo_exists: todo 'x' already exists\n"))
+        self.assertEqual(debug.code, 1)
+        self.assertTrue(debug.err.startswith("todo_exists: todo 'x' already exists\n"), debug.err)
+        self.assertIn("Traceback", debug.err)
+
     def test_shad_error_exits_1(self) -> None:
         with (
-            patch("shad.cli.load", side_effect=ShadError("boom")),
-            patch("shad.cli.err_console"),
+            patch("shad.cli.load", side_effect=ShadError.internal("boom", "boom")),
+            patch("sys.stderr"),
         ):
             self.assertEqual(main(["projects"]), 1)
 
     def test_keyboard_interrupt_exits_130(self) -> None:
         with (
             patch("shad.cli.load", side_effect=KeyboardInterrupt()),
-            patch("shad.cli.err_console"),
+            patch("sys.stderr"),
         ):
             self.assertEqual(main(["projects"]), 130)
 
     def test_eof_error_exits_130(self) -> None:
         with (
             patch("shad.cli.load", side_effect=EOFError()),
-            patch("shad.cli.err_console"),
+            patch("sys.stderr"),
         ):
             self.assertEqual(main(["projects"]), 130)
 
@@ -430,8 +537,8 @@ class GitCliTests(unittest.TestCase):
     def test_git_errors_exit_one(self) -> None:
         with (
             patch("shad.cli.load", return_value=Config(defaults=Defaults())),
-            patch("shad.cli.cmd_git", side_effect=ShadError("boom")),
-            patch("shad.cli.err_console"),
+            patch("shad.cli.cmd_git", side_effect=ShadError.internal("boom", "boom")),
+            patch("sys.stderr"),
         ):
             self.assertEqual(main(["git", "sync"]), 1)
 

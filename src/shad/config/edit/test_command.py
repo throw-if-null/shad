@@ -41,19 +41,23 @@ class EditTests(ConfigCase):
         Criterion:  edit-reports-an-editor-failure
           Given:    EDITOR is `false`.
           When:     `shad config edit`.
-          Then:     exit 1, stdout empty, stderr says the editor exited.
+          Then:     exit 1, stdout empty, stderr one line `editor_failed:
+                    <non-empty>` that says the editor exited.
         """
-        self.assertIn("editor exited", self._fail("edit", env={"EDITOR": "false"}))
+        self.assertIn(
+            "editor exited", self._fail("edit", code="editor_failed", env={"EDITOR": "false"})
+        )
 
     def test_edit_reports_a_result_that_does_not_load(self) -> None:
         """
         Criterion:  edit-reports-a-result-that-does-not-load
           Given:    EDITOR is a command that sets oc_position to "sideways".
           When:     `shad config edit`.
-          Then:     exit 1, stdout empty, stderr names `sideways`, and the
-                    edited file is kept as the editor left it.
+          Then:     exit 1, stdout empty, stderr one line `invalid_config:
+                    <non-empty>` that names `sideways`, and the edited file is
+                    kept as the editor left it.
         """
-        err = self._fail("edit", env={"EDITOR": "sed -i s/top/sideways/"})
+        err = self._fail("edit", code="invalid_config", env={"EDITOR": "sed -i s/top/sideways/"})
         self.assertIn("sideways", err)
         self.assertIn('oc_position   = "sideways"', self.path.read_text())
 
@@ -62,6 +66,6 @@ class EditTests(ConfigCase):
         Criterion:  edit-prefers-visual-to-editor
           Given:    VISUAL is `false` and EDITOR is `true`.
           When:     `shad config edit`.
-          Then:     exit 1: the VISUAL command ran.
+          Then:     exit 1 with `editor_failed`: the VISUAL command ran.
         """
-        self._fail("edit", env={"VISUAL": "false", "EDITOR": "true"})
+        self._fail("edit", code="editor_failed", env={"VISUAL": "false", "EDITOR": "true"})

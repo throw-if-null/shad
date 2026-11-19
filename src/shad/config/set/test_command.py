@@ -35,21 +35,25 @@ class SetTests(ConfigCase):
         Criterion:  set-rejects-an-invalid-value-and-leaves-the-file-unchanged
           Given:    shad.toml sets oc_position = "top".
           When:     `shad config set defaults.oc_position sideways`.
-          Then:     exit 1, stdout empty, stderr lists the allowed values,
-                    and the file is byte-identical.
+          Then:     exit 1, stdout empty, stderr one line `invalid_value:
+                    <non-empty>` that lists the allowed values, and the file
+                    is byte-identical.
         """
         before = self.path.read_text()
-        self.assertIn("must be one of", self._fail("set", "defaults.oc_position", "sideways"))
+        self.assertIn(
+            "must be one of",
+            self._fail("set", "defaults.oc_position", "sideways", code="invalid_value"),
+        )
         self.assertEqual(self.path.read_text(), before)
 
     def test_rejects_a_percent_out_of_range(self) -> None:
-        self._fail("set", "defaults.split_percent", "200")
+        self._fail("set", "defaults.split_percent", "200", code="invalid_value")
 
     def test_rejects_a_non_integer_percent(self) -> None:
-        self._fail("set", "defaults.panel_percent", "wide")
+        self._fail("set", "defaults.panel_percent", "wide", code="invalid_value")
 
     def test_rejects_a_zero_todo_percent(self) -> None:
-        self._fail("set", "defaults.todo_percent", "0")
+        self._fail("set", "defaults.todo_percent", "0", code="invalid_value")
 
     def test_writes_a_panel_switch_as_a_toml_boolean(self) -> None:
         self._run("set", "defaults.git_panel", "False")
@@ -57,24 +61,27 @@ class SetTests(ConfigCase):
         self.assertIn("git_panel = false", self.path.read_text())
 
     def test_rejects_a_panel_switch_that_is_not_true_or_false(self) -> None:
-        self.assertIn("true or false", self._fail("set", "defaults.todo_panel", "off"))
+        self.assertIn(
+            "true or false", self._fail("set", "defaults.todo_panel", "off", code="invalid_value")
+        )
 
     def test_set_of_an_unknown_key_fails_unless_forced(self) -> None:
         """
         Criterion:  set-of-an-unknown-key-fails-unless-forced
           When:     `shad config set defaults.nope 7`, then the same with
                     `--force`.
-          Then:     the first exits 1 with stdout empty and stderr naming the
-                    unknown key; the second exits 0 and writes 7 as an
-                    integer.
+          Then:     the first exits 1 with stdout empty and stderr one line
+                    `unknown_key: <non-empty>` naming the key; the second
+                    exits 0 and writes 7 as an integer.
         """
-        self.assertIn("unknown key", self._fail("set", "defaults.nope", "7"))
+        self.assertIn("unknown key", self._fail("set", "defaults.nope", "7", code="unknown_key"))
         self._run("set", "--force", "defaults.nope", "7")
         self.assertEqual(self._raw()["defaults"]["nope"], 7)
 
     def test_rejects_a_missing_project_path(self) -> None:
         self.assertIn(
-            "path does not exist", self._fail("set", "projects.kb.path", str(self.root / "gone"))
+            "path does not exist",
+            self._fail("set", "projects.kb.path", str(self.root / "gone"), code="path_missing"),
         )
 
     def test_a_forced_missing_project_path_is_written(self) -> None:
@@ -101,7 +108,8 @@ class SetTests(ConfigCase):
 
     def test_rejects_a_missing_todo_path(self) -> None:
         self.assertIn(
-            "path does not exist", self._fail("set", "todo.path", str(self.root / "gone"))
+            "path does not exist",
+            self._fail("set", "todo.path", str(self.root / "gone"), code="path_missing"),
         )
 
     def test_creates_a_new_project_table(self) -> None:
@@ -117,20 +125,31 @@ class SetTests(ConfigCase):
           When:     `shad config set projects.fresh.path <root>/kb`, and
                     `shad config set --force projects.alvr.db.path <root>/kb`,
                     and `shad config set projects.grp.sub.session x`.
-          Then:     each exits 1 with stdout empty and stderr naming the
-                    problem, and the file is byte-identical after each.
+          Then:     each exits 1 with stdout empty and stderr one line
+                    `invalid_config: <non-empty>` naming the problem, and the
+                    file is byte-identical after each.
         """
         before = self.path.read_text()
         self.assertIn(
-            "both point at", self._fail("set", "projects.fresh.path", str(self.root / "kb"))
+            "both point at",
+            self._fail("set", "projects.fresh.path", str(self.root / "kb"), code="invalid_config"),
         )
         self.assertEqual(self.path.read_text(), before)
         self.assertIn(
             "both point at",
-            self._fail("set", "--force", "projects.alvr.db.path", str(self.root / "kb")),
+            self._fail(
+                "set",
+                "--force",
+                "projects.alvr.db.path",
+                str(self.root / "kb"),
+                code="invalid_config",
+            ),
         )
         self.assertEqual(self.path.read_text(), before)
-        self.assertIn("set its 'path' first", self._fail("set", "projects.grp.sub.session", "x"))
+        self.assertIn(
+            "set its 'path' first",
+            self._fail("set", "projects.grp.sub.session", "x", code="invalid_config"),
+        )
         self.assertEqual(self.path.read_text(), before)
 
     def test_set_keeps_the_file_mode_and_leaves_no_temporary_file(self) -> None:

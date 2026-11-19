@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 
-from shad.shared.errors import ShadError
+from shad.errors import ShadError
 
 _FALLBACKS = ("nvim", "vim", "vi", "nano")
 
@@ -18,4 +18,4 @@ def resolve_editor() -> str:
     for candidate in _FALLBACKS:
         if shutil.which(candidate):
             return candidate
-    raise ShadError("no editor found; set $EDITOR")
+    raise ShadError.infrastructure("no_editor", "no editor found; set $EDITOR")

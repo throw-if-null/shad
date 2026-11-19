@@ -5,8 +5,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from shad.errors import ShadError
 from shad.git import run
-from shad.shared.errors import ShadError
 
 REPO = Path("/tmp/repo")
 

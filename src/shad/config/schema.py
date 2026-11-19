@@ -19,8 +19,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from shad.config.toml_edit import format_value
+from shad.errors import ShadError
 from shad.shared.config import HARNESSES, OC_POSITIONS
-from shad.shared.errors import ShadError
 
 ENUM = "enum"
 BOOL = "bool"
@@ -118,7 +118,8 @@ def coerce(field: Field, raw: str, key: str) -> tuple[object, str]:
     if field.kind == ENUM:
         lowered = value.lower()
         if lowered not in field.choices:
-            raise ShadError(
+            raise ShadError.validation(
+                "invalid_value",
                 f"invalid value for '{key}': {raw!r}; "
                 f"must be one of: {', '.join(field.choices)}"
             )
@@ -127,7 +128,9 @@ def coerce(field: Field, raw: str, key: str) -> tuple[object, str]:
     if field.kind == BOOL:
         lowered = value.lower()
         if lowered not in ("true", "false"):
-            raise ShadError(f"invalid value for '{key}': {raw!r}; must be true or false")
+            raise ShadError.validation(
+                "invalid_value", f"invalid value for '{key}': {raw!r}; must be true or false"
+            )
         flag = lowered == "true"
         return flag, format_value(flag)
 
@@ -135,24 +138,30 @@ def coerce(field: Field, raw: str, key: str) -> tuple[object, str]:
         try:
             number = int(value)
         except ValueError:
-            raise ShadError(
+            raise ShadError.validation(
+                "invalid_value",
                 f"invalid value for '{key}': {raw!r}; expected an integer"
             ) from None
         if not 1 <= number <= 99:
-            raise ShadError(
+            raise ShadError.validation(
+                "invalid_value",
                 f"invalid value for '{key}': {number}; must be between 1 and 99"
             )
         return number, format_value(number)
 
     if field.kind == PATH:
         if not value:
-            raise ShadError(f"invalid value for '{key}': path must not be empty")
+            raise ShadError.validation(
+                "invalid_value", f"invalid value for '{key}': path must not be empty"
+            )
         expanded = Path(value).expanduser()
         resolved = str(expanded.resolve() if expanded.is_absolute() or expanded.exists() else expanded)
         return resolved, format_value(resolved)
 
     if not value:
-        raise ShadError(f"invalid value for '{key}': value must not be empty")
+        raise ShadError.validation(
+            "invalid_value", f"invalid value for '{key}': value must not be empty"
+        )
     return value, format_value(value)
 
 

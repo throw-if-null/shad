@@ -7,7 +7,6 @@ import sqlite3
 import tempfile
 import unittest
 import uuid
-import warnings
 from pathlib import Path
 from unittest.mock import patch
 
@@ -16,6 +15,7 @@ from rich.console import Console
 from shad.projects.open.sessions import (
     OcSession,
     OpencodeTarget,
+    Unreadable,
     _query_claude_sessions,
     _query_sessions,
     _render_picker,
@@ -80,6 +80,21 @@ class PickOpencodeTargetTests(unittest.TestCase):
             target = pick_opencode_target(Path("/tmp/project"), "opencode")
 
         self.assertIsNone(target)
+
+    def test_an_unreadable_store_is_shown_in_the_picker(self) -> None:
+        with (
+            patch(
+                "shad.projects.open.sessions._query_sessions",
+                side_effect=Unreadable("could not read the opencode session database: boom"),
+            ),
+            patch("shad.projects.open.sessions._run_picker", return_value=0) as picker,
+        ):
+            target = pick_opencode_target(Path("/tmp/project"), "opencode")
+
+        assert target is not None
+        self.assertTrue(target.fresh)
+        self.assertEqual(picker.call_args.args[0], [])
+        self.assertIn("boom", picker.call_args.kwargs["note"])
 
     def test_returns_second_session_when_index_2_selected(self) -> None:
         s1 = OcSession(id="aaa", title="First", time_updated=1000)
@@ -157,7 +172,7 @@ class QuerySessionsTests(unittest.TestCase):
             result = _query_sessions(Path("/tmp/project"))
         self.assertEqual(result, [])
 
-    def test_returns_empty_list_and_warns_on_db_error(self) -> None:
+    def test_raises_unreadable_on_db_error(self) -> None:
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
             f.write(b"not a valid sqlite database")
             bad_db = Path(f.name)
@@ -165,19 +180,10 @@ class QuerySessionsTests(unittest.TestCase):
         try:
             with (
                 patch("shad.projects.open.sessions.DB_PATH", bad_db),
-                warnings.catch_warnings(record=True) as caught,
+                self.assertRaises(Unreadable) as ctx,
             ):
-                warnings.simplefilter("always")
-                result = _query_sessions(Path("/tmp/project"))
-
-            self.assertEqual(result, [])
-            self.assertTrue(
-                any(
-                    "could not read opencode session DB" in str(w.message)
-                    for w in caught
-                ),
-                "Expected a warning about the DB",
-            )
+                _query_sessions(Path("/tmp/project"))
+            self.assertIn("could not read the opencode session database", str(ctx.exception))
         finally:
             bad_db.unlink(missing_ok=True)
 

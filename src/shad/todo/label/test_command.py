@@ -52,11 +52,13 @@ class LabelTests(TodoCase):
         Criterion:  label-add-rejects-a-duplicate-and-a-bad-name
           When:     `shad todo label add chore`, and
                     `shad todo label add "Not Valid"`.
-          Then:     each exits 1 with stdout empty and stderr naming the
-                    label, and the vocabulary is unchanged.
+          Then:     each exits 1 with stdout empty; the first is one line
+                    `label_exists: <non-empty>`, the second one line
+                    `invalid_label: <non-empty>`, each naming the label, and
+                    the vocabulary is unchanged.
         """
-        self.assertIn("chore", self._fail("label", "add", "chore"))
-        self.assertIn("Not Valid", self._fail("label", "add", "Not Valid"))
+        self.assertIn("chore", self._fail("label", "add", "chore", code="label_exists"))
+        self.assertIn("Not Valid", self._fail("label", "add", "Not Valid", code="invalid_label"))
         self.assertEqual(self._run("label", "list"), "chore\npoc\n")
 
     def test_label_rm_removes_an_unused_label(self) -> None:
@@ -74,11 +76,12 @@ class LabelTests(TodoCase):
         Criterion:  label-rm-refuses-a-label-in-use-unless-forced
           Given:    one item carries poc.
           When:     `shad todo label rm poc`, then the same with `--force`.
-          Then:     the first exits 1 with stdout empty and stderr counting
-                    one item; the second exits 0 and removes the label.
+          Then:     the first exits 1 with stdout empty and stderr one line
+                    `label_in_use: <non-empty>` counting one item; the second
+                    exits 0 and removes the label.
         """
         self._run("add", "Uses it", "--label", "poc")
-        self.assertIn("1 item(s)", self._fail("label", "rm", "poc"))
+        self.assertIn("1 item(s)", self._fail("label", "rm", "poc", code="label_in_use"))
         self._run("label", "rm", "poc", "--force")
         self.assertEqual(self._run("label", "list"), "chore\n")
 
@@ -86,12 +89,13 @@ class LabelTests(TodoCase):
         notes = self.root / "notes"
         self.config.write_text(f'{CONFIG.format(root=self.root)}path = "{notes}"\n')
         self._run("add", "Uses it", "--label", "poc")
-        self.assertIn("1 item(s)", self._fail("label", "rm", "poc"))
+        self.assertIn("1 item(s)", self._fail("label", "rm", "poc", code="label_in_use"))
 
     def test_label_rm_of_an_unknown_label_fails(self) -> None:
         """
         Criterion:  label-rm-of-an-unknown-label-fails
           When:     `shad todo label rm nope`.
-          Then:     exit 1, stdout empty, stderr names the label.
+          Then:     exit 1, stdout empty, stderr one line `no_such_label:
+                    <non-empty>` naming the label.
         """
-        self.assertIn("nope", self._fail("label", "rm", "nope"))
+        self.assertIn("nope", self._fail("label", "rm", "nope", code="no_such_label"))

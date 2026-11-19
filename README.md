@@ -323,6 +323,26 @@ shad config unset projects.kb
 shad config edit
 ```
 
+### Exit codes and errors
+
+Every command exits `0` on success, `2` on an invalid invocation, and `1` on every other
+failure. A failure prints one line on stderr, `<code>: <message>`, and nothing on stdout:
+
+```
+$ shad projects nope status
+no_such_project: no project or group matching 'nope'
+$ echo $?
+1
+```
+
+`code` is a stable word a script can match on; the message is for people and may change.
+Nothing else is printed on stderr by default. `--debug`, given before or after the subcommand,
+adds the traceback of the failure and shad's diagnostics (a version fetch that failed, a
+`git sync` project that failed) to stderr. stdout is the same with and without it.
+
+Ctrl-C prints `Aborted.` and exits `130`. A command that hands the terminal to tmux, `shad
+projects <name>` and `shad sessions restore`, exits with tmux's exit status once you detach.
+
 ## Git maintenance
 
 `shad git sync` brings repositories up to date and clears out branches and
@@ -921,10 +941,11 @@ shad/
         │   │   └── command.py
         │   └── stop/
         │       └── command.py
+        ├── errors.py
+        ├── trace.py
         ├── shared/
         │   ├── config.py
         │   ├── editor.py
-        │   ├── errors.py
         │   ├── picker.py
         │   ├── render.py
         │   ├── terminal.py
