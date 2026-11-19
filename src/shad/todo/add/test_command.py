@@ -178,57 +178,40 @@ class AddInEditorTests(TodoTerminalCase):
         self.assertEqual(self.keys(), [])
         self.assertFalse(draft.exists())
 
-    def test_an_invalid_draft_reopens_after_confirmation(self) -> None:
+    def test_a_rejected_draft_reopens_with_the_error(self) -> None:
         """
-        Criterion:  an-invalid-draft-reopens-after-confirmation
+        Criterion:  add-rejected-draft-reopens-with-the-error
           Given:    EDITOR saves a draft with an unknown label, then a valid
                     one.
-          When:     `shad todo add` in a terminal, and `y` at "Edit again?".
-          Then:     exit 0, the editor received the same file twice with the
-                    typed text kept, the item exists, and the draft is gone.
+          When:     `shad todo add` in a terminal.
+          Then:     exit 0 with no prompt, the editor reopens the same file,
+                    the reopened draft carries the rejection reason as '#'
+                    comment lines above the typed text, the item exists, and
+                    the draft is gone.
         """
         bad = DRAFT.replace("labels: chore", "labels: nope")
         editor = self.editor(bad, DRAFT)
         pane = self.pane("todo", "add")
-        pane.wait_for("Edit again?")
-        pane.send("y", "Enter")
         self.assertEqual(pane.wait_exit(), 0)
         shown = editor.shown()
-        self.assertEqual(shown[1], (shown[0][0], bad))
+        self.assertEqual(len(shown), 2)
+        self.assertEqual(shown[1][0], shown[0][0])
+        reopened = shown[1][1]
+        self.assertIn("# !", reopened)
+        self.assertIn("nope", reopened)
+        self.assertIn("The resize handler fires twice.", reopened)
         self.assertEqual(self.keys(), ["fix-panel-resize"])
         self.assertFalse(shown[0][0].exists())
 
-    def test_a_body_without_a_title_is_not_discarded(self) -> None:
+    def test_a_body_without_a_title_reopens_and_is_not_discarded(self) -> None:
         untitled = DRAFT.replace("Fix panel resize", "")
         editor = self.editor(untitled, DRAFT)
         pane = self.pane("todo", "add")
-        pane.wait_for("Edit again?")
-        pane.send("y", "Enter")
         self.assertEqual(pane.wait_exit(), 0)
-        self.assertEqual(editor.shown()[1][1], untitled)
+        reopened = editor.shown()[1][1]
+        self.assertIn("The resize handler fires twice.", reopened)
+        self.assertIn("# !", reopened)
         self.assertEqual(self.keys(), ["fix-panel-resize"])
-
-    def test_declining_to_edit_again_keeps_the_draft(self) -> None:
-        """
-        Criterion:  declining-to-edit-again-keeps-the-draft
-          Given:    EDITOR saves a draft with an unknown status.
-          When:     `shad todo add` in a terminal, and `n` at "Edit again?".
-          Then:     exit 1, the screen holds one line `draft_rejected:
-                    <non-empty>` naming the kept draft, the draft holds the
-                    typed text, and no item exists.
-        """
-        bad = DRAFT.replace("status: todo", "status: doing")
-        editor = self.editor(bad)
-        pane = self.pane("todo", "add")
-        pane.wait_for("Edit again?")
-        pane.send("n", "Enter")
-        self.assertEqual(pane.wait_exit(), 1)
-        [(draft, _)] = editor.shown()
-        self.addCleanup(draft.unlink, missing_ok=True)
-        self.assertIn("draft_rejected: ", pane.screen())
-        self.assertIn(str(draft), pane.screen())
-        self.assertEqual(draft.read_text(), bad)
-        self.assertEqual(self.keys(), [])
 
     def test_a_failing_editor_creates_nothing(self) -> None:
         """

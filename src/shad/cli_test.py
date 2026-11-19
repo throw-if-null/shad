@@ -14,7 +14,7 @@ from shad.projects import command as projects
 from shad.sessions.restore import command as restore
 from shad.sessions.show import command as sessions_show
 from shad.testing import TmuxCase, run
-from shad.todo.label import command as label
+from shad.todo.label.list import command as label_list
 from shad.todo.list import command as todo_list
 
 
@@ -30,7 +30,7 @@ class ParserRegistrationTests(unittest.TestCase):
             (["config"], config_show.run),
             (["config", "show"], config_show.run),
             (["todo", "list"], todo_list.run),
-            (["todo", "label", "list"], label.run_list),
+            (["todo", "label", "list"], label_list.run),
             (["sessions", "show"], sessions_show.run),
             (["sessions", "restore"], restore.run),
             (["cheat"], cheat.run),

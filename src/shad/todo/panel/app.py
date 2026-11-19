@@ -35,7 +35,7 @@ from shad.errors import ShadError
 from shad.output import Output
 from shad.style import relative_age
 from shad.todo import add_in_editor, edit_in_editor, remove, set_status, store
-from shad.todo.model import Item, Status, problems
+from shad.todo.model import Item, Status, problems, sort_key
 from shad.todo.render import labels_text, status_glyph, status_word, title_text
 
 POLL_SECONDS = 1.0
@@ -100,12 +100,23 @@ class TodoPanel(App[None]):
 
     # ── data ──────────────────────────────────────────────────────────────
 
+    def _load_items(self) -> list[Item]:
+        """Every item in the directory, in display order. A file removed between
+        the listing and its read is skipped."""
+        items: list[Item] = []
+        for key in store.keys(self._directory):
+            try:
+                items.append(store.read_item(self._directory, key))
+            except ShadError:
+                continue
+        return sorted(items, key=sort_key)
+
     def load(self) -> None:
         """Re-read the directory and redraw, keeping the cursor on the same item."""
         table: DataTable[Text] = self.query_one("#items", DataTable)
         current = self.current_key()
         self._signature = store.signature(self._directory)
-        items = store.list_items(self._directory)
+        items = self._load_items()
         self._items = {item.key: item for item in items}
 
         table.clear()

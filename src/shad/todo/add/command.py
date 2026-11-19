@@ -12,7 +12,6 @@ import sys
 import tempfile
 from pathlib import Path
 
-from rich.prompt import Confirm
 from rich.text import Text
 
 from shad import parsers
@@ -55,6 +54,18 @@ def run(args: argparse.Namespace, deps: Deps) -> None:
     )
 
 
+_DRAFT_ERROR = "# ! "
+
+
+def _annotate(text: str, message: str) -> str:
+    """Put *message* at the top of the draft as '#' comment lines, replacing
+    any left by a previous rejection. parse() skips them, and they stay in the
+    header block because no blank line separates them from the headers."""
+    kept = [line for line in text.split("\n") if not line.startswith(_DRAFT_ERROR)]
+    banner = [f"{_DRAFT_ERROR}{line}" for line in message.split("\n")]
+    return "\n".join(banner + kept)
+
+
 def add_in_editor(
     directory: Path, labels: list[str], vocabulary: list[str], out: Output, editor: Editor
 ) -> Item:
@@ -64,11 +75,12 @@ def add_in_editor(
 
     The draft is in the temporary directory, not in the item directory, so the
     list and the panel never show an unfinished draft. When store.add rejects
-    the draft, the editor opens it again on request. The draft file is kept
-    when the user declines.
+    the draft, the reason is written at the top of the draft as '#' comment
+    lines and the editor opens again, until the draft is valid or left empty.
+    There is no prompt.
 
-    The editor and the prompt use the terminal, so a textual caller must
-    suspend the app around this call.
+    The editor uses the terminal, so a textual caller must suspend the app
+    around this call.
     """
     if not sys.stdin.isatty():
         raise ShadError.infrastructure(
@@ -81,11 +93,11 @@ def add_in_editor(
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
         fh.write(template(labels, vocabulary))
 
-    keep = False
     try:
         while True:
             editor.open(draft)
-            fields = parse(draft.read_text(encoding="utf-8", errors="replace"), key="")
+            text = draft.read_text(encoding="utf-8", errors="replace")
+            fields = parse(text, key="")
             if not fields.title and not fields.body.strip():
                 raise ShadError.validation("empty_todo", "empty title and body; no todo created")
             try:
@@ -100,12 +112,6 @@ def add_in_editor(
                 )
             except ShadError as exc:
                 out.note(Text(f"  ✗ {exc}", style="bold red"))
-                if Confirm.ask("  Edit again?", default=True):
-                    continue
-                keep = True
-                raise ShadError.validation(
-                    "draft_rejected", f"no todo created; the draft is kept in {draft}"
-                ) from None
+                draft.write_text(_annotate(text, str(exc)), encoding="utf-8")
     finally:
-        if not keep:
-            draft.unlink(missing_ok=True)
+        draft.unlink(missing_ok=True)
