@@ -260,9 +260,12 @@ shad init
 shad projects
 shad projects --json
 
-# Open a top-level project (exact or prefix match)
+# Open a top-level project (a new conversation by default)
 shad projects kb
 shad projects k         # prefix: resolves to kb if unambiguous
+shad projects kb --resume          # resume the most recent conversation
+shad projects kb --resume <id>     # resume a specific conversation
+shad projects kb --pick            # choose a conversation in a picker
 
 # List sub-projects in a group
 shad projects alvr

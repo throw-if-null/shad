@@ -9,13 +9,13 @@ from __future__ import annotations
 
 import re
 import shutil
-from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
 from rich.panel import Panel
 from rich.text import Text
 
+from shad.errors import ShadError
 from shad.harness import (
     Harness,
     Recorded,
@@ -122,10 +122,7 @@ def _run_picker(
             _render_picker(sessions, selected, project_name, label, note), term_width
         )
 
-    try:
-        return pick_one(render, len(items))
-    except NoTerminal:
-        return None
+    return pick_one(render, len(items))
 
 
 # ── Public API ─────────────────────────────────────────────────────────────
@@ -139,11 +136,16 @@ def pick_target(harness: Harness, project_path: Path, base_cmd: str) -> Target |
     recorded conversation the target is a fresh one without a picker. A
     session store that cannot be read is reported in the picker instead.
     """
-    sessions, note = _query_or_note(harness.recorded, project_path)
+    sessions, note = recorded_or_note(harness, project_path)
     if not sessions and note is None:
         return fresh_target(harness, base_cmd)
 
-    chosen = _run_picker(sessions, project_path.name, label=harness.name, note=note)
+    try:
+        chosen = _run_picker(sessions, project_path.name, label=harness.name, note=note)
+    except NoTerminal as exc:
+        raise ShadError.infrastructure(
+            "no_terminal", f"no terminal to open the picker in; {exc}"
+        ) from None
     if chosen is None:
         return None  # user cancelled — caller should abort
     if chosen == 0:
@@ -151,11 +153,11 @@ def pick_target(harness: Harness, project_path: Path, base_cmd: str) -> Target |
     return resume_target(harness, base_cmd, sessions[chosen - 1].id)
 
 
-def _query_or_note(
-    query: Callable[[Path], list[Recorded]], project_path: Path
+def recorded_or_note(
+    harness: Harness, project_path: Path
 ) -> tuple[list[Recorded], str | None]:
-    """*query*'s sessions, or no sessions and the reason the store could not be read."""
+    """*harness*'s recorded conversations, or none and why the store could not be read."""
     try:
-        return query(project_path), None
+        return harness.recorded(project_path), None
     except Unreadable as exc:
         return [], str(exc)

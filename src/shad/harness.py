@@ -19,7 +19,6 @@ import json
 import os
 import re
 import sqlite3
-import time
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -425,13 +424,13 @@ def fresh_target(harness: Harness, base_cmd: str) -> Target:
     shad choose the id gets one, and the tmux session name is derived from
     it, so `shad sessions save` can map the session back to its
     conversation even without the harness's own process record. A harness
-    that assigns its own id gets a key made of the moment, which names the
-    tmux session and nothing else.
+    that assigns its own id gets a unique `fresh-<hex>` key, which names
+    the tmux session and nothing else, so two opens cannot collide.
     """
     session_id = harness.new_session_id()
     return Target(
         command=harness.fresh_command(base_cmd, session_id),
-        session_key=session_id or f"fresh-{int(time.time())}",
+        session_key=session_id or f"fresh-{uuid.uuid4().hex}",
         fresh=True,
         session_prefix=harness.prefix,
     )
