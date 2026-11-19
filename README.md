@@ -902,6 +902,34 @@ No other binary is required for the git pane. Earlier versions ran
 [gitui](https://github.com/gitui-org/gitui) there; `shad git panel` replaces
 it, so `gitui` can be uninstalled if nothing else uses it.
 
+## Trust boundary
+
+`shad` is a single-user tool. It trusts the person who runs it and the files
+that person owns: `shad.toml`, the todo files, and the saved-sessions
+snapshot. A mistake in one of those is a configuration error, reported as
+such; it is not a security boundary.
+
+`shad` does not trust what other programs and the network produce, and it
+validates each at the point it reads it:
+
+- **Conversation ids** come from the snapshot and from Claude Code's process
+  records. An id becomes part of the command line a harness pane runs, so a
+  value that is not a conversation id (a UUID) is rejected where it is read:
+  the snapshot fails to load with `invalid_snapshot`, and a process record
+  with a malformed `sessionId` is ignored. No file-sourced id reaches a pane.
+- **Claude Code transcripts and process records, and the opencode database**
+  are parsed defensively: a line that is not the expected shape is skipped,
+  not trusted, and a store that cannot be read is reported rather than
+  assumed empty.
+- **Network responses** (the latest-version lookups in `shad projects <name>
+  status`) are advisory. A failed or unexpected response leaves the version
+  blank; it never changes what a command does.
+
+`shad init --install-deps` downloads a pinned `opencode` release and runs as
+root. It checks the archive against a known SHA-256 before installing and
+refuses architectures other than x86_64, so a tampered download does not
+install.
+
 ## Project structure
 
 ```

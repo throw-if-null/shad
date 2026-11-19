@@ -12,7 +12,7 @@ from shad.sessions.model import Entry, Snapshot
 
 _SNAPSHOT = Snapshot(
     saved_at=1700000000,
-    entries=(Entry(group=None, key="kb", harness="claude", session_id="uuid-a", attached=True),),
+    entries=(Entry(group=None, key="kb", harness="claude", session_id="11111111-1111-4111-8111-111111111111", attached=True),),
 )
 
 

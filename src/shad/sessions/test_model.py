@@ -6,9 +6,11 @@ import unittest
 from shad.errors import ShadError
 from shad.sessions.model import FORMAT, Entry, Snapshot, parse, serialize
 
+_UUID_A = "11111111-1111-4111-8111-111111111111"
+
 _ENTRIES = (
     Entry(
-        group="tin", key="shad", harness="claude", session_id="uuid-a", attached=True,
+        group="tin", key="shad", harness="claude", session_id=_UUID_A, attached=True,
         name="Releaser", title="first prompt",
     ),
     Entry(group=None, key="kb", harness="claude", session_id=None, attached=False),
@@ -30,7 +32,7 @@ class RoundTripTests(unittest.TestCase):
                 "group": "tin",
                 "key": "shad",
                 "harness": "claude",
-                "session_id": "uuid-a",
+                "session_id": _UUID_A,
                 "attached": True,
                 "name": "Releaser",
                 "title": "first prompt",
@@ -70,6 +72,18 @@ class ParseRejectionTests(unittest.TestCase):
     def test_rejects_an_entry_without_a_harness(self) -> None:
         raw = {"format": FORMAT, "saved_at": 1, "sessions": [{"key": "kb"}]}
         self._rejects(json.dumps(raw), "no harness")
+
+    def test_rejects_a_non_uuid_session_id(self) -> None:
+        # The id becomes part of a harness command line, so a shell-injection
+        # payload is rejected at the read, not typed into a pane.
+        raw = {
+            "format": FORMAT,
+            "saved_at": 1,
+            "sessions": [
+                {"key": "kb", "harness": "claude", "session_id": "x; touch /tmp/pwned"}
+            ],
+        }
+        self._rejects(json.dumps(raw), "invalid session_id")
 
     def test_rejects_a_non_string_session_id(self) -> None:
         raw = {

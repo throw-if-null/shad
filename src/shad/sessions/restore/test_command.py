@@ -109,6 +109,23 @@ class RestoreTests(SessionsCase):
         self.assertRegex(result.err, r"^no_snapshot: .+\n$")
         self.assertIn("no saved sessions", result.err)
 
+    def test_a_malformed_saved_id_is_rejected(self) -> None:
+        """
+        Criterion:  malformed-saved-id-is-rejected
+          Given:    the snapshot carries session_id = `x; touch <pwned>` for
+                    kb, a value that is not a conversation id.
+          When:     `shad sessions restore --no-attach`.
+          Then:     exit 1, stdout empty, stderr one line `invalid_snapshot:
+                    <non-empty>`, and no session and no marker file created.
+        """
+        pwned = self.root / "pwned"
+        self.write_snapshot(entry("kb", f"x; touch {pwned}"))
+        result = self.run_detached("sessions", "restore", "--no-attach")
+        self.assertEqual((result.code, result.out), (1, ""), result.err)
+        self.assertRegex(result.err, r"^invalid_snapshot: .+\n$")
+        self.assertEqual(self.server.sessions(), [])
+        self.assertFalse(pwned.exists())
+
     def test_restore_attaches_to_the_session_attached_at_save(self) -> None:
         """
         Criterion:  restore-attaches-to-the-session-attached-at-save

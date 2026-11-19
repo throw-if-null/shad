@@ -340,7 +340,7 @@ class Claude:
                 continue
             pid = data.get("pid")
             session_id = data.get("sessionId")
-            if not isinstance(pid, int) or not isinstance(session_id, str) or not session_id:
+            if not isinstance(pid, int) or not isinstance(session_id, str) or not is_uuid(session_id):
                 continue
             if not _alive(pid):
                 continue
