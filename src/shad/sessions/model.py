@@ -16,6 +16,7 @@ import json
 from dataclasses import asdict, dataclass
 
 from shad.errors import ShadError
+from shad.harness import is_uuid
 
 FORMAT = 1
 
@@ -93,7 +94,9 @@ def parse(text: str) -> Snapshot:
             )
         if not isinstance(harness, str) or not harness:
             raise ShadError.validation("invalid_snapshot", f"saved session {index} has no harness")
-        if session_id is not None and not isinstance(session_id, str):
+        # The id becomes part of the command line a harness pane runs, so a
+        # non-uuid value is rejected here rather than typed into a shell.
+        if session_id is not None and (not isinstance(session_id, str) or not is_uuid(session_id)):
             raise ShadError.validation(
                 "invalid_snapshot", f"saved session {index} has an invalid session_id"
             )
