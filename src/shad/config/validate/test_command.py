@@ -1,14 +1,40 @@
 from __future__ import annotations
 
+import json
+
 from shad.config.testing import ConfigCase
 
 
 class ValidateTests(ConfigCase):
     """
     Feature:    config/validate
-    Boundary:   command. `shad config validate`, through main(argv) with
-                SHAD_CONFIG set. Contract: exit code + stdout + stderr.
+    Boundary:   command. `shad config validate [--json]`, through main(argv)
+                with SHAD_CONFIG set. Contract: exit code + stdout + stderr.
     """
+
+    def test_validate_json_reports_the_counts(self) -> None:
+        """
+        Criterion:  validate-json-reports-the-counts
+          Given:    shad.toml holds the projects kb and alvr db.
+          When:     `shad config validate --json`.
+          Then:     exit 0, stderr empty, stdout is one JSON object with
+                    `path`, `valid` true, `projects` 2 and `groups` 1.
+        """
+        self.assertEqual(
+            json.loads(self._run("validate", "--json")),
+            {"path": str(self.path), "valid": True, "projects": 2, "groups": 1},
+        )
+
+    def test_validate_json_of_a_bad_config_is_the_error_line(self) -> None:
+        """
+        Criterion:  validate-json-of-a-bad-config-is-the-error-line
+          Given:    shad.toml sets oc_position = "sideways".
+          When:     `shad config validate --json`.
+          Then:     exit 1, stdout empty, stderr one line `invalid_config:
+                    <non-empty>`: a failure is never JSON.
+        """
+        self.path.write_text('[defaults]\noc_position = "sideways"\n')
+        self._fail("validate", "--json", code="invalid_config")
 
     def test_validate_accepts_a_good_config(self) -> None:
         """

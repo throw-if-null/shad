@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import unittest
 from pathlib import Path
 from typing import Any
@@ -10,9 +11,15 @@ from shad.git import apply, refs
 from shad.git import command as C
 from shad.git.model import BranchInfo, ProjectOutcome, ProjectPlan, Repo, WorktreeInfo
 from shad.git.testing import GitCase, git, words
+from shad.output import Output
 from shad.shared.config import Project
 
 ROOT = Path("/tmp/repo")
+
+
+def _out() -> Output:
+    """An Output nothing reads: these tests assert on the run, not the report."""
+    return Output(stdout=io.StringIO(), stderr=io.StringIO())
 
 
 def _project(key: str, group: str | None = None) -> Project:
@@ -83,12 +90,11 @@ class SyncGateTests(unittest.TestCase):
             patch.object(C, "_resolve", side_effect=_resolve_all),
             patch.object(C, "fetch_and_plan", return_value=self.plan),
             patch.object(C, "report"),
-            patch.object(C, "console"),
             patch.object(C, "apply_plan") as apply_plan,
             patch.object(C, "Confirm") as confirm,
         ):
             confirm.ask.return_value = kwargs.pop("answer", False)
-            C.sync_projects([_project("kb")], **kwargs)
+            C.sync_projects([_project("kb")], _out(), **kwargs)
         return apply_plan, confirm
 
     def test_dry_run_never_prompts_and_never_applies(self) -> None:
@@ -127,12 +133,11 @@ class SyncGateTests(unittest.TestCase):
             patch.object(C, "_resolve", side_effect=_resolve_all),
             patch.object(C, "fetch_and_plan", return_value=self.plan),
             patch.object(C, "report"),
-            patch.object(C, "console"),
             patch.object(C, "apply_plan"),
             patch.object(C, "Confirm") as confirm,
         ):
             confirm.ask.return_value = False
-            run = C.sync_projects([_project("kb")])
+            run = C.sync_projects([_project("kb")], _out())
         self.assertFalse(run.confirmed)
 
 
@@ -150,9 +155,8 @@ class SyncOrchestrationTests(unittest.TestCase):
             patch.object(C, "_resolve", side_effect=_resolve_all),
             patch.object(C, "fetch_and_plan", side_effect=fake),
             patch.object(C, "report"),
-            patch.object(C, "console"),
         ):
-            run = C.sync_projects(projects)
+            run = C.sync_projects(projects, _out())
 
         by_key = {o.plan.project.key: o.plan for o in run.outcomes}
         self.assertEqual(len(run.outcomes), 3)
@@ -168,9 +172,8 @@ class SyncOrchestrationTests(unittest.TestCase):
             patch.object(C, "_resolve", side_effect=_resolve_all),
             patch.object(C, "fetch_and_plan", side_effect=lambda p, **_k: _plan(p)),
             patch.object(C, "report"),
-            patch.object(C, "console"),
         ):
-            run = C.sync_projects(projects)
+            run = C.sync_projects(projects, _out())
         self.assertEqual([o.plan.project.key for o in run.outcomes], ["a", "b", "c"])
 
     def test_a_partial_failure_is_not_a_shad_error(self) -> None:
@@ -184,9 +187,8 @@ class SyncOrchestrationTests(unittest.TestCase):
             patch.object(C, "_resolve", side_effect=_resolve_all),
             patch.object(C, "fetch_and_plan", side_effect=fake),
             patch.object(C, "report"),
-            patch.object(C, "console"),
         ):
-            run = C.sync_projects([_project("a"), _project("b")])
+            run = C.sync_projects([_project("a"), _project("b")], _out())
         self.assertEqual(len(run.outcomes), 2)
 
 
@@ -316,9 +318,8 @@ class FailureIsolationTests(unittest.TestCase):
             patch.object(C, "fetch_and_plan", side_effect=lambda p, **_k: {"a": good, "b": bad}[p.key]),
             patch.object(C, "apply_plan", side_effect=fake),
             patch.object(C, "report"),
-            patch.object(C, "console"),
         ):
-            run = C.sync_projects([_project("a"), _project("b")], yes=True)
+            run = C.sync_projects([_project("a"), _project("b")], _out(), yes=True)
 
         by_key = {o.plan.project.key: o for o in run.outcomes}
         self.assertEqual([b.name for b in by_key["a"].deleted_branches], ["feat"])

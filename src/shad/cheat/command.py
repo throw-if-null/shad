@@ -10,6 +10,7 @@ Outside tmux → prints the cheat sheet to stdout
 
 from __future__ import annotations
 
+import argparse
 import os
 import subprocess
 
@@ -17,6 +18,10 @@ from rich import box
 from rich.console import Console
 from rich.table import Table
 from rich.text import Text
+
+from shad import parsers
+from shad.deps import Deps
+from shad.output import Output
 
 _SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
     ("PANES", [
@@ -105,14 +110,37 @@ def _build_table() -> Table:
     return t
 
 
-def cmd_cheat() -> int:
+def register(sub: parsers.Subparsers) -> None:
+    parsers.command(
+        sub,
+        "cheat",
+        run=run,
+        help="Show a tmux cheat sheet in a popup (or stdout if outside tmux)",
+        description=(
+            "Display a tmux key-binding reference.\n\n"
+            "Inside tmux  : opens a floating popup; dismiss with q\n"
+            "Outside tmux : prints the cheat sheet to stdout\n\n"
+            "Recommended ~/.tmux.conf binding:\n"
+            '  bind-key F12 run-shell "shad cheat"'
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+
+
+def run(args: argparse.Namespace, deps: Deps) -> int:
+    return cheat(deps.out)
+
+
+def cheat(out: Output) -> int:
+    """The sheet on *out*, or in a tmux popup; returns the popup's exit status."""
     inside_tmux = os.environ.get("TMUX") is not None
 
     if not inside_tmux:
-        Console().print(_build_table())
+        out.print(_build_table())
         return 0
 
-    # Render to a string and pipe through less inside a tmux popup
+    # Rendered to a string with color forced on, because the popup's pager
+    # is what shows it, then piped through less inside the popup.
     from io import StringIO
     buf = StringIO()
     Console(file=buf, force_terminal=True, width=82).print(_build_table())

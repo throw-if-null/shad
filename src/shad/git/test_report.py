@@ -2,12 +2,7 @@ from __future__ import annotations
 
 import io
 import unittest
-from collections.abc import Iterator
-from contextlib import contextmanager
 from pathlib import Path
-from unittest.mock import patch
-
-from rich.console import Console
 
 from shad.git import report
 from shad.git.model import (
@@ -20,6 +15,7 @@ from shad.git.model import (
     WorktreeInfo,
     WorktreeKept,
 )
+from shad.output import Output
 from shad.shared.config import Project
 
 
@@ -30,18 +26,15 @@ def _project(key: str = "shad", group: str | None = "tin") -> Project:
     )
 
 
-@contextmanager
-def _capture(width: int = 200) -> Iterator[io.StringIO]:
+def _capture(width: int = 200) -> tuple[Output, io.StringIO]:
     """
-    Render into a real Console.
+    An Output over a buffer, and the buffer.
 
     Tables elsewhere in the suite are asserted on via str(call_args), but a
     rich Table has no useful __str__ — it only becomes text when rendered.
     """
     buffer = io.StringIO()
-    console = Console(file=buffer, width=width, force_terminal=False, highlight=False)
-    with patch.object(report, "console", console):
-        yield buffer
+    return Output(stdout=buffer, width=width, color=False), buffer
 
 
 def _text(buffer: io.StringIO) -> str:
@@ -54,8 +47,8 @@ def _text(buffer: io.StringIO) -> str:
 
 class RenderAppliedTests(unittest.TestCase):
     def _render(self, plan: ProjectPlan) -> str:
-        with _capture() as buffer:
-            report.render_applied([plan])
+        out, buffer = _capture()
+        report.render_applied(out, [plan])
         return _text(buffer)
 
     def test_unchanged_project_collapses_to_one_line(self) -> None:
@@ -116,8 +109,8 @@ class RenderAppliedTests(unittest.TestCase):
 
     def test_dry_run_calls_stale_refs_stale_because_nothing_was_pruned(self) -> None:
         plan = ProjectPlan(project=_project(), pruned_refs=["origin/feat/login"])
-        with _capture() as buffer:
-            report.render_applied([plan], dry_run=True)
+        out, buffer = _capture()
+        report.render_applied(out, [plan], dry_run=True)
         output = _text(buffer)
         self.assertIn("would prune", output)
         self.assertNotIn("pruned remote refs", output)
@@ -171,8 +164,8 @@ class RenderPendingTests(unittest.TestCase):
                 ],
             ),
         ]
-        with _capture() as buffer:
-            report.render_pending(plans)
+        out, buffer = _capture()
+        report.render_pending(out, plans)
         output = _text(buffer)
 
         self.assertIn("pending deletions", output)
@@ -191,8 +184,8 @@ class RenderResultsTests(unittest.TestCase):
             plan=ProjectPlan(project=_project()),
             deleted_branches=[BranchInfo(name="feat/login", sha="9c3fe4b", reason="merged")],
         )
-        with _capture() as buffer:
-            report.render_results([outcome])
+        out, buffer = _capture()
+        report.render_results(out, [outcome])
         output = _text(buffer)
         self.assertIn("deleted branch", output)
         self.assertIn("was 9c3fe4b", output)
@@ -203,8 +196,8 @@ class RenderResultsTests(unittest.TestCase):
             plan=ProjectPlan(project=_project()),
             failures=["branch feat: not fully merged"],
         )
-        with _capture() as buffer:
-            report.render_results([outcome])
+        out, buffer = _capture()
+        report.render_results(out, [outcome])
         output = _text(buffer)
         self.assertIn("✗", output)
         self.assertIn("not fully merged", output)
@@ -212,8 +205,8 @@ class RenderResultsTests(unittest.TestCase):
 
 class RenderSummaryTests(unittest.TestCase):
     def _summary(self, run: SyncRun) -> str:
-        with _capture() as buffer:
-            report.render_summary(run)
+        out, buffer = _capture()
+        report.render_summary(out, run)
         return _text(buffer)
 
     def test_counts_are_pluralised_correctly(self) -> None:
@@ -281,13 +274,13 @@ class RenderSummaryTests(unittest.TestCase):
 
 class RenderHeaderTests(unittest.TestCase):
     def test_single_project_run_prints_no_header(self) -> None:
-        with _capture() as buffer:
-            report.render_header(1)
+        out, buffer = _capture()
+        report.render_header(out, 1)
         self.assertEqual(buffer.getvalue(), "")
 
     def test_multi_project_run_announces_the_count(self) -> None:
-        with _capture() as buffer:
-            report.render_header(7)
+        out, buffer = _capture()
+        report.render_header(out, 7)
         self.assertIn("syncing 7 projects", _text(buffer))
 
 

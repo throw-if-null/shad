@@ -12,6 +12,7 @@ Then appends the new [projects.*] entry to shad.toml.
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import os
 import platform
@@ -24,16 +25,14 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 from rich.text import Text
 
+from shad import parsers
+from shad.deps import Deps
 from shad.errors import ShadError
-from shad.shared.config import config_path
-
-console = Console()
-err_console = Console(stderr=True)
+from shad.output import Output
 
 # A pinned release, so the archive can be checked against a known SHA-256. Change the version and
 # the checksum together, from the release's asset digest.
@@ -49,7 +48,7 @@ OPENCODE_INSTALL_URL = (
 class Dependency:
     binary: str
     package: str | None = None
-    installer: Callable[[], None] | None = field(default=None, compare=False, hash=False)
+    installer: Callable[[Output], None] | None = field(default=None, compare=False, hash=False)
 
 
 _DEFAULTS_BLOCK = """\
@@ -147,21 +146,23 @@ def _is_root() -> bool:
     return geteuid() == 0
 
 
-def _run_install_command(command: list[str], description: str) -> None:
-    console.print(Text(f"  → {description}", style="cyan"))
+def _run_install_command(out: Output, command: list[str], description: str) -> None:
+    out.print(Text(f"  → {description}", style="cyan"))
     result = subprocess.run(command, check=False)
     if result.returncode != 0:
         raise ShadError.infrastructure("install_failed", f"command failed: {' '.join(command)}")
 
 
-def _install_via_dnf(package: str) -> Callable[[], None]:
+def _install_via_dnf(package: str) -> Callable[[Output], None]:
     """Return an installer callable that installs a single dnf package."""
-    def _install() -> None:
-        _run_install_command(["dnf", "install", "-y", package], f"installing {package} with dnf")
+    def _install(out: Output) -> None:
+        _run_install_command(
+            out, ["dnf", "install", "-y", package], f"installing {package} with dnf"
+        )
     return _install
 
 
-def _install_opencode_systemwide() -> None:
+def _install_opencode_systemwide(out: Output) -> None:
     if platform.machine() != "x86_64":
         raise ShadError.infrastructure(
             "unsupported_platform",
@@ -175,7 +176,7 @@ def _install_opencode_systemwide() -> None:
     binary = tmp_dir / "opencode"
 
     try:
-        console.print(Text(f"  → installing opencode {OPENCODE_VERSION} to /usr/local/bin/opencode", style="cyan"))
+        out.print(Text(f"  → installing opencode {OPENCODE_VERSION} to /usr/local/bin/opencode", style="cyan"))
         with urllib.request.urlopen(OPENCODE_INSTALL_URL) as response, archive.open("wb") as fh:
             shutil.copyfileobj(response, fh)
 
@@ -187,8 +188,12 @@ def _install_opencode_systemwide() -> None:
                 f"opencode archive checksum mismatch: expected {OPENCODE_LINUX_X64_SHA256}, got {digest}"
             )
 
-        _run_install_command(["tar", "-xzf", str(archive), "-C", str(tmp_dir)], "extracting opencode release")
-        _run_install_command(["install", "-m", "0755", str(binary), "/usr/local/bin/opencode"], "copying opencode binary")
+        _run_install_command(
+            out, ["tar", "-xzf", str(archive), "-C", str(tmp_dir)], "extracting opencode release"
+        )
+        _run_install_command(
+            out, ["install", "-m", "0755", str(binary), "/usr/local/bin/opencode"], "copying opencode binary"
+        )
     except ShadError:
         raise
     except Exception as exc:
@@ -211,10 +216,10 @@ def _missing_dependencies() -> list[Dependency]:
     return [dep for dep in _build_dependencies() if shutil.which(dep.binary) is None]
 
 
-def ensure_dependencies_installed() -> None:
+def ensure_dependencies_installed(out: Output) -> None:
     missing = _missing_dependencies()
     if not missing:
-        console.print(Text("  ✓ dependencies already installed", style="bold green"))
+        out.print(Text("  ✓ dependencies already installed", style="bold green"))
         return
 
     if not _detect_fedora():
@@ -230,9 +235,9 @@ def ensure_dependencies_installed() -> None:
 
     for dep in missing:
         if dep.installer is not None:
-            dep.installer()
+            dep.installer(out)
 
-    console.print(Text("  ✓ dependencies installed", style="bold green"))
+    out.print(Text("  ✓ dependencies installed", style="bold green"))
 
 
 def _toml_key(group: str | None, key: str) -> str:
@@ -242,16 +247,49 @@ def _toml_key(group: str | None, key: str) -> str:
 
 # ── interactive wizard ────────────────────────────────────────────────────
 
-def cmd_init(*, install_deps: bool = False, path: Path | None = None) -> None:
-    target = path or config_path()
+def register(sub: parsers.Subparsers) -> None:
+    parser = parsers.command(
+        sub,
+        "init",
+        run=run,
+        help="Add a new project to the config interactively",
+        description=(
+            "Interactive wizard that adds a new project to the resolved config file.\n"
+            "Creates the config file with a commented [defaults] block if it does not exist yet.\n\n"
+            "Options:\n"
+            "  --install-deps  install missing tmux and opencode dependencies on Fedora\n\n"
+            "Prompts:\n"
+            "  path         Absolute path to the project root (must exist)\n"
+            "  group        Optional group name; leave blank for a top-level project\n"
+            "  key          Short project name; defaults to the directory name\n"
+            "  session      tmux session name; defaults to <key> or <group>-<key>\n\n"
+            "Examples:\n"
+            "  shad init                         add a top-level project\n"
+            "  sudo shad init --install-deps     install Fedora deps, then run init\n"
+            "  shad init                         add a grouped project (enter group at prompt)"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--install-deps",
+        action="store_true",
+        help="Install missing tmux and opencode dependencies on Fedora before prompting",
+    )
 
-    console.print()
-    console.print(Text("shad init", style="bold cyan") + Text(" — add a new project", style="dim"))
-    console.print()
+
+def run(args: argparse.Namespace, deps: Deps) -> None:
+    init_project(deps.config_file, deps.out, install_deps=args.install_deps)
+
+
+def init_project(target: Path, out: Output, *, install_deps: bool = False) -> None:
+    """The wizard: prompt for the project, then append it to *target*."""
+    out.print()
+    out.print(Text("shad init", style="bold cyan") + Text(" — add a new project", style="dim"))
+    out.print()
 
     if install_deps:
-        ensure_dependencies_installed()
-        console.print()
+        ensure_dependencies_installed(out)
+        out.print()
 
     # --- path ---
     while True:
@@ -259,7 +297,7 @@ def cmd_init(*, install_deps: bool = False, path: Path | None = None) -> None:
         project_path = _expand(raw_path)
         if project_path.exists():
             break
-        err_console.print(Text(f"  ✗ path does not exist: {project_path}", style="bold red"))
+        out.note(Text(f"  ✗ path does not exist: {project_path}", style="bold red"))
 
     default_key = project_path.name
 
@@ -271,7 +309,7 @@ def cmd_init(*, install_deps: bool = False, path: Path | None = None) -> None:
         key = Prompt.ask("[cyan]  key[/cyan]", default=default_key)
         if not _key_exists(target, group, key):
             break
-        err_console.print(Text(f"  ✗ [{_toml_key(group, key)}] already exists in {target}", style="bold red"))
+        out.note(Text(f"  ✗ [{_toml_key(group, key)}] already exists in {target}", style="bold red"))
 
     # --- session ---
     default_session = f"{group}-{key}" if group else key
@@ -279,8 +317,8 @@ def cmd_init(*, install_deps: bool = False, path: Path | None = None) -> None:
 
     # --- confirm ---
     toml_key = _toml_key(group, key)
-    console.print()
-    console.print(Panel(
+    out.print()
+    out.print(Panel(
         f"[dim]\\[{toml_key}][/dim]\n"
         f"[dim]path    =[/dim] [bright_white]{project_path}[/bright_white]\n"
         f"[dim]session =[/dim] [bright_white]{session}[/bright_white]",
@@ -289,7 +327,7 @@ def cmd_init(*, install_deps: bool = False, path: Path | None = None) -> None:
     ))
 
     if not Confirm.ask("  Add to config?", default=True):
-        console.print(Text("  Aborted.", style="dim"))
+        out.print(Text("  Aborted.", style="dim"))
         return
 
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -298,8 +336,8 @@ def cmd_init(*, install_deps: bool = False, path: Path | None = None) -> None:
         _write_defaults_block(target)
     _append_toml(target, group, key, project_path, session)
 
-    console.print()
-    console.print(Text(f"  ✓ Added to {target}", style="bold green"))
+    out.print()
+    out.print(Text(f"  ✓ Added to {target}", style="bold green"))
     open_cmd = f"shad projects {group} {key}" if group else f"shad projects {key}"
-    console.print(Text("  Open with: ", style="dim") + Text(open_cmd, style="cyan"))
-    console.print()
+    out.print(Text("  Open with: ", style="dim") + Text(open_cmd, style="cyan"))
+    out.print()

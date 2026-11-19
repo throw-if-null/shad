@@ -27,21 +27,19 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from rich.console import Console
 from rich.prompt import Confirm
 from rich.text import Text
 
+from shad import parsers
+from shad.deps import Deps
 from shad.errors import ShadError
 from shad.git import apply, discover, refs, report
 from shad.git import plan as planning
 from shad.git.model import ProjectOutcome, ProjectPlan, Repo, SyncRun
 from shad.git.run import GitMissing, require_git
+from shad.output import Output
 from shad.shared.config import Config, Project, resolve_target
 from shad.trace import Trace
-
-console = Console()
-
-ACTIONS = ("sync", "panel")
 
 # Each unit of work is a `git fetch` subprocess; an uncapped pool would open
 # one per configured project, contending for the ssh-agent and the link.
@@ -320,6 +318,7 @@ def apply_plan(plan: ProjectPlan) -> ProjectOutcome:
 
 def sync_projects(
     projects: list[Project],
+    out: Output,
     *,
     yes: bool = False,
     dry_run: bool = False,
@@ -327,27 +326,28 @@ def sync_projects(
     trace: Trace | None = None,
 ) -> SyncRun:
     """
-    Run the full sync over *projects* and return what happened. *trace*
-    receives the traceback of every per-project failure the run recorded.
+    Run the full sync over *projects*, printing the report on *out*, and
+    return what happened. *trace* receives the traceback of every
+    per-project failure the run recorded.
     """
     trace = trace or Trace()
     if not projects:
-        console.print(Text("no projects configured", style="dim"))
+        out.print(Text("no projects configured", style="dim"))
         return SyncRun(dry_run=dry_run)
 
     require_git()
 
-    report.render_header(len(projects))
+    report.render_header(out, len(projects))
     plans = _inspect(projects, dry_run=dry_run, switch=switch, trace=trace)
 
-    report.render_applied(plans, dry_run=dry_run)
+    report.render_applied(out, plans, dry_run=dry_run)
 
     pending = [p for p in plans if p.pending]
 
     if dry_run:
         if pending:
-            report.render_pending(plans)
-        report.render_dry_run_footer()
+            report.render_pending(out, plans)
+        report.render_dry_run_footer(out)
         run = SyncRun(
             outcomes=[ProjectOutcome(plan=p) for p in plans], dry_run=True
         )
@@ -356,29 +356,29 @@ def sync_projects(
 
     if not pending:
         run = SyncRun(outcomes=[ProjectOutcome(plan=p) for p in plans])
-        report.render_summary(run)
+        report.render_summary(out, run)
         _raise_if_all_failed(run)
         return run
 
-    report.render_pending(plans)
-    console.print()
+    report.render_pending(out, plans)
+    out.print()
     if not yes and not Confirm.ask(
         "  Delete these branches and worktrees?", default=False
     ):
-        report.render_aborted()
+        report.render_aborted(out)
         # Still summarise: the fetch and fast-forward already happened, and a
         # project that failed during them must not vanish because the user
         # declined the deletions.
         run = SyncRun(
             outcomes=[ProjectOutcome(plan=p) for p in plans], confirmed=False
         )
-        report.render_summary(run)
+        report.render_summary(out, run)
         return run
 
     outcomes = [_apply_one(p, trace) for p in plans]
     run = SyncRun(outcomes=outcomes)
-    report.render_results(outcomes)
-    report.render_summary(run)
+    report.render_results(out, outcomes)
+    report.render_summary(out, run)
     _raise_if_all_failed(run)
     return run
 
@@ -518,28 +518,146 @@ def _raise_if_all_failed(run: SyncRun) -> None:
         raise ShadError.infrastructure("sync_failed", f"all {len(run.outcomes)} project(s) failed")
 
 
-def cmd_git(cfg: Config, args: argparse.Namespace, trace: Trace | None = None) -> None:
-    action = getattr(args, "git_action", None)
-    if action is None:
-        raise ShadError.usage("no_action", f"no git action given; available: {', '.join(ACTIONS)}")
-    if action not in ACTIONS:
-        raise ShadError.usage(
-            "unknown_action",
-            f"unknown git action '{action}'; available: {', '.join(ACTIONS)}"
-        )
+def register(sub: parsers.Subparsers) -> None:
+    _, actions = parsers.group(
+        sub,
+        "git",
+        dest="git_action",
+        help="Run git maintenance across configured projects",
+        description=(
+            "Git maintenance across one, some, or all configured projects.\n\n"
+            "Actions:\n"
+            "  sync     fetch, fast-forward, and prune dead branches and worktrees\n"
+            "  panel    read-only branch, worktree and stash view for one repository\n\n"
+            "Examples:\n"
+            "  shad git sync                     every configured project\n"
+            "  shad git sync kb                  one top-level project\n"
+            "  shad git sync alvr                every project in the alvr group\n"
+            "  shad git sync alvr db             one grouped project\n\n"
+            "Prefix matching is supported at each level."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    sync = parsers.command(
+        actions,
+        "sync",
+        run=run_sync,
+        help="Fetch, fast-forward, and prune dead branches and worktrees",
+        description=(
+            "For each targeted project:\n"
+            "  1. git fetch --prune\n"
+            "  2. fast-forward the default branch (skipped if diverged or dirty)\n"
+            "  3. delete local branches that are merged, or whose upstream was\n"
+            "     pruned in this run after every commit had been pushed\n"
+            "  4. prune worktree records whose directory is gone, and remove\n"
+            "     clean worktrees whose branch is being deleted\n\n"
+            "Steps 1 and 2 are applied immediately and are NOT undone if you\n"
+            "decline the prompt. Only the deletions in steps 3 and 4 are gated.\n\n"
+            "Never deleted: the default branch, a branch checked out in a\n"
+            "worktree that is staying, a branch with unpushed commits, a branch\n"
+            "that never had an upstream, a locked worktree, or a worktree with\n"
+            "local changes.\n\n"
+            "Options:\n"
+            "  --switch    check out the default branch in each main worktree\n"
+            "  --yes       skip the confirmation prompt (use this in scripts)\n"
+            "  --dry-run   report only; still fetches, but deletes nothing\n\n"
+            "--switch is the only step that touches a working tree. A project\n"
+            "is skipped, with the reason, when its tree is dirty, its HEAD is\n"
+            "detached, the default branch is held by another worktree, or it\n"
+            "has no local copy of that branch. Switching also un-pins the\n"
+            "branch it leaves behind, so that branch can be deleted in the\n"
+            "same run if it qualifies.\n\n"
+            "Examples:\n"
+            "  shad git sync\n"
+            "  shad git sync tin shad --dry-run\n"
+            "  shad git sync --switch\n"
+            "  shad git sync --yes"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    sync.add_argument(
+        "name",
+        nargs="*",
+        metavar="NAME",
+        help="[group] [project]  — omit to target every configured project",
+    )
+    sync.add_argument(
+        "--switch",
+        action="store_true",
+        help="Check out the default branch in each project's main worktree",
+    )
+    sync.add_argument(
+        "--yes",
+        action="store_true",
+        help="Skip the confirmation prompt and apply every listed deletion",
+    )
+    sync.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Report what would change; still fetches, but deletes nothing",
+    )
 
-    if action == "panel":
-        open_panel(cfg, list(args.name), fetch=not getattr(args, "no_fetch", False))
-        return
+    panel = parsers.command(
+        actions,
+        "panel",
+        run=run_panel,
+        help="Read-only branch, worktree and stash view for one repository (full-screen)",
+        description=(
+            "A read-only view of one repository, shown in shad's third pane.\n\n"
+            "Sections:\n"
+            "  branches    local branches, tracking state, and upstream\n"
+            "  worktrees   path, branch, and locked/prunable/bare flags\n"
+            "  stashes     ref, branch, message, and age\n\n"
+            "The header carries the active branch, how far it is ahead of and\n"
+            "behind upstream, the repository, and the git version — in that\n"
+            "order, because a narrow pane truncates the tail.\n\n"
+            "Unlike `sync`, no name means the current directory, not every\n"
+            "configured project: this view shows one repository. A name that\n"
+            "matches more than one project is an error.\n\n"
+            "The panel fetches on open so the counts are accurate, and `r`\n"
+            "fetches again. It never prunes and never writes to a working\n"
+            "tree — nothing here changes the repository. It is a full-screen\n"
+            "view, so it has no --json.\n\n"
+            "Keys:\n"
+            "  tab         move focus between the section list and the table\n"
+            "  up/down     move the row cursor (j / k also work)\n"
+            "  r           fetch and reload\n"
+            "  q           quit\n\n"
+            "Examples:\n"
+            "  shad git panel\n"
+            "  shad git panel shad\n"
+            "  shad git panel tin shad\n"
+            "  shad git panel --no-fetch"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    panel.add_argument(
+        "name",
+        nargs="*",
+        metavar="NAME",
+        help="[group] [project]  — omit to use the current directory",
+    )
+    panel.add_argument(
+        "--no-fetch",
+        action="store_true",
+        help="Skip the fetch on open; show local state only",
+    )
 
-    target = resolve_target(cfg, list(args.name), usage="shad git sync")
+
+def run_sync(args: argparse.Namespace, deps: Deps) -> None:
+    target = resolve_target(deps.config, list(args.name), usage="shad git sync")
     sync_projects(
         target.projects,
+        deps.out,
         yes=getattr(args, "yes", False),
         dry_run=getattr(args, "dry_run", False),
         switch=getattr(args, "switch", False),
-        trace=trace,
+        trace=deps.trace,
     )
+
+
+def run_panel(args: argparse.Namespace, deps: Deps) -> None:
+    open_panel(deps.config, list(args.name), fetch=not getattr(args, "no_fetch", False))
 
 
 def open_panel(cfg: Config, name: list[str], *, fetch: bool) -> None:

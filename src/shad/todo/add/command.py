@@ -13,34 +13,50 @@ import sys
 import tempfile
 from pathlib import Path
 
-from rich.console import Console
 from rich.prompt import Confirm
 from rich.text import Text
 
+from shad import parsers
+from shad.deps import Deps
 from shad.errors import ShadError
-from shad.shared.config import Config
+from shad.output import Output
 from shad.shared.editor import resolve_editor
 from shad.todo import store
 from shad.todo.model import Item, check_labels, parse, template
 
-console = Console()
+
+def register(sub: parsers.Subparsers) -> None:
+    parser = parsers.command(sub, "add", run=run, help="Create an item")
+    parser.add_argument(
+        "title",
+        metavar="TITLE",
+        nargs="?",
+        help="The item title; its key is a slug of it. Omit it to write the item in $EDITOR",
+    )
+    parser.add_argument(
+        "--label",
+        action="append",
+        metavar="LABEL",
+        help="A configured label; repeat for more than one",
+    )
 
 
-def add_todo(cfg: Config, args: argparse.Namespace) -> None:
+def run(args: argparse.Namespace, deps: Deps) -> None:
+    cfg = deps.config
     directory = store.todo_dir(cfg)
     labels = list(args.label or [])
     if args.title is None:
-        item = add_in_editor(directory, labels, cfg.todo_labels)
+        item = add_in_editor(directory, labels, cfg.todo_labels, deps.out)
     else:
         item = store.add(directory, args.title, labels, cfg.todo_labels)
-    console.print(
+    deps.out.print(
         Text("  ✓ ", style="bold green")
         + Text(item.key, style="bright_white")
         + Text(f"  {store.item_path(directory, item.key)}", style="dim")
     )
 
 
-def add_in_editor(directory: Path, labels: list[str], vocabulary: list[str]) -> Item:
+def add_in_editor(directory: Path, labels: list[str], vocabulary: list[str], out: Output) -> Item:
     """
     Open the editor on a draft of a new item, create the item from it, and
     return the item.
@@ -82,7 +98,7 @@ def add_in_editor(directory: Path, labels: list[str], vocabulary: list[str]) -> 
                     extra=fields.extra,
                 )
             except ShadError as exc:
-                console.print(Text(f"  ✗ {exc}", style="bold red"))
+                out.note(Text(f"  ✗ {exc}", style="bold red"))
                 if Confirm.ask("  Edit again?", default=True):
                     continue
                 keep = True

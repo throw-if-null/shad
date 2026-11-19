@@ -1,13 +1,11 @@
 """
-Project status reporting for shad.
+`shad projects [<group>] <name> status` — one project's state, as a result.
 
-Prints a human-readable summary as a series of titled tables:
-  - tmux session state
-  - git: branch, latest tag, last 3 commits, dirty file count
-  - detected runtimes (Python, Node, Go, Rust, Deno) based on
-    manifest files found in the project path, with latest available
-    versions fetched in parallel
-  - opencode version (since it is the default top_command)
+The status is the tmux session state, the repository (branch, latest tag,
+the last commits, the uncommitted file count), the runtimes the project's
+manifest files name (Python, Node, Go, Rust, Deno) with the latest released
+version of each fetched in parallel, and the opencode version. The root
+renders it as titled tables, or as JSON.
 """
 
 from __future__ import annotations
@@ -18,22 +16,59 @@ import subprocess
 import urllib.request
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from pathlib import Path
 
-from rich.console import Console
 from rich.text import Text
 
 from shad.git import refs
 from shad.git.discover import head_branch, is_clean
-from shad.git.model import short_branch
+from shad.git.model import Commit, short_branch
+from shad.output import Output
 from shad.shared.config import Project
 from shad.shared.render import make_table, relative_age
 from shad.shared.tmux import list_project_sessions, tmux_server_running
 from shad.trace import Trace
 
-console = Console()
-
 RECENT_COMMITS = 3
+
+
+@dataclass(frozen=True)
+class Session:
+    name: str
+    base: bool  # the project's bare session name, as opposed to a scoped one
+
+
+@dataclass(frozen=True)
+class Tmux:
+    server: bool  # a tmux server is running
+    sessions: tuple[Session, ...]
+
+
+@dataclass(frozen=True)
+class Git:
+    branch: str | None  # None when HEAD is detached
+    tag: str | None  # the latest tag reachable from HEAD
+    changed: int  # tracked files with uncommitted changes
+    untracked: int
+    commits: tuple[Commit, ...]  # newest first
+
+
+@dataclass(frozen=True)
+class Runtime:
+    name: str
+    installed: str
+    latest: str | None  # None when the fetch failed
+    path: str | None  # the binary, when it is on PATH
+
+
+@dataclass(frozen=True)
+class Status:
+    project: Project
+    tmux: Tmux
+    git: Git | None  # None when the directory is not a repository
+    runtimes: tuple[Runtime, ...]
+    opencode: str | None
 
 
 # ── subprocess / fetch helpers ────────────────────────────────────────────
@@ -103,93 +138,57 @@ _LATEST_FETCHERS: dict[str, Callable[[], str | None]] = {
 }
 
 
-# ── section builders ──────────────────────────────────────────────────────
+# ── the readings ──────────────────────────────────────────────────────────
 
 
-def _print_tmux(project: Project) -> None:
-    t = make_table("tmux")
+def _tmux(project: Project) -> Tmux:
     running = list_project_sessions(project.session)
     if not running:
-        if not tmux_server_running():
-            t.add_row(
-                Text("session", style="dim"),
-                Text(project.session),
-                Text("tmux not running", style="dim"),
-            )
-        else:
-            t.add_row(
-                Text("session", style="dim"),
-                Text(project.session),
-                Text("not running", style="dim"),
-            )
-        console.print(t)
-        return
-
-    for index, session in enumerate(running):
-        label = Text("session", style="dim") if index == 0 else Text("")
-        display = Text(session)
-        if session == project.session:
-            display.append("  (base)", style="dim")
-        t.add_row(label, display, Text("running", style="bold green"))
-
-    console.print(t)
+        return Tmux(server=tmux_server_running(), sessions=())
+    return Tmux(
+        server=True,
+        sessions=tuple(Session(name=name, base=name == project.session) for name in running),
+    )
 
 
-def _print_git(path: Path) -> None:
+def _git(path: Path) -> Git | None:
     """
-    Print the git section for *path*.
+    The repository at *path*, or None when there is none.
 
     Every query goes through shad.git.run.git rather than a bare subprocess:
     that wrapper scrubs an inherited GIT_DIR, which would otherwise make this
-    table describe whichever repository invoked shad — a git hook, or a tmux
-    pane started by one — instead of the project. It also passes an explicit
-    `-C` and a timeout, so a slow or wedged repository cannot hang the report.
+    describe whichever repository invoked shad — a git hook, or a tmux pane
+    started by one — instead of the project. It also passes an explicit `-C`
+    and a timeout, so a slow or wedged repository cannot hang the report.
     """
     if not (path / ".git").exists():
-        console.print(Text("  (not a git repository)", style="dim"))
-        return
-
-    t = make_table("git")
-
+        return None
     head = head_branch(path)
-    branch = short_branch(head) if head else "detached"
-    t.add_row(Text("branch", style="dim"), Text(branch, style="dim"))
-
     tag = refs.latest_tag(path)
-    t.add_row(
-        Text("latest tag", style="dim"),
-        Text(tag if tag else "—", style="" if tag else "dim"),
-    )
-
     # Counts every untracked file, where `status --short` collapsed an
     # untracked directory into a single entry. An untracked directory holding
-    # two files now reads as two, which is what the "file(s)" label claims.
+    # two files reads as two, which is what the "file(s)" label claims.
     _clean, changed, untracked = is_clean(path, untracked=True)
-    dirty_count = changed + untracked
-    if dirty_count:
-        dirty_val = Text(f"{dirty_count} file(s)", style="yellow")
-    else:
-        dirty_val = Text("clean", style="dim")
-    t.add_row(Text("uncommitted", style="dim"), dirty_val)
-
-    commits = refs.recent_commits(path, RECENT_COMMITS)
-    if commits:
-        for i, commit in enumerate(commits):
-            label = Text("commits", style="dim") if i == 0 else Text("")
-            row = Text()
-            row.append(commit.short_oid, style="yellow")
-            row.append("  ")
-            row.append(commit.subject)
-            row.append("  ")
-            row.append(relative_age(commit.timestamp), style="dim")
-            t.add_row(label, row)
-    else:
-        t.add_row(Text("commits", style="dim"), Text("none", style="dim"))
-
-    console.print(t)
+    return Git(
+        branch=short_branch(head) if head else None,
+        tag=tag or None,
+        changed=changed,
+        untracked=untracked,
+        commits=tuple(refs.recent_commits(path, RECENT_COMMITS)),
+    )
 
 
-def _print_runtimes(path: Path, trace: Trace) -> None:
+def _semver(v: str) -> str:
+    for part in v.split():
+        s = part.lstrip("v")
+        if s.startswith("go") and s[2:3].isdigit():
+            return s[2:]
+        if s[:1].isdigit():
+            return s.split()[0]
+    return v.strip()
+
+
+def _runtimes(path: Path, trace: Trace) -> tuple[Runtime, ...]:
     checks: list[tuple[str, list[str], list[str]]] = [
         (
             "python",
@@ -214,14 +213,11 @@ def _print_runtimes(path: Path, trace: Trace) -> None:
             continue
         version = _capture(cmd)
         installed = version.splitlines()[0] if version else ""
-        detected.append((label, installed, cmd[0]))
-
-    # filter out runtimes not in PATH
-    detected = [(lang, v, b) for lang, v, b in detected if v]
+        if installed:  # a runtime that is not on PATH is left out
+            detected.append((label, installed, cmd[0]))
     if not detected:
-        return
+        return ()
 
-    # fetch latest versions in parallel
     latest: dict[str, str | None] = {}
     with ThreadPoolExecutor(max_workers=max(1, len(detected))) as pool:
         futures = {
@@ -237,79 +233,133 @@ def _print_runtimes(path: Path, trace: Trace) -> None:
                 trace.note(f"latest {lbl} version unknown: {exc}")
                 latest[lbl] = None
 
-    def _semver(v: str) -> str:
-        for part in v.split():
-            s = part.lstrip("v")
-            if s.startswith("go") and s[2:3].isdigit():
-                return s[2:]
-            if s[:1].isdigit():
-                return s.split()[0]
-        return v.strip()
+    return tuple(
+        Runtime(
+            name=label,
+            installed=_semver(installed),
+            latest=_semver(found) if (found := latest.get(label)) else None,
+            path=shutil.which(binary),
+        )
+        for label, installed, binary in detected
+    )
 
-    def _version_tuple(v: str) -> tuple[int, ...]:
-        try:
-            return tuple(int(x) for x in v.split("."))
-        except ValueError:
-            return ()
 
-    def _version_style(installed_v: str, latest_v: str) -> str:
-        i = _version_tuple(installed_v)
-        latest = _version_tuple(latest_v)
-        if not i or not latest or i == latest:
-            return "dim"
-        if latest[0] != i[0]:
-            return "red"
-        if len(latest) > 1 and len(i) > 1 and latest[1] != i[1]:
-            return "yellow"
-        return "green"
+def _opencode() -> str | None:
+    version = _capture(["opencode", "--version"])
+    return version.splitlines()[0] if version else None
 
+
+def status(project: Project, trace: Trace) -> Status:
+    """The project's state now. *trace* receives the version-fetch failures."""
+    return Status(
+        project=project,
+        tmux=_tmux(project),
+        git=_git(project.path),
+        runtimes=_runtimes(project.path, trace),
+        opencode=_opencode(),
+    )
+
+
+# ── rendering ─────────────────────────────────────────────────────────────
+
+
+def render(result: Status, out: Output) -> None:
+    out.print()
+    out.print(
+        Text(result.project.display_name, style="bold bright_white")
+        + Text(f"  {result.project.path}", style="dim")
+    )
+    out.print()
+    _render_tmux(result, out)
+    out.print()
+    _render_git(result.git, out)
+    out.print()
+    _render_runtimes(result.runtimes, out)
+    if result.opencode:
+        t = make_table("opencode")
+        t.add_row(Text("version", style="dim"), Text(result.opencode))
+        out.print(t)
+    out.print()
+
+
+def _render_tmux(result: Status, out: Output) -> None:
+    t = make_table("tmux")
+    if not result.tmux.sessions:
+        state = "not running" if result.tmux.server else "tmux not running"
+        t.add_row(Text("session", style="dim"), Text(result.project.session), Text(state, style="dim"))
+        out.print(t)
+        return
+    for index, session in enumerate(result.tmux.sessions):
+        label = Text("session", style="dim") if index == 0 else Text("")
+        display = Text(session.name)
+        if session.base:
+            display.append("  (base)", style="dim")
+        t.add_row(label, display, Text("running", style="bold green"))
+    out.print(t)
+
+
+def _render_git(git: Git | None, out: Output) -> None:
+    if git is None:
+        out.print(Text("  (not a git repository)", style="dim"))
+        return
+    t = make_table("git")
+    t.add_row(Text("branch", style="dim"), Text(git.branch or "detached", style="dim"))
+    t.add_row(
+        Text("latest tag", style="dim"),
+        Text(git.tag if git.tag else "—", style="" if git.tag else "dim"),
+    )
+    dirty_count = git.changed + git.untracked
+    if dirty_count:
+        dirty_val = Text(f"{dirty_count} file(s)", style="yellow")
+    else:
+        dirty_val = Text("clean", style="dim")
+    t.add_row(Text("uncommitted", style="dim"), dirty_val)
+    if git.commits:
+        for i, commit in enumerate(git.commits):
+            label = Text("commits", style="dim") if i == 0 else Text("")
+            row = Text()
+            row.append(commit.short_oid, style="yellow")
+            row.append("  ")
+            row.append(commit.subject)
+            row.append("  ")
+            row.append(relative_age(commit.timestamp), style="dim")
+            t.add_row(label, row)
+    else:
+        t.add_row(Text("commits", style="dim"), Text("none", style="dim"))
+    out.print(t)
+
+
+def _version_tuple(v: str) -> tuple[int, ...]:
+    try:
+        return tuple(int(x) for x in v.split("."))
+    except ValueError:
+        return ()
+
+
+def _version_style(installed_v: str, latest_v: str) -> str:
+    i = _version_tuple(installed_v)
+    latest = _version_tuple(latest_v)
+    if not i or not latest or i == latest:
+        return "dim"
+    if latest[0] != i[0]:
+        return "red"
+    if len(latest) > 1 and len(i) > 1 and latest[1] != i[1]:
+        return "yellow"
+    return "green"
+
+
+def _render_runtimes(runtimes: tuple[Runtime, ...], out: Output) -> None:
+    if not runtimes:
+        return
     t = make_table("runtimes")
     t.add_column(style="dim")  # name
     t.add_column()  # installed
     t.add_column()  # latest
     t.add_column(style="dim")  # path
-
-    for label, installed, binary in detected:
-        bin_path = shutil.which(binary) or "—"
-        installed_str = _semver(installed)
-        lat = latest.get(label)
-        if lat:
-            latest_v = _semver(lat)
-            style = _version_style(installed_str, latest_v)
-            latest_text = Text(latest_v, style=style)
+    for runtime in runtimes:
+        if runtime.latest:
+            latest_text = Text(runtime.latest, style=_version_style(runtime.installed, runtime.latest))
         else:
             latest_text = Text("—", style="dim")
-
-        t.add_row(label, installed_str, latest_text, bin_path)
-
-    console.print(t)
-
-
-def _print_opencode() -> None:
-    version = _capture(["opencode", "--version"])
-    if not version:
-        return
-    t = make_table("opencode")
-    t.add_row(Text("version", style="dim"), Text(version.splitlines()[0]))
-    console.print(t)
-
-
-# ── public entry point ────────────────────────────────────────────────────
-
-
-def print_status(project: Project, trace: Trace | None = None) -> None:
-    """The status tables on stdout. *trace* receives the version-fetch failures."""
-    trace = trace or Trace()
-    console.print()
-    console.print(
-        Text(project.display_name, style="bold bright_white")
-        + Text(f"  {project.path}", style="dim")
-    )
-    console.print()
-    _print_tmux(project)
-    console.print()
-    _print_git(project.path)
-    console.print()
-    _print_runtimes(project.path, trace)
-    _print_opencode()
-    console.print()
+        t.add_row(runtime.name, runtime.installed, latest_text, runtime.path or "—")
+    out.print(t)

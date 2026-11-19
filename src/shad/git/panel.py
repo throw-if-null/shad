@@ -31,6 +31,7 @@ from textual.widgets import (
     Static,
 )
 
+from shad.errors import ShadError
 from shad.git.model import BranchRef, Repo, short_branch
 from shad.git.snapshot import Snapshot, collect
 from shad.shared.render import relative_age
@@ -167,7 +168,7 @@ class GitPanel(App[None]):
             self.apply_snapshot(worker.result)
         elif name in ("ERROR", "CANCELLED"):
             self._busy = False
-            self._set_header(f"failed: {worker.error}" if worker.error else "failed")
+            self._set_header(_failure(worker.error))
 
     def apply_snapshot(self, snapshot: Snapshot) -> None:
         self._snapshot = snapshot
@@ -277,6 +278,13 @@ class GitPanel(App[None]):
     def _active(self) -> DataTable[str]:
         current = self.query_one(ContentSwitcher).current or BRANCHES
         return self.query_one(f"#{current}", DataTable)
+
+
+def _failure(error: BaseException | None) -> str:
+    """The header line for a failed reading: the model's code and category when it has them."""
+    if isinstance(error, ShadError):
+        return f"{error.code} ({error.category}): {error.message}"
+    return f"failed: {error}" if error else "failed"
 
 
 def run_panel(repo: Repo, *, fetch: bool = True) -> None:

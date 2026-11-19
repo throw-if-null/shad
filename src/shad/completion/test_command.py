@@ -23,8 +23,7 @@ from tempfile import TemporaryDirectory
 
 import shad
 from shad.cli import build_parser
-from shad.completion.command import BASH_COMPLETION, print_completion
-from shad.errors import ShadError
+from shad.completion.command import BASH_COMPLETION
 from shad.shared.config import HARNESSES
 from shad.testing import run
 from shad.todo import store
@@ -200,8 +199,10 @@ class CompletionScriptTests(unittest.TestCase):
         for name in _subcommands():
             self.assertIn(name, offered)
 
-    def test_top_level_offers_the_global_option(self) -> None:
-        self.assertIn("--config", self._run("shad "))
+    def test_top_level_offers_the_global_options(self) -> None:
+        offered = self._run("shad ")
+        self.assertIn("--config", offered)
+        self.assertIn("--json", offered)
 
     def test_top_level_filters_on_the_partial_word(self) -> None:
         self.assertEqual(self._run("shad co"), ["config", "completion"])
@@ -220,7 +221,7 @@ class CompletionScriptTests(unittest.TestCase):
 
     def test_config_option_selects_the_file_project_names_come_from(self) -> None:
         offered = self._run(f"shad --config {self.other_config} projects ")
-        self.assertEqual(offered, ["elsewhere", "--harness"])
+        self.assertEqual(offered, ["elsewhere", "--json", "--harness"])
 
     # -- the projects --harness option ------------------------------------
 
@@ -241,7 +242,7 @@ class CompletionScriptTests(unittest.TestCase):
     def test_harness_value_does_not_shift_project_positions(self) -> None:
         self.assertEqual(
             sorted(self._run("shad projects --harness claude ")),
-            ["al", "alvr", "kb", "web"],
+            ["--json", "al", "alvr", "kb", "web"],
         )
 
     def test_harness_value_does_not_shift_sub_project_positions(self) -> None:
@@ -261,9 +262,10 @@ class CompletionScriptTests(unittest.TestCase):
     # -- projects ---------------------------------------------------------
 
     def test_projects_offers_top_level_keys_and_group_names(self) -> None:
+        # With no name the line lists, so --json is offered beside --harness.
         self.assertEqual(
             sorted(self._run("shad projects ")),
-            ["--harness", "al", "alvr", "kb", "web"],
+            ["--harness", "--json", "al", "alvr", "kb", "web"],
         )
 
     def test_projects_offers_sub_projects_of_a_group(self) -> None:
@@ -295,9 +297,10 @@ class CompletionScriptTests(unittest.TestCase):
             ["--harness", "api", "db", "status"],
         )
 
-    def test_projects_stops_completing_after_an_action(self) -> None:
-        self.assertEqual(self._run("shad projects kb status "), [])
-        self.assertEqual(self._run("shad projects alvr db status "), [])
+    def test_projects_offers_only_json_after_an_action(self) -> None:
+        self.assertEqual(self._run("shad projects kb status "), ["--json"])
+        self.assertEqual(self._run("shad projects alvr db status "), ["--json"])
+        self.assertEqual(self._run("shad projects alvr db status --json "), [])
 
     def test_projects_offers_nothing_beyond_a_grouped_project(self) -> None:
         self.assertEqual(self._run("shad projects alvr db extra "), [])
@@ -395,12 +398,17 @@ class CompletionScriptTests(unittest.TestCase):
     def test_config_set_offers_nothing_for_a_free_form_value(self) -> None:
         self.assertEqual(self._run("shad config set projects.kb.session "), [])
 
-    def test_config_show_does_not_repeat_its_flag(self) -> None:
-        self.assertEqual(self._run("shad config show "), ["--raw"])
-        self.assertEqual(self._run("shad config show --raw "), [])
+    def test_config_show_does_not_repeat_its_flags(self) -> None:
+        self.assertEqual(self._run("shad config show "), ["--json", "--raw"])
+        self.assertEqual(self._run("shad config show --raw "), ["--json"])
+        self.assertEqual(self._run("shad config show --raw --json "), [])
 
-    def test_config_read_only_actions_offer_nothing(self) -> None:
-        for action in ("path", "keys", "edit", "validate"):
+    def test_config_reads_offer_json(self) -> None:
+        self.assertEqual(self._run("shad config validate "), ["--json"])
+        self.assertEqual(self._run("shad config get defaults.harness "), ["--json"])
+
+    def test_config_plain_actions_offer_nothing(self) -> None:
+        for action in ("path", "keys", "edit"):
             self.assertEqual(self._run(f"shad config {action} "), [], action)
 
     # -- todo -------------------------------------------------------------
@@ -424,9 +432,9 @@ class CompletionScriptTests(unittest.TestCase):
         self.assertEqual(self._run("shad todo add t --label chore "), ["--label"])
         self.assertEqual(sorted(self._run("shad todo add t --label ")), ["chore", "poc"])
 
-    def test_todo_list_offers_its_flag_once(self) -> None:
-        self.assertEqual(self._run("shad todo list "), ["--keys"])
-        self.assertEqual(self._run("shad todo list --keys "), [])
+    def test_todo_list_offers_its_flags_once(self) -> None:
+        self.assertEqual(self._run("shad todo list "), ["--json", "--keys"])
+        self.assertEqual(self._run("shad todo list --keys "), ["--json"])
 
     def test_todo_status_offers_every_status_after_the_key(self) -> None:
         self.assertEqual(
@@ -465,8 +473,6 @@ class CompletionScriptTests(unittest.TestCase):
 
     def test_completion_offers_only_supported_shells(self) -> None:
         self.assertEqual(self._run("shad completion "), ["bash"])
-        with self.assertRaises(ShadError):
-            print_completion("zsh")
 
     def test_init_offers_its_flag_once(self) -> None:
         self.assertEqual(self._run("shad init "), ["--install-deps"])
@@ -487,9 +493,10 @@ class CompletionScriptSessionsTests(CompletionScriptTests):
         self.assertEqual(self._run("shad sessions save "), ["--all"])
         self.assertEqual(self._run("shad sessions save --all "), [])
 
-    def test_sessions_stop_and_show_offer_nothing(self) -> None:
+    def test_sessions_stop_offers_nothing_and_show_offers_json(self) -> None:
         self.assertEqual(self._run("shad sessions stop "), [])
-        self.assertEqual(self._run("shad sessions show "), [])
+        self.assertEqual(self._run("shad sessions show "), ["--json"])
+        self.assertEqual(self._run("shad sessions show --json "), [])
 
     def test_sessions_restore_offers_its_flag_once(self) -> None:
         self.assertEqual(self._run("shad sessions restore "), ["--no-attach"])

@@ -20,10 +20,10 @@ class SaveAllTests(SessionsCase):
                     prompt "first prompt"), and kb also runs an opencode
                     session.
           When:     `shad sessions save --all`.
-          Then:     exit 0, stderr empty, stdout reports 2 sessions saved and
-                    lists the opencode session as not supported, and the
-                    snapshot holds kb with A, Netbird and its prompt, and tin
-                    shad with B and its prompt, neither attached.
+          Then:     exit 0, stdout reports 2 sessions saved, stderr lists
+                    the opencode session as not supported, and the snapshot
+                    holds kb with A, Netbird and its prompt, and tin shad
+                    with B and its prompt, neither attached.
         """
         self.start_session("kb", UUID_A, name="Netbird", title="Fix the panel", status="idle")
         self.start_session("tin-shad", UUID_B)
@@ -31,10 +31,11 @@ class SaveAllTests(SessionsCase):
 
         result = self.run_detached("sessions", "save", "--all")
 
-        self.assertEqual((result.code, result.err), (0, ""), result.out)
+        self.assertEqual(result.code, 0, result.err)
         self.assertIn("2 sessions saved", result.out)
-        self.assertIn(opencode, result.out)
-        self.assertIn("not supported", result.out)
+        self.assertNotIn(opencode, result.out)
+        self.assertIn(opencode, result.err)
+        self.assertIn("not supported", result.err)
         self.assertEqual(
             self.read_snapshot(),
             [
@@ -77,14 +78,17 @@ class SaveAllTests(SessionsCase):
         Criterion:  save-all-with-only-unsupported-sessions-fails
           Given:    the only shad session runs opencode.
           When:     `shad sessions save --all`.
-          Then:     exit 1, stderr one line `no_saveable_session:
-                    <non-empty>`, and no snapshot is written.
+          Then:     exit 1, stdout empty, stderr one line
+                    `no_saveable_session: <non-empty>` that names the
+                    session and why, and no snapshot is written.
         """
-        self.start_session("kb", "fresh-1", harness="opencode")
+        session = self.start_session("kb", "fresh-1", harness="opencode")
         result = self.run_detached("sessions", "save", "--all")
-        self.assertEqual(result.code, 1)
+        self.assertEqual((result.code, result.out), (1, ""), result.err)
         self.assertRegex(result.err, r"^no_saveable_session: .+\n$")
         self.assertIn("no session could be saved", result.err)
+        self.assertIn(session, result.err)
+        self.assertIn("not supported", result.err)
         self.assertFalse(self.snapshot.exists())
 
 

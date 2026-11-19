@@ -123,15 +123,15 @@ touch ~/.config/shad/shad.toml
 
 | Command | Description |
 |---|---|
-| `shad config` / `shad config show` | Print a rendered summary of defaults and projects |
+| `shad config` / `shad config show [--json]` | Print a rendered summary of defaults and projects |
 | `shad config show --raw` | Print the file contents as-is |
 | `shad config path` | Print the resolved config file path |
 | `shad config keys` | Print every settable key, one per line |
-| `shad config get <key>` | Print one value; a table is expanded into dotted lines |
+| `shad config get <key> [--json]` | Print one value; a table is expanded into dotted lines |
 | `shad config set <key> <value>` | Set one value |
 | `shad config unset <key>` | Remove a key, or a whole project table |
 | `shad config edit` | Open the file in `$EDITOR`, then validate it |
-| `shad config validate` | Check that the file parses and loads |
+| `shad config validate [--json]` | Check that the file parses and loads |
 
 `get` prints the effective value: a key that is absent from the file falls back to what `shad` actually uses (for example `defaults.oc_position` or a project's derived `session`). `show` marks which defaults are set in the file and which are built in.
 
@@ -258,6 +258,7 @@ shad init
 
 # List all configured projects and groups
 shad projects
+shad projects --json
 
 # Open a top-level project (exact or prefix match)
 shad projects kb
@@ -277,6 +278,7 @@ shad projects alvr db --harness opencode
 # Show session status without opening
 shad projects kb status
 shad projects alvr db status
+shad projects kb status --json
 
 # Git maintenance across projects
 shad git sync                     # every configured project
@@ -294,7 +296,7 @@ shad git panel --no-fetch         # skip the fetch on open
 # The todo list: one list, not tied to a project
 shad todo add                     # write the item in $EDITOR from a template
 shad todo add "Fix panel resize" --label chore
-shad todo list                    # --keys prints just the keys
+shad todo list                    # --keys prints just the keys; --json the items as JSON
 shad todo status fix in-progress  # keys accept a unique prefix
 shad todo edit fix                # open the item in $EDITOR
 shad todo rm fix
@@ -307,16 +309,19 @@ shad sessions save --all          # record every running session, no picker
 shad sessions restore             # resumes each saved conversation, then attaches
 shad sessions restore --no-attach # for a script
 shad sessions stop                # pick running sessions to kill
-shad sessions show
+shad sessions show                # --json prints the snapshot as JSON
 
 # Show a tmux cheat sheet popup
 shad cheat
 
 # Inspect and edit the config file
 shad config
+shad config --json
 shad config path
 shad config keys
 shad config get defaults.harness
+shad config get defaults.harness --json
+shad config validate --json
 shad config set defaults.panel_percent 40
 shad config set projects.kb.path ~/gh/kb
 shad config unset projects.kb
@@ -336,12 +341,41 @@ $ echo $?
 ```
 
 `code` is a stable word a script can match on; the message is for people and may change.
-Nothing else is printed on stderr by default. `--debug`, given before or after the subcommand,
-adds the traceback of the failure and shad's diagnostics (a version fetch that failed, a
-`git sync` project that failed) to stderr. stdout is the same with and without it.
+stderr otherwise holds only what a command reports about its run: a session `sessions save`
+could not record, a tab `sessions restore` could not open, a problem `todo edit` found in the
+saved file. On failure the error line comes last. `--debug`, given before or after the
+subcommand, adds the traceback of the failure and shad's diagnostics (a version fetch that
+failed, a `git sync` project that failed) to stderr. stdout is the same with and without it.
+
+An invocation the parser itself rejects (an unknown flag, a value outside the allowed set)
+prints argparse's usage line and `shad: error: ...` and exits `2`; it carries no `code`.
 
 Ctrl-C prints `Aborted.` and exits `130`. A command that hands the terminal to tmux, `shad
 projects <name>` and `shad sessions restore`, exits with tmux's exit status once you detach.
+
+### Scripting
+
+Every read command accepts `--json`, before or after the subcommand, and then prints one JSON
+document on stdout and nothing else: no color, no table, no progress.
+
+| Command | The document |
+|---|---|
+| `shad projects [<group>] --json` | `group` (null for every project) and `projects`: `key`, `group`, `path`, `session`, `harness` per project |
+| `shad projects [<group>] <name> status --json` | `project`, `tmux` (`server`, `sessions`), `git` (`branch`, `tag`, `changed`, `untracked`, `commits`) or null, `runtimes`, `opencode` |
+| `shad config [show] --json` | `path`, `defaults` (`value` and `origin` per setting), `projects` (`project`, `exists`), `todo` (`labels`, `path`, `path_set`) |
+| `shad config get <key> --json` | `key`, `value` (a scalar, a list, or a table as an object), `source` (`file` or `default`) |
+| `shad config validate --json` | `path`, `valid`, `projects`, `groups` |
+| `shad todo list --json` | `labels` (the vocabulary) and `items`: `key`, `title`, `status`, `labels`, `created`, `updated`, `body`, `problems` per item |
+| `shad sessions show --json` | `saved_at` and `sessions`, as the snapshot file spells them |
+
+A document's shape is stable across patch releases: a field may be added, and none is removed
+or renamed without a minor version bump. A failure is never JSON; it is the stderr line and the
+exit code above.
+
+The output of `shad config path`, `shad config keys`, `shad todo list --keys`, `shad todo label
+list` and `shad completion bash` is the machine form as it is: one value per line, or the
+script. `shad config show --raw` prints the file. These, every command that changes something,
+and the full-screen panels reject `--json` with the usage error `no_json`.
 
 ## Git maintenance
 
@@ -585,7 +619,7 @@ and in `shad todo list`, never fatal.
 |---|---|
 | `shad todo add [--label L ...]` | Create the item from a template opened in the editor |
 | `shad todo add "title" [--label L ...]` | Create the item; prints its key and path |
-| `shad todo list [--keys]` | Print the items, or just their keys one per line |
+| `shad todo list [--keys \| --json]` | Print the items, just their keys one per line, or the items as JSON |
 | `shad todo status <key> <status>` | `todo`, `in-progress`, `done`, or `wont-do` |
 | `shad todo edit <key>` | Open the file in `$VISUAL`, `$EDITOR`, or the first editor found |
 | `shad todo rm <key>` | Delete the file |
@@ -703,8 +737,8 @@ own, opened behind the current tab and attached to that session, with the
 project directory as the tab's working directory. A session that was detached
 at save stays detached. A session that already has a client gets no tab,
 because a second client would mirror the first. When a tab cannot be opened,
-`restore` prints the `tmux attach-session` command for each session without
-one. `--no-attach` opens no tabs.
+`restore` prints, on stderr, the `tmux attach-session` command for each
+session without one. `--no-attach` opens no tabs.
 
 The tabs need this line in `kitty.conf`:
 
@@ -727,8 +761,9 @@ again. The session the command runs in is not listed, because killing it would
 detach you mid-command.
 
 Supported harness for `save` and `restore`: Claude Code. A session running
-OpenCode is listed by `save` with the reason it cannot be saved, and is not
-written. `stop` kills it like any other.
+OpenCode is listed by `save` on stderr with the reason it cannot be saved, and
+is not written; when no session can be saved, the error line names each one.
+`stop` kills it like any other.
 
 The snapshot is `sessions.json` in the data dir, `$XDG_DATA_HOME/shad`
 (`~/.local/share/shad` on Linux), beside the todo files.
@@ -881,11 +916,18 @@ shad/
         ├── __init__.py
         ├── __main__.py
         ├── cli.py
+        ├── banner.py
+        ├── deps.py
+        ├── errors.py
+        ├── output.py
+        ├── parsers.py
+        ├── trace.py
         ├── cheat/
         │   └── command.py
         ├── completion/
         │   └── command.py
         ├── config/
+        │   ├── command.py
         │   ├── render.py
         │   ├── schema.py
         │   ├── store.py
@@ -918,14 +960,17 @@ shad/
         ├── init/
         │   └── command.py
         ├── projects/
+        │   ├── command.py
+        │   ├── list/
+        │   │   └── command.py
         │   ├── open/
-        │   │   ├── banner.py
         │   │   ├── command.py
         │   │   ├── layout.py
         │   │   └── sessions.py
         │   └── status/
         │       └── command.py
         ├── sessions/
+        │   ├── command.py
         │   ├── harness.py
         │   ├── live.py
         │   ├── model.py
@@ -941,8 +986,6 @@ shad/
         │   │   └── command.py
         │   └── stop/
         │       └── command.py
-        ├── errors.py
-        ├── trace.py
         ├── shared/
         │   ├── config.py
         │   ├── editor.py
@@ -951,6 +994,7 @@ shad/
         │   ├── terminal.py
         │   └── tmux.py
         └── todo/
+            ├── command.py
             ├── model.py
             ├── render.py
             ├── store.py

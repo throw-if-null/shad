@@ -1,33 +1,41 @@
-"""`shad todo status` — set one item's status."""
+"""`shad todo status` — set one item's status. `set_status` is also what the panel's keys run."""
 
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
-from rich.console import Console
 from rich.text import Text
 
+from shad import parsers
+from shad.deps import Deps
 from shad.errors import ShadError
-from shad.shared.config import Config
 from shad.todo import store
-from shad.todo.model import STATUSES
+from shad.todo.model import STATUSES, Item
 from shad.todo.render import status_word
 
-console = Console()
+
+def register(sub: parsers.Subparsers) -> None:
+    parser = parsers.command(sub, "status", run=run, help="Set an item's status")
+    parser.add_argument("key", metavar="KEY", help="Item key, or a unique prefix")
+    parser.add_argument("status", metavar="STATUS", choices=STATUSES)
 
 
-def set_todo_status(cfg: Config, args: argparse.Namespace) -> None:
-    if args.status not in STATUSES:
-        raise ShadError.validation(
-            "invalid_status",
-            f"unknown status '{args.status}'; must be one of: {', '.join(STATUSES)}",
-        )
-    directory = store.todo_dir(cfg)
-    key = store.resolve_key(directory, args.key)
-    item = store.set_status(directory, key, args.status)
-    console.print(
+def run(args: argparse.Namespace, deps: Deps) -> None:
+    item = set_status(store.todo_dir(deps.config), args.key, args.status)
+    deps.out.print(
         Text("  ✓ ", style="bold green")
         + Text(item.key, style="bright_white")
         + Text("  ")
         + status_word(item.status)
     )
+
+
+def set_status(directory: Path, key: str, status: str) -> Item:
+    """The item *key* names, or a unique prefix of it, rewritten with *status*."""
+    if status not in STATUSES:
+        raise ShadError.validation(
+            "invalid_status",
+            f"unknown status '{status}'; must be one of: {', '.join(STATUSES)}",
+        )
+    return store.set_status(directory, store.resolve_key(directory, key), status)

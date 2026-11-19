@@ -1,10 +1,15 @@
 """
 The todo panel — the pane that shows the todo files.
 
-A list over a detail box, under a one-line header. Every read and write goes
-through store.py; this module only draws and dispatches keys. It polls the
-directory once a second, so an item added from the CLI or edited in another
-pane appears without a keypress.
+A list over a detail box, under a one-line header. The reads go through
+store.py, and each key that changes an item runs the command that owns the
+change: `set_status`, `remove`, `add_in_editor`, `edit_in_editor`. This module
+only draws and dispatches keys. It polls the directory once a second, so an
+item added from the CLI or edited in another pane appears without a keypress.
+
+The panel is the presentation boundary while it runs: a failure of one of
+those commands is shown as a notification with its code and category, and the
+panel goes on.
 
 The pane is about 25 rows by 40 to 50 columns at the default todo_percent, so
 the list and the detail are stacked rather than side by side, and the header
@@ -16,9 +21,8 @@ this module lazily, so `shad todo add` never pays for it.
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, Literal
 
 from rich.text import Text
 from textual.app import App, ComposeResult
@@ -27,12 +31,15 @@ from textual.containers import VerticalScroll
 from textual.widgets import DataTable, Footer, Static
 
 from shad.errors import ShadError
-from shad.shared.editor import resolve_editor
+from shad.output import Output
 from shad.shared.render import relative_age
 from shad.todo import store
 from shad.todo.add.command import add_in_editor
+from shad.todo.edit.command import edit_in_editor
 from shad.todo.model import Item, Status, problems
 from shad.todo.render import labels_text, status_glyph, status_word, title_text
+from shad.todo.rm.command import remove
+from shad.todo.status.command import set_status
 
 POLL_SECONDS = 1.0
 
@@ -66,10 +73,11 @@ class TodoPanel(App[None]):
         Binding("k", "cursor_up", "up", show=False),
     ]
 
-    def __init__(self, directory: Path, labels: list[str]) -> None:
+    def __init__(self, directory: Path, labels: list[str], out: Output) -> None:
         super().__init__()
         self._directory = directory
         self._labels = labels
+        self._out = out
         self._items: dict[str, Item] = {}
         self._signature = store.signature(directory)
         self._pending_delete: str | None = None
@@ -175,7 +183,10 @@ class TodoPanel(App[None]):
         key = self.current_key()
         if key is None:
             return
-        store.set_status(self._directory, key, status)
+        try:
+            set_status(self._directory, key, status)
+        except ShadError as exc:
+            self._report(exc)
         self.load()
 
     def action_delete(self) -> None:
@@ -191,7 +202,10 @@ class TodoPanel(App[None]):
             return
         self._pending_delete = None
         if key in self._items:
-            store.remove(self._directory, key)
+            try:
+                remove(self._directory, key)
+            except ShadError as exc:
+                self._report(exc)
         self.load()
 
     def action_cancel(self) -> None:
@@ -206,20 +220,23 @@ class TodoPanel(App[None]):
     def action_add(self) -> None:
         self._cancel()
         item: Item | None = None
-        error = ""
+        failure: ShadError | None = None
+        interrupted = False
         # suspend() resumes the app only when its block exits normally
         # (textual 8.2), so every exception is caught inside the block.
         # Ctrl-C at the "Edit again?" prompt raises KeyboardInterrupt here,
         # because the terminal is in cooked mode while the app is suspended.
         with self.suspend():
             try:
-                item = add_in_editor(self._directory, [], self._labels)
+                item = add_in_editor(self._directory, [], self._labels, self._out)
             except ShadError as exc:
-                error = str(exc)
+                failure = exc
             except (KeyboardInterrupt, EOFError):
-                error = "no todo created"
-        if error:
-            self.notify(error, severity="warning", markup=False)
+                interrupted = True
+        if failure is not None:
+            self._report(failure)
+        elif interrupted:
+            self.notify("no todo created", severity="warning", markup=False)
         self.load()
         if item is not None and item.key in self._items:
             table: DataTable[Text] = self.query_one("#items", DataTable)
@@ -230,12 +247,24 @@ class TodoPanel(App[None]):
         key = self.current_key()
         if key is None:
             return
-        path = store.item_path(self._directory, key)
-        editor = resolve_editor()
+        failure: ShadError | None = None
         # The editor takes the terminal over; textual restores it on exit.
+        # Caught inside the block for the reason action_add gives.
         with self.suspend():
-            subprocess.run([*editor.split(), str(path)], check=False)
+            try:
+                edit_in_editor(self._directory, key)
+            except ShadError as exc:
+                failure = exc
+        if failure is not None:
+            self._report(failure)
         self.load()
+
+    def _report(self, exc: ShadError) -> None:
+        """A failed key, in the panel's own surface: the code and the category."""
+        severity: Literal["warning", "error"] = (
+            "warning" if exc.category in ("validation", "not_found", "conflict") else "error"
+        )
+        self.notify(f"{exc.code}: {exc.message}", title=exc.category, severity=severity, markup=False)
 
     def action_refresh(self) -> None:
         self._cancel()
@@ -248,5 +277,5 @@ class TodoPanel(App[None]):
         self.query_one("#items", DataTable).action_cursor_up()
 
 
-def run_panel(directory: Path, labels: list[str]) -> None:
-    TodoPanel(directory, labels).run()
+def run_panel(directory: Path, labels: list[str], out: Output) -> None:
+    TodoPanel(directory, labels, out).run()

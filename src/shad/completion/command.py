@@ -18,7 +18,10 @@ second process launch.
 
 from __future__ import annotations
 
-from shad.errors import ShadError
+import argparse
+
+from shad import parsers
+from shad.deps import Deps
 from shad.shared.config import HARNESSES, OC_POSITIONS
 from shad.todo.model import STATUSES
 
@@ -143,10 +146,17 @@ _shad_complete_config() {
 
     case "${args[0]}" in
     show)
-        _shad_offer "$cur" "$(_shad_unused "--raw" "${flags[@]}")"
+        _shad_offer "$cur" "$(_shad_unused "--json --raw" "${flags[@]}")"
         ;;
     get)
-        ((${#args[@]} == 1)) && _shad_offer "$cur" "$("${_shad_cmd[@]}" config keys 2>/dev/null)"
+        if ((${#args[@]} == 1)); then
+            _shad_offer "$cur" "$("${_shad_cmd[@]}" config keys 2>/dev/null)"
+        else
+            _shad_offer "$cur" "$(_shad_unused "--json" "${flags[@]}")"
+        fi
+        ;;
+    validate)
+        _shad_offer "$cur" "$(_shad_unused "--json" "${flags[@]}")"
         ;;
     unset)
         if ((${#args[@]} == 1)); then
@@ -197,7 +207,7 @@ _shad_complete_todo() {
         _shad_offer "$cur" "--label"
         ;;
     list)
-        _shad_offer "$cur" "$(_shad_unused "--keys" "${flags[@]}")"
+        _shad_offer "$cur" "$(_shad_unused "--json --keys" "${flags[@]}")"
         ;;
     status)
         if ((${#rest[@]} == 0)); then
@@ -290,7 +300,7 @@ _shad_complete() {
 
     # positional[0] is the command name itself.
     if ((${#positional[@]} == 1)); then
-        local top_flags="--debug --version --help"
+        local top_flags="--debug --json --version --help"
         ((${#_shad_cmd[@]} == 1)) && top_flags="--config $top_flags"
         _shad_offer "$cur" \
             "projects git config completion init cheat todo sessions" \
@@ -330,6 +340,8 @@ _shad_complete() {
             _shad_offer "$cur" "$(_shad_unused "--all" "${flags[@]}")"
         elif [[ "${args[0]}" == "restore" ]]; then
             _shad_offer "$cur" "$(_shad_unused "--no-attach" "${flags[@]}")"
+        elif [[ "${args[0]}" == "show" ]]; then
+            _shad_offer "$cur" "$(_shad_unused "--json" "${flags[@]}")"
         fi
         return
         ;;
@@ -355,17 +367,22 @@ _shad_complete() {
         esac
         args=("${args[@]:1}")
     else
-        # An action ends a `projects` line; nothing may follow it.
+        # An action ends a `projects` line; only its --json may follow it.
         for word in "${args[@]}"; do
             case "$word" in
-            status) return ;;
+            status)
+                _shad_offer "$cur" "$(_shad_unused "--json" "${flags[@]}")"
+                return
+                ;;
             esac
         done
         # Two names is the longest valid `projects` line; past that the
         # command itself errors, so offer nothing.
         ((${#args[@]} > 2)) && return
-        # Open only, so it is dropped above once an action is present.
+        # A name opens a project, which has no --json; with no name the
+        # line lists, which has.
         extra="--harness"
+        ((${#args[@]} == 0)) && extra="--json --harness"
     fi
 
     local flag_words
@@ -407,7 +424,25 @@ BASH_COMPLETION = (
 )
 
 
-def print_completion(shell: str) -> None:
-    if shell != "bash":
-        raise ShadError.usage("unsupported_shell", f"unsupported shell: {shell!r}")
-    print(BASH_COMPLETION)
+def register(sub: parsers.Subparsers) -> None:
+    parser = parsers.command(
+        sub,
+        "completion",
+        run=run,
+        help="Print the bash completion script",
+        description=(
+            "Print the bash completion script to stdout. The script is the\n"
+            "machine form as it is; there is no --json.\n\n"
+            "To install:\n"
+            "  echo 'source <(shad completion bash)' >> ~/.bashrc\n\n"
+            "Source the script rather than pasting its text into a startup file.\n"
+            "A pasted copy keeps completing the command surface that existed when\n"
+            "it was written."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("shell", choices=["bash"], help="Shell to generate completions for")
+
+
+def run(args: argparse.Namespace, deps: Deps) -> None:
+    deps.out.plain(BASH_COMPLETION)

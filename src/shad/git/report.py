@@ -2,31 +2,29 @@
 Rendering for `shad git sync`.
 
 Nothing here runs git or decides anything — it prints the plans and outcomes
-that shad.git.command produces. Sections with nothing to show are omitted
-entirely, and projects with nothing to report collapse to a single line, so a
-seven-project run stays readable.
+that shad.git.command produces, on the Output the root injected. Sections
+with nothing to show are omitted entirely, and projects with nothing to
+report collapse to a single line, so a seven-project run stays readable.
 """
 
 from __future__ import annotations
 
-from rich.console import Console
 from rich.text import Text
 
 from shad.git.model import ProjectOutcome, ProjectPlan, SyncRun
+from shad.output import Output
 from shad.shared.render import make_table
-
-console = Console()
 
 
 def _plural(count: int, noun: str, plural: str | None = None) -> str:
     return f"{count} {noun}" if count == 1 else f"{count} {plural or noun + 's'}"
 
 
-def render_header(count: int) -> None:
+def render_header(out: Output, count: int) -> None:
     """Announce a multi-project run, so the network gap is not silent."""
     if count > 1:
-        console.print()
-        console.print(Text(f"syncing {_plural(count, 'project')}…", style="dim"))
+        out.print()
+        out.print(Text(f"syncing {_plural(count, 'project')}…", style="dim"))
 
 
 def _project_title(plan: ProjectPlan) -> Text:
@@ -35,7 +33,7 @@ def _project_title(plan: ProjectPlan) -> Text:
     )
 
 
-def _render_fetch(plan: ProjectPlan) -> None:
+def _render_fetch(out: Output, plan: ProjectPlan) -> None:
     rows: list[tuple[str, Text]] = []
 
     if plan.relinked_from is not None:
@@ -84,10 +82,10 @@ def _render_fetch(plan: ProjectPlan) -> None:
     table = make_table("fetch")
     for label, value in rows:
         table.add_row(Text(label, style="dim"), value)
-    console.print(table)
+    out.print(table)
 
 
-def _render_pruned(plan: ProjectPlan, *, dry_run: bool) -> None:
+def _render_pruned(out: Output, plan: ProjectPlan, *, dry_run: bool) -> None:
     if not plan.pruned_refs:
         return
     # --dry-run fetches but never prunes, so these refs are still present.
@@ -99,10 +97,10 @@ def _render_pruned(plan: ProjectPlan, *, dry_run: bool) -> None:
             Text(ref, style="cyan"),
             Text(f"was tracked by {note}", style="dim") if note else Text(""),
         )
-    console.print(table)
+    out.print(table)
 
 
-def _render_kept(plan: ProjectPlan) -> None:
+def _render_kept(out: Output, plan: ProjectPlan) -> None:
     """Branches and worktrees get separate tables — their columns differ."""
     if plan.branches_kept:
         table = make_table("branches kept")
@@ -112,7 +110,7 @@ def _render_kept(plan: ProjectPlan) -> None:
                 Text(branch.sha, style="yellow"),
                 Text(branch.reason, style="dim"),
             )
-        console.print(table)
+        out.print(table)
 
     if plan.worktrees_kept:
         table = make_table("worktrees kept")
@@ -122,49 +120,49 @@ def _render_kept(plan: ProjectPlan) -> None:
                 Text(worktree.branch_name, style="cyan"),
                 Text(worktree.reason, style="dim"),
             )
-        console.print(table)
+        out.print(table)
 
 
-def render_applied(plans: list[ProjectPlan], *, dry_run: bool = False) -> None:
+def render_applied(out: Output, plans: list[ProjectPlan], *, dry_run: bool = False) -> None:
     """
     Report what already happened: fetch, prune, and fast-forward.
 
     Printed before the confirmation prompt, in the past tense, because
     declining the prompt does not undo any of it.
     """
-    console.print()
+    out.print()
     for plan in plans:
         if plan.status == "skipped":
-            console.print(
+            out.print(
                 Text("  ● ", style="cyan")
                 + Text(f"{plan.project.display_name}  ", style="dim")
                 + Text(plan.detail or "skipped", style="dim")
             )
             continue
         if plan.status == "failed":
-            console.print(
+            out.print(
                 Text("  ✗ ", style="bold red")
                 + Text(f"{plan.project.display_name}  ", style="bright_white")
                 + Text(plan.detail or "failed", style="dim")
             )
             continue
         if not plan.changed:
-            console.print(
+            out.print(
                 Text("  ● ", style="cyan")
                 + Text(f"{plan.project.display_name}  ", style="bright_white")
                 + Text("up to date", style="dim")
             )
             continue
 
-        console.print()
-        console.print(_project_title(plan))
-        console.print()
-        _render_fetch(plan)
-        _render_pruned(plan, dry_run=dry_run)
-        _render_kept(plan)
+        out.print()
+        out.print(_project_title(plan))
+        out.print()
+        _render_fetch(out, plan)
+        _render_pruned(out, plan, dry_run=dry_run)
+        _render_kept(out, plan)
 
 
-def render_pending(plans: list[ProjectPlan]) -> None:
+def render_pending(out: Output, plans: list[ProjectPlan]) -> None:
     """
     One consolidated table of every deletion across every project.
 
@@ -191,38 +189,38 @@ def render_pending(plans: list[ProjectPlan]) -> None:
                 Text(branch.reason, style="dim"),
             )
 
-    console.print()
-    console.print(table)
+    out.print()
+    out.print(table)
 
 
-def render_dry_run_footer() -> None:
-    console.print()
-    console.print(Text("  dry run — nothing was deleted", style="dim"))
-    console.print()
+def render_dry_run_footer(out: Output) -> None:
+    out.print()
+    out.print(Text("  dry run — nothing was deleted", style="dim"))
+    out.print()
 
 
-def render_results(outcomes: list[ProjectOutcome]) -> None:
+def render_results(out: Output, outcomes: list[ProjectOutcome]) -> None:
     """Per-deletion results, including the OID needed to undo a branch delete."""
     printed = False
     for outcome in outcomes:
         for path in outcome.removed_worktrees:
             if not printed:
-                console.print()
+                out.print()
                 printed = True
-            console.print(
+            out.print(
                 Text("  ✓ ", style="bold green")
                 + Text("removed worktree  ", style="dim")
                 + Text(str(path), style="cyan")
             )
         for branch in outcome.deleted_branches:
             if not printed:
-                console.print()
+                out.print()
                 printed = True
             # Deleting a branch drops its reflog, so this is the user's only
             # recovery path until the next gc. The command carries the full
             # OID: a 7-character prefix can be ambiguous in a large repository,
             # and an undo that fails to resolve is no undo at all.
-            console.print(
+            out.print(
                 Text("  ✓ ", style="bold green")
                 + Text("deleted branch    ", style="dim")
                 + Text(branch.name, style="cyan")
@@ -234,12 +232,12 @@ def render_results(outcomes: list[ProjectOutcome]) -> None:
             )
         for failure in outcome.failures:
             if not printed:
-                console.print()
+                out.print()
                 printed = True
-            console.print(Text("  ✗ ", style="bold red") + Text(failure, style="dim"))
+            out.print(Text("  ✗ ", style="bold red") + Text(failure, style="dim"))
 
 
-def render_summary(run: SyncRun) -> None:
+def render_summary(out: Output, run: SyncRun) -> None:
     """Counts on one line, then any per-project failures beneath it."""
     synced = [o for o in run.outcomes if o.plan.status == "ok"]
     skipped = [o for o in run.outcomes if o.plan.status == "skipped"]
@@ -247,7 +245,7 @@ def render_summary(run: SyncRun) -> None:
     branches = sum(len(o.deleted_branches) for o in run.outcomes)
     worktrees = sum(len(o.removed_worktrees) for o in run.outcomes)
 
-    console.print()
+    out.print()
     glyph = (
         Text("  ✓ ", style="bold green")
         if synced
@@ -260,20 +258,20 @@ def render_summary(run: SyncRun) -> None:
         parts.append(_plural(worktrees, "worktree") + " removed")
     if skipped:
         parts.append(_plural(len(skipped), "project") + " skipped")
-    console.print(glyph + Text("   ".join(parts), style="dim"))
+    out.print(glyph + Text("   ".join(parts), style="dim"))
 
     if failed:
-        console.print(
+        out.print(
             Text("  ✗ ", style="bold red")
             + Text(_plural(len(failed), "project") + " failed", style="dim")
         )
         for outcome in failed:
-            console.print(
+            out.print(
                 Text(f"      {outcome.plan.project.display_name}   ", style="bright_white")
                 + Text(outcome.plan.detail or "unknown error", style="dim")
             )
-    console.print()
+    out.print()
 
 
-def render_aborted() -> None:
-    console.print(Text("  Aborted.", style="dim"))
+def render_aborted(out: Output) -> None:
+    out.print(Text("  Aborted.", style="dim"))

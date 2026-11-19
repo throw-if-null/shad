@@ -1,352 +1,78 @@
 from __future__ import annotations
 
-import argparse
 import unittest
-from pathlib import Path
 from unittest.mock import patch
 
-from shad.cli import (
-    _run_action,
-    build_parser,
-    cmd_projects,
-    cmd_sessions,
-    cmd_todo,
-    main,
-)
+from shad.cheat import command as cheat
+from shad.cli import build_parser, main
+from shad.config.show import command as config_show
 from shad.errors import ShadError
-from shad.shared.config import Config, Defaults, Project
+from shad.git import command as git
+from shad.projects import command as projects
+from shad.sessions.restore import command as restore
+from shad.sessions.show import command as sessions_show
+from shad.shared.config import Config, Defaults
 from shad.testing import TmuxCase, run
-from shad.trace import Trace
+from shad.todo.label import command as label
+from shad.todo.list import command as todo_list
 
 
-def _make_project(
-    key: str, group: str | None = None, session: str | None = None
-) -> Project:
-    return Project(
-        key=key,
-        group=group,
-        path=Path("/tmp") / key,
-        session=session or (f"{group}-{key}" if group else key),
-    )
+class ParserRegistrationTests(unittest.TestCase):
+    """Each package registers its own parser and records what the root runs."""
 
-
-def _make_args(name: list[str], harness: str | None = None) -> argparse.Namespace:
-    return argparse.Namespace(name=name, harness=harness)
-
-
-# ---------------------------------------------------------------------------
-# cmd_projects dispatch
-# ---------------------------------------------------------------------------
-
-
-class ProjectsCommandTests(unittest.TestCase):
-    def test_grouped_project_open_dispatches_to_open_project(self) -> None:
-        project = _make_project("shad", group="tin")
-        cfg = Config(defaults=Defaults(), groups={"tin": {"shad": project}})
-        args = _make_args(["tin", "shad"])
-
-        with (
-            patch("shad.cli.print_banner"),
-            patch("shad.cli.open_project", return_value=0) as open_project,
-        ):
-            code = cmd_projects(cfg, args)
-
-        self.assertEqual(code, 0)
-        open_project.assert_called_once_with(project, cfg.defaults, harness=None)
-
-    def test_top_level_project_open_dispatches_to_open_project(self) -> None:
-        project = _make_project("shad")
-        cfg = Config(defaults=Defaults(), projects={"shad": project})
-        args = _make_args(["shad"])
-
-        with (
-            patch("shad.cli.print_banner"),
-            patch("shad.cli.open_project", return_value=0) as open_project,
-        ):
-            code = cmd_projects(cfg, args)
-
-        self.assertEqual(code, 0)
-        open_project.assert_called_once_with(project, cfg.defaults, harness=None)
-
-
-class ProjectsListTests(unittest.TestCase):
-    def test_no_args_lists_all_with_no_projects(self) -> None:
-        cfg = Config(defaults=Defaults())
-        args = _make_args([])
-
-        with patch("shad.cli.console") as mock_console:
-            cmd_projects(cfg, args)
-
-        output = " ".join(str(c) for c in mock_console.print.call_args_list)
-        self.assertIn("no projects configured", output)
-
-    def test_no_args_lists_top_level_and_groups(self) -> None:
-        cfg = Config(
-            defaults=Defaults(),
-            projects={"myapp": _make_project("myapp")},
-            groups={"tin": {"shad": _make_project("shad", group="tin")}},
-        )
-        args = _make_args([])
-
-        with patch("shad.cli.console"):
-            cmd_projects(cfg, args)
-
-    def test_single_token_resolves_to_group_and_lists_subprojects(self) -> None:
-        cfg = Config(
-            defaults=Defaults(),
-            groups={"tin": {"shad": _make_project("shad", group="tin")}},
-        )
-        args = _make_args(["tin"])
-
-        with patch("shad.cli.console"):
-            cmd_projects(cfg, args)
-
-    def test_single_token_unknown_raises_shad_error(self) -> None:
-        cfg = Config(defaults=Defaults())
-        args = _make_args(["xyz"])
-
-        with self.assertRaises(ShadError) as ctx:
-            cmd_projects(cfg, args)
-
-        self.assertIn("xyz", str(ctx.exception))
-
-    def test_single_token_ambiguous_raises_shad_error(self) -> None:
-        cfg = Config(
-            defaults=Defaults(),
-            projects={
-                "shad": _make_project("shad"),
-                "shell": _make_project("shell"),
-            },
-        )
-        args = _make_args(["sh"])
-
-        with self.assertRaises(ShadError) as ctx:
-            cmd_projects(cfg, args)
-
-        self.assertIn("ambiguous", str(ctx.exception))
-
-    def test_action_on_group_raises_shad_error(self) -> None:
-        cfg = Config(
-            defaults=Defaults(),
-            groups={"tin": {"shad": _make_project("shad", group="tin")}},
-        )
-        args = _make_args(["tin", "status"])
-
-        with self.assertRaises(ShadError) as ctx:
-            cmd_projects(cfg, args)
-
-        self.assertIn("group", str(ctx.exception))
-
-    def test_two_tokens_status_action_calls_print_status(self) -> None:
-        project = _make_project("shad", group="tin")
-        cfg = Config(defaults=Defaults(), groups={"tin": {"shad": project}})
-        args = _make_args(["tin", "shad", "status"])
-
-        with patch("shad.cli.print_status") as mock_status:
-            cmd_projects(cfg, args)
-
-        mock_status.assert_called_once()
-        self.assertIs(mock_status.call_args.args[0], project)
-
-    def test_group_token_resolves_to_top_level_project_raises_helpful_error(
-        self,
-    ) -> None:
-        cfg = Config(
-            defaults=Defaults(),
-            projects={"shad": _make_project("shad")},
-        )
-        args = _make_args(["shad", "something"])
-
-        with self.assertRaises(ShadError) as ctx:
-            cmd_projects(cfg, args)
-
-        self.assertIn("did you mean", str(ctx.exception))
-
-    def test_unknown_group_raises_shad_error(self) -> None:
-        cfg = Config(defaults=Defaults())
-        args = _make_args(["xyz", "proj"])
-
-        with self.assertRaises(ShadError) as ctx:
-            cmd_projects(cfg, args)
-
-        self.assertIn("no group matching", str(ctx.exception))
-
-    def test_unknown_project_within_group_raises_shad_error(self) -> None:
-        cfg = Config(
-            defaults=Defaults(),
-            groups={"tin": {"shad": _make_project("shad", group="tin")}},
-        )
-        args = _make_args(["tin", "zzz"])
-
-        with self.assertRaises(ShadError) as ctx:
-            cmd_projects(cfg, args)
-
-        self.assertIn("no project matching", str(ctx.exception))
-        self.assertIn("tin", str(ctx.exception))
-
-    def test_too_many_tokens_raises_shad_error(self) -> None:
-        cfg = Config(defaults=Defaults())
-        args = _make_args(["a", "b", "c"])
-
-        with self.assertRaises(ShadError) as ctx:
-            cmd_projects(cfg, args)
-
-        self.assertIn("too many arguments", str(ctx.exception))
-
-    def test_a_cancelled_open_returns_none(self) -> None:
-        project = _make_project("shad")
-        cfg = Config(defaults=Defaults(), projects={"shad": project})
-        args = _make_args(["shad"])
-
-        with (
-            patch("shad.cli.print_banner"),
-            patch("shad.cli.open_project", return_value=None),
-        ):
-            self.assertIsNone(cmd_projects(cfg, args))
-
-    def test_the_attach_exit_code_is_returned(self) -> None:
-        project = _make_project("shad")
-        cfg = Config(defaults=Defaults(), projects={"shad": project})
-        args = _make_args(["shad"])
-
-        with (
-            patch("shad.cli.print_banner"),
-            patch("shad.cli.open_project", return_value=3),
-        ):
-            self.assertEqual(cmd_projects(cfg, args), 3)
-
-    def test_unknown_action_raises_shad_error(self) -> None:
-        project = _make_project("shad")
-        cfg = Config(defaults=Defaults(), projects={"shad": project})
-
-        with self.assertRaises(ShadError) as ctx:
-            _run_action(cfg, project, "restart", None, Trace())
-
-        self.assertIn("unknown action", str(ctx.exception))
-
-
-# ---------------------------------------------------------------------------
-# main() error handling
-# ---------------------------------------------------------------------------
-
-
-
-class ProjectsHarnessOverrideTests(unittest.TestCase):
-    def test_override_is_forwarded_for_a_top_level_project(self) -> None:
-        project = _make_project("shad")
-        cfg = Config(defaults=Defaults(), projects={"shad": project})
-        args = _make_args(["shad"], harness="claude")
-
-        with (
-            patch("shad.cli.print_banner"),
-            patch("shad.cli.open_project", return_value=0) as open_project,
-        ):
-            cmd_projects(cfg, args)
-
-        open_project.assert_called_once_with(project, cfg.defaults, harness="claude")
-
-    def test_override_is_forwarded_for_a_grouped_project(self) -> None:
-        project = _make_project("shad", group="tin")
-        cfg = Config(defaults=Defaults(), groups={"tin": {"shad": project}})
-        args = _make_args(["tin", "shad"], harness="opencode")
-
-        with (
-            patch("shad.cli.print_banner"),
-            patch("shad.cli.open_project", return_value=0) as open_project,
-        ):
-            cmd_projects(cfg, args)
-
-        open_project.assert_called_once_with(project, cfg.defaults, harness="opencode")
-
-    def test_status_action_ignores_the_override(self) -> None:
-        project = _make_project("shad")
-        cfg = Config(defaults=Defaults(), projects={"shad": project})
-        args = _make_args(["shad", "status"], harness="claude")
-
-        with (
-            patch("shad.cli.print_status") as print_status,
-            patch("shad.cli.open_project") as open_project,
-        ):
-            cmd_projects(cfg, args)
-
-        print_status.assert_called_once()
-        self.assertIs(print_status.call_args.args[0], project)
-        open_project.assert_not_called()
-
-    def test_parser_accepts_harness_on_the_projects_subcommand(self) -> None:
+    def test_each_parser_records_its_run(self) -> None:
         parser = build_parser()
+        for argv, expected in (
+            (["projects"], projects.run),
+            (["git", "sync"], git.run_sync),
+            (["git", "panel"], git.run_panel),
+            (["config"], config_show.run),
+            (["config", "show"], config_show.run),
+            (["todo", "list"], todo_list.run),
+            (["todo", "label", "list"], label.run_list),
+            (["sessions", "show"], sessions_show.run),
+            (["sessions", "restore"], restore.run),
+            (["cheat"], cheat.run),
+        ):
+            with self.subTest(argv=argv):
+                self.assertIs(parser.parse_args(argv).run, expected)
 
-        args = parser.parse_args(["projects", "tin", "shad", "--harness", "claude"])
+    def test_only_a_read_parser_records_a_render(self) -> None:
+        parser = build_parser()
+        for argv, reads in (
+            (["projects"], True),
+            (["config"], True),
+            (["config", "get", "k"], True),
+            (["config", "validate"], True),
+            (["config", "path"], False),
+            (["config", "set", "k", "v"], False),
+            (["todo", "list"], True),
+            (["todo", "add", "x"], False),
+            (["sessions", "show"], True),
+            (["sessions", "save"], False),
+            (["git", "sync"], False),
+            (["cheat"], False),
+        ):
+            with self.subTest(argv=argv):
+                self.assertEqual(parser.parse_args(argv).render is not None, reads)
 
+    def test_json_is_accepted_before_and_after_a_read_command(self) -> None:
+        parser = build_parser()
+        for argv in (["--json", "todo", "list"], ["todo", "list", "--json"], ["todo", "--json", "list"]):
+            with self.subTest(argv=argv):
+                self.assertTrue(parser.parse_args(argv).json)
+
+    def test_json_is_parsed_in_any_position_on_any_command(self) -> None:
+        # The root rejects it where it does not apply, so the rejection has one form.
+        self.assertTrue(build_parser().parse_args(["todo", "add", "x", "--json"]).json)
+
+    def test_the_projects_parser_takes_the_harness(self) -> None:
+        args = build_parser().parse_args(["projects", "tin", "shad", "--harness", "claude"])
         self.assertEqual(args.harness, "claude")
         self.assertEqual(args.name, ["tin", "shad"])
-
-    def test_parser_defaults_harness_to_none(self) -> None:
-        parser = build_parser()
-
-        args = parser.parse_args(["projects", "shad"])
-
-        self.assertIsNone(args.harness)
-
-    def test_parser_rejects_an_unknown_harness(self) -> None:
-        parser = build_parser()
-
+        self.assertIsNone(build_parser().parse_args(["projects", "shad"]).harness)
         with self.assertRaises(SystemExit), patch("sys.stderr"):
-            parser.parse_args(["projects", "shad", "--harness", "nope"])
-
-
-class SessionsCommandTests(unittest.TestCase):
-    def _cfg(self) -> Config:
-        return Config(defaults=Defaults(), projects={"kb": _make_project("kb")})
-
-    def test_each_action_dispatches_to_its_slice(self) -> None:
-        for action, target in (
-            ("save", "save_sessions"),
-            ("restore", "restore_sessions"),
-            ("stop", "stop_sessions"),
-            ("show", "show_sessions"),
-        ):
-            with self.subTest(action=action), patch(f"shad.cli.{target}") as mock:
-                args = argparse.Namespace(sessions_action=action)
-                cmd_sessions(self._cfg(), args)
-                mock.assert_called_once_with(self._cfg(), args)
-
-    def test_restore_exit_code_is_returned(self) -> None:
-        with patch("shad.cli.restore_sessions", return_value=3):
-            code = cmd_sessions(self._cfg(), argparse.Namespace(sessions_action="restore"))
-        self.assertEqual(code, 3)
-
-    def test_missing_action_raises_shad_error(self) -> None:
-        with self.assertRaises(ShadError):
-            cmd_sessions(self._cfg(), argparse.Namespace(sessions_action=None))
-
-
-class TodoCommandTests(unittest.TestCase):
-    def test_each_action_dispatches_to_its_slice(self) -> None:
-        cfg = Config(defaults=Defaults())
-        for action, target in (
-            ("panel", "open_todo_panel"),
-            ("add", "add_todo"),
-            ("list", "list_todos"),
-            ("status", "set_todo_status"),
-            ("edit", "edit_todo"),
-            ("rm", "remove_todo"),
-        ):
-            with self.subTest(action=action), patch(f"shad.cli.{target}") as mock:
-                args = argparse.Namespace(todo_action=action)
-                cmd_todo(cfg, args)
-                mock.assert_called_once_with(cfg, args)
-
-    def test_label_gets_the_config_path(self) -> None:
-        cfg = Config(defaults=Defaults())
-        args = argparse.Namespace(todo_action="label")
-        with patch("shad.cli.manage_labels") as mock:
-            cmd_todo(cfg, args, path=Path("/x/shad.toml"))
-        mock.assert_called_once_with(cfg, args, Path("/x/shad.toml"))
-
-    def test_missing_action_raises_shad_error(self) -> None:
-        with self.assertRaises(ShadError):
-            cmd_todo(Config(defaults=Defaults()), argparse.Namespace(todo_action=None))
+            build_parser().parse_args(["projects", "shad", "--harness", "nope"])
 
 
 class ErrorContractTests(TmuxCase):
@@ -412,6 +138,21 @@ class ErrorContractTests(TmuxCase):
                 self.assertTrue(result.err.startswith("invalid_config: "), result.err)
                 self.assertIn("Traceback", result.err)
 
+    def test_json_on_a_command_without_a_result_is_a_usage_error(self) -> None:
+        """
+        Criterion:  json-on-a-command-without-a-result-is-a-usage-error
+          When:     `shad --json todo add x`, and `shad todo add x --json`.
+          Then:     each exits 2, stdout empty, stderr one line
+                    `no_json: <non-empty>`, and no item is created.
+        """
+        self.write_config("[projects.kb]\npath = '/tmp/kb'\n")
+        for argv in (("--json", "todo", "add", "x"), ("todo", "add", "x", "--json")):
+            with self.subTest(argv=argv):
+                result = self.run_shad(*argv)
+                self.assertEqual((result.code, result.out), (2, ""), result.err)
+                self.assertRegex(result.err, r"^no_json: .+\n$")
+        self.assertEqual(self.run_shad("todo", "list", "--keys").out, "")
+
     def test_interrupt_exits_130(self) -> None:
         """
         Criterion:  interrupt-exits-130
@@ -438,14 +179,14 @@ class MainErrorHandlingTests(unittest.TestCase):
     """
 
     def test_an_undeclared_exception_is_internal(self) -> None:
-        with patch("shad.cli.load", side_effect=RuntimeError("boom")):
+        with patch("shad.deps.load", side_effect=RuntimeError("boom")):
             result = run(["projects"])
         self.assertEqual((result.code, result.out), (1, ""), result.err)
         self.assertEqual(result.err, "unexpected: RuntimeError: boom\n")
 
     def test_the_error_line_carries_the_code_and_the_debug_traceback(self) -> None:
         boom = ShadError.conflict("todo_exists", "todo 'x' already exists")
-        with patch("shad.cli.load", side_effect=boom):
+        with patch("shad.deps.load", side_effect=boom):
             plain = run(["projects"])
             debug = run(["--debug", "projects"])
         self.assertEqual((plain.code, plain.err), (1, "todo_exists: todo 'x' already exists\n"))
@@ -455,21 +196,21 @@ class MainErrorHandlingTests(unittest.TestCase):
 
     def test_shad_error_exits_1(self) -> None:
         with (
-            patch("shad.cli.load", side_effect=ShadError.internal("boom", "boom")),
+            patch("shad.deps.load", side_effect=ShadError.internal("boom", "boom")),
             patch("sys.stderr"),
         ):
             self.assertEqual(main(["projects"]), 1)
 
     def test_keyboard_interrupt_exits_130(self) -> None:
         with (
-            patch("shad.cli.load", side_effect=KeyboardInterrupt()),
+            patch("shad.deps.load", side_effect=KeyboardInterrupt()),
             patch("sys.stderr"),
         ):
             self.assertEqual(main(["projects"]), 130)
 
     def test_eof_error_exits_130(self) -> None:
         with (
-            patch("shad.cli.load", side_effect=EOFError()),
+            patch("shad.deps.load", side_effect=EOFError()),
             patch("sys.stderr"),
         ):
             self.assertEqual(main(["projects"]), 130)
@@ -486,16 +227,19 @@ class MainErrorHandlingTests(unittest.TestCase):
         with patch("shad.cli.print_banner"), patch("sys.stdout"):
             self.assertEqual(main([]), 0)
 
-    def test_the_sessions_exit_code_is_returned(self) -> None:
-        with (
-            patch("shad.cli.load", return_value=Config(defaults=Defaults())),
-            patch("shad.cli.cmd_sessions", return_value=3),
-        ):
+    def test_the_exit_status_a_hand_over_returns_is_the_exit_code(self) -> None:
+        with patch("shad.sessions.restore.command.run", return_value=3):
             self.assertEqual(main(["sessions", "restore"]), 3)
-
-    def test_the_cheat_exit_code_is_returned(self) -> None:
-        with patch("shad.cli.cmd_cheat", return_value=4):
+        with patch("shad.cheat.command.run", return_value=4):
             self.assertEqual(main(["cheat"]), 4)
+
+    def test_json_on_a_command_without_a_result_is_refused_before_it_runs(self) -> None:
+        for argv in (["--json", "todo", "add", "x"], ["todo", "add", "x", "--json"]):
+            with self.subTest(argv=argv), patch("shad.todo.add.command.run") as add:
+                result = run(argv)
+                self.assertEqual((result.code, result.out), (2, ""), result.err)
+                self.assertRegex(result.err, r"^no_json: .+\n$")
+                add.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -523,21 +267,21 @@ class GitCliTests(unittest.TestCase):
         self.assertEqual(args.command, "git")
         self.assertIsNone(args.git_action)
 
-    def test_main_dispatches_git_after_loading_the_config(self) -> None:
+    def test_main_hands_sync_the_loaded_config(self) -> None:
         cfg = Config(defaults=Defaults())
         with (
-            patch("shad.cli.load", return_value=cfg) as load,
-            patch("shad.cli.cmd_git") as cmd_git,
+            patch("shad.deps.load", return_value=cfg) as load,
+            patch("shad.git.command.run_sync", return_value=None) as run_sync,
         ):
             self.assertEqual(main(["git", "sync"]), 0)
-        load.assert_called_once()
-        cmd_git.assert_called_once()
-        self.assertIs(cmd_git.call_args.args[0], cfg)
+            run_sync.assert_called_once()
+            # The config loads on first use, through the Deps the root built.
+            self.assertIs(run_sync.call_args.args[1].config, cfg)
+            load.assert_called_once()
 
     def test_git_errors_exit_one(self) -> None:
         with (
-            patch("shad.cli.load", return_value=Config(defaults=Defaults())),
-            patch("shad.cli.cmd_git", side_effect=ShadError.internal("boom", "boom")),
+            patch("shad.git.command.run_sync", side_effect=ShadError.internal("boom", "boom")),
             patch("sys.stderr"),
         ):
             self.assertEqual(main(["git", "sync"]), 1)

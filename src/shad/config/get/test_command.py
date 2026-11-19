@@ -1,15 +1,47 @@
 from __future__ import annotations
 
+import json
+
 from shad.config.testing import ConfigCase
 
 
 class GetTests(ConfigCase):
     """
     Feature:    config/get
-    Boundary:   command. `shad config get KEY`, through main(argv) with
-                SHAD_CONFIG set and XDG_DATA_HOME under the test root.
+    Boundary:   command. `shad config get KEY [--json]`, through main(argv)
+                with SHAD_CONFIG set and XDG_DATA_HOME under the test root.
                 Contract: exit code + stdout + stderr.
     """
+
+    def test_get_json_carries_the_value_and_its_source(self) -> None:
+        """
+        Criterion:  get-json-carries-the-value-and-its-source
+          Given:    shad.toml sets panel_percent = 35 and no harness.
+          When:     `shad config get defaults.panel_percent --json`, and
+                    `shad config get defaults.harness --json`.
+          Then:     each exits 0 with stderr empty; stdout is one JSON
+                    object with `key`, `value` 35 and `source` "file" for
+                    the first, and `value` "opencode" and `source`
+                    "default" for the second.
+        """
+        self.assertEqual(
+            json.loads(self._run("get", "defaults.panel_percent", "--json")),
+            {"key": "defaults.panel_percent", "value": 35, "source": "file"},
+        )
+        self.assertEqual(
+            json.loads(self._run("get", "defaults.harness", "--json")),
+            {"key": "defaults.harness", "value": "opencode", "source": "default"},
+        )
+
+    def test_get_json_of_a_table_is_a_nested_object(self) -> None:
+        """
+        Criterion:  get-json-of-a-table-is-a-nested-object
+          Given:    the group alvr holds the project db.
+          When:     `shad config get projects.alvr --json`.
+          Then:     exit 0, and `value` is an object holding `db.path`.
+        """
+        document = json.loads(self._run("get", "projects.alvr", "--json"))
+        self.assertEqual(document["value"]["db"]["path"], f"{self.root}/alvr/db")
 
     def test_get_prints_a_value_from_the_file(self) -> None:
         """

@@ -164,53 +164,6 @@ class OpenTests(ProjectsCase):
         self.assertIn("claude", result.err)
 
 
-class ListTests(ProjectsCase):
-    """
-    Feature:    projects/list
-    Boundary:   command. `shad projects` and `shad projects <group>`,
-                through main(argv) with SHAD_CONFIG set. Contract: exit
-                code + stdout + stderr.
-    """
-
-    def test_list_prints_every_project_and_group(self) -> None:
-        """
-        Criterion:  list-prints-every-project-and-group
-          Given:    the projects kb, kc, tin shad and tin coral.
-          When:     `shad projects`.
-          Then:     exit 0, stderr empty, stdout names each project and the
-                    group.
-        """
-        result = self.run_shad("projects")
-        self.assertEqual((result.code, result.err), (0, ""), result.out)
-        for text in ("kb", "kc", "tin", "tin shad", "tin coral"):
-            self.assertIn(text, result.out)
-
-    def test_list_of_a_group_prints_its_projects(self) -> None:
-        """
-        Criterion:  list-of-a-group-prints-its-projects
-          When:     `shad projects tin`.
-          Then:     exit 0, stderr empty, stdout names tin shad and tin
-                    coral and no top-level project.
-        """
-        result = self.run_shad("projects", "tin")
-        self.assertEqual((result.code, result.err), (0, ""), result.out)
-        self.assertIn("tin shad", result.out)
-        self.assertIn("tin coral", result.out)
-        self.assertNotIn("kb", result.out)
-
-    def test_list_with_no_projects_says_so(self) -> None:
-        """
-        Criterion:  list-with-no-projects-says-so
-          Given:    the config names no project.
-          When:     `shad projects`.
-          Then:     exit 0, stderr empty, stdout says none is configured.
-        """
-        self.write_config("[defaults]\n")
-        result = self.run_shad("projects")
-        self.assertEqual((result.code, result.err), (0, ""), result.out)
-        self.assertIn("no projects configured", result.out)
-
-
 class FreshTargetTests(unittest.TestCase):
     """
     A fresh target that meets an existing session of its name. The pickers

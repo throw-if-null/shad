@@ -7,11 +7,10 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from rich.console import Console
-
+from shad.output import Output
 from shad.sessions import store
 from shad.sessions.model import Entry, Snapshot
-from shad.sessions.restore.command import restore_sessions
+from shad.sessions.restore.command import run as restore
 from shad.sessions.testing import (
     CFG,
     KB,
@@ -23,6 +22,7 @@ from shad.sessions.testing import (
     running,
 )
 from shad.shared.config import Config, Defaults, Project
+from shad.testing import deps
 
 DOC = Project(key="doc", group=None, path=Path("/p/doc"), session="doc", harness="claude")
 UUID_C = "33333333-3333-4333-8333-333333333333"
@@ -115,8 +115,8 @@ class RestoreTests(SessionsCase):
                     session that is not kitty.
           When:     `shad sessions restore` typed into that shell.
           Then:     the client moves to kb's session, and the shell shows
-                    that tin shad got no tab because the terminal is not
-                    kitty, with the attach command for it.
+                    (on stderr) that tin shad got no tab because the
+                    terminal is not kitty, with the attach command for it.
         """
         self.write_snapshot(
             entry("kb", UUID_A, attached=True), entry("shad", UUID_B, group="tin", attached=True)
@@ -156,15 +156,13 @@ class KittyTabTests(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.path = Path(self._tmp.name) / "sessions.json"
+        # The tab report goes to stderr; stdout holds the restored table.
         self.output = io.StringIO()
+        self.out = Output(stdout=io.StringIO(), stderr=self.output, width=120, color=False)
         for patcher in (
             patch("shad.sessions.store.snapshot_path", return_value=self.path),
             patch("shad.sessions.restore.command.attached_sessions", return_value=set()),
             patch("shad.shared.terminal.current", return_value="kitty"),
-            patch(
-                "shad.sessions.restore.command.console",
-                Console(file=self.output, width=120, force_terminal=False),
-            ),
             patch("shad.sessions.live.collect", return_value=[]),
             patch("shad.sessions.restore.plan.session_exists", return_value=False),
             patch("shad.sessions.harness.Claude.can_resume", return_value=True),
@@ -185,7 +183,7 @@ class KittyTabTests(unittest.TestCase):
             _entry("kb", UUID_A, attached=True), _entry("shad", UUID_B, group="tin", attached=True)
         )
         with patch("shad.shared.terminal.open_tab", return_value=None) as open_tab:
-            restore_sessions(CFG, self._args())
+            restore(self._args(), deps(CFG, out=self.out))
 
         open_tab.assert_called_once_with(
             "kitty",
@@ -197,7 +195,7 @@ class KittyTabTests(unittest.TestCase):
     def test_no_tab_for_a_session_detached_at_save(self) -> None:
         self._write_snapshot(_entry("kb", UUID_A, attached=True), _entry("shad", UUID_B, group="tin"))
         with patch("shad.shared.terminal.open_tab") as open_tab:
-            restore_sessions(CFG, self._args())
+            restore(self._args(), deps(CFG, out=self.out))
 
         open_tab.assert_not_called()
 
@@ -214,7 +212,7 @@ class KittyTabTests(unittest.TestCase):
             ),
             patch("shad.shared.terminal.open_tab") as open_tab,
         ):
-            restore_sessions(CFG, self._args())
+            restore(self._args(), deps(CFG, out=self.out))
 
         open_tab.assert_not_called()
 
@@ -223,7 +221,7 @@ class KittyTabTests(unittest.TestCase):
             _entry("kb", UUID_A, attached=True), _entry("shad", UUID_B, group="tin", attached=True)
         )
         with patch("shad.shared.terminal.open_tab") as open_tab:
-            restore_sessions(CFG, self._args(no_attach=True))
+            restore(self._args(no_attach=True), deps(CFG, out=self.out))
 
         open_tab.assert_not_called()
 
@@ -235,7 +233,7 @@ class KittyTabTests(unittest.TestCase):
             _entry("doc", UUID_C, attached=True),
         )
         with patch("shad.shared.terminal.open_tab", return_value="kitty said no") as open_tab:
-            restore_sessions(cfg, self._args())
+            restore(self._args(), deps(cfg, out=self.out))
 
         open_tab.assert_called_once()
         output = self.output.getvalue()
