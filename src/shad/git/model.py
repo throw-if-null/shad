@@ -246,4 +246,5 @@ class ProjectOutcome:
 class SyncRun:
     outcomes: list[ProjectOutcome] = field(default_factory=list)
     dry_run: bool = False
-    confirmed: bool = True
+    # whether the branch and worktree deletions were applied (--yes)
+    applied: bool = False

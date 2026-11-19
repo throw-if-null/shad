@@ -390,7 +390,7 @@ default, or over the projects you name.
 | `shad git sync <group> <name>` | Sync one grouped project |
 | `shad git sync --switch` | Also check out the default branch in each project |
 | `shad git sync --dry-run` | Report what would change; delete nothing |
-| `shad git sync --yes` | Apply the deletions without the prompt |
+| `shad git sync --yes` | Apply the branch and worktree deletions |
 
 Prefix matching works at each level, exactly as it does for `shad projects`.
 
@@ -405,8 +405,12 @@ For each project, in order:
 4. Prune worktree records whose directory is gone, and remove clean worktrees
    whose branch is being deleted.
 
-Steps 1 and 2 are applied immediately. Steps 3 and 4 are listed first and ask
-for one confirmation covering the whole run.
+Steps 1 and 2 are applied immediately. Steps 3 and 4 happen only with
+`--yes`: without it, `shad git sync` lists the deletions it would make and
+deletes nothing. There is no confirmation prompt — a run with no terminal
+behaves the same as one with. A run where any project fails exits `1`
+(`partial_failure`, or `sync_failed` when every project failed); the
+per-project report says which failed and why.
 
 ### Checking out the default branch
 
@@ -428,11 +432,11 @@ A project is skipped, with the reason, when it cannot be switched safely:
 Switching also **un-pins the branch it leaves behind**. A branch is normally
 kept because the main worktree has it checked out; once you are on the default
 branch, that branch is a deletion candidate like any other, and can be removed
-in the same run if it qualifies. It still appears in the confirmation table
-first, and the deletion rules do not change.
+in the same run if it qualifies. It still appears in the pending-deletions
+table first, and the deletion rules do not change.
 
-**Declining the prompt does not undo the fetch or the fast-forward.** Only the
-deletions are gated.
+**Without `--yes`, the fetch and the fast-forward still happen.** Only the
+deletions are withheld, and they are listed so you can re-run with `--yes`.
 
 ### What it never does
 
