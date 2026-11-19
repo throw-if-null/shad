@@ -18,9 +18,11 @@ from rich.text import Text
 
 from shad import parsers
 from shad.deps import Deps
+from shad.errors import ShadError
 from shad.layout import create_session
 from shad.output import Output
 from shad.sessions import live, render, store
+from shad.sessions.model import parse
 from shad.sessions.restore import plan, terminal
 from shad.tmux import Tmux
 
@@ -45,16 +47,30 @@ def run(args: argparse.Namespace, deps: Deps) -> int | None:
     out = deps.out
     tmux = deps.tmux
     harnesses = deps.harnesses
-    snapshot = store.read(store.snapshot_path(cfg))
+    snapshot = parse(_read(store.snapshot_path(cfg)))
     steps = plan.plan(cfg, snapshot, live.collect(cfg, tmux, harnesses), tmux, harnesses)
+    failures: list[str] = []
     for step in steps:
         creation = step.creation
-        if creation is not None:
+        if creation is None:
+            continue
+        try:
             create_session(tmux, creation.project, cfg.defaults, creation.command, creation.session)
+        except ShadError as exc:
+            # One session that cannot be created must not abort the rest
+            # ([ERR-4]); it is reported and the run exits 1.
+            failures.append(f"{step.entry.display_name}: {exc.message}")
+            deps.trace.exception(exc)
 
     out.print(
         render.table("restored", [(step.entry, _outcome(step)) for step in steps], out.width)
     )
+    for failure in failures:
+        out.note(Text("  ✗ ", style="bold red") + Text(failure, style="dim"))
+    if failures:
+        raise ShadError.infrastructure(
+            "partial_failure", f"{len(failures)} session(s) could not be restored"
+        )
 
     if getattr(args, "no_attach", False):
         return None
@@ -88,6 +104,15 @@ def _open_tabs(tabs: list[tuple[str, Path]], out: Output) -> None:
     out.note(Text("attach them with:"))
     for session in left:
         out.note(Text(f"  {shlex.join(Tmux.attach_command(session))}"))
+
+
+def _read(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        raise ShadError.not_found(
+            "no_snapshot", f"no saved sessions at {path}; run `shad sessions save` first"
+        ) from None
 
 
 def _outcome(step: plan.Step) -> Text:

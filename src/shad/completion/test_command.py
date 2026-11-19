@@ -489,12 +489,12 @@ class CompletionScriptSessionsTests(CompletionScriptTests):
     def test_sessions_offers_its_actions(self) -> None:
         self.assertEqual(self._run("shad sessions "), ["save", "restore", "stop", "show"])
 
-    def test_sessions_save_offers_its_flag_once(self) -> None:
-        self.assertEqual(self._run("shad sessions save "), ["--all"])
-        self.assertEqual(self._run("shad sessions save --all "), [])
+    def test_sessions_save_offers_its_flags_once(self) -> None:
+        self.assertEqual(sorted(self._run("shad sessions save ")), ["--all", "--pick"])
+        self.assertEqual(self._run("shad sessions save --all "), ["--pick"])
 
-    def test_sessions_stop_offers_nothing_and_show_offers_json(self) -> None:
-        self.assertEqual(self._run("shad sessions stop "), [])
+    def test_sessions_stop_offers_its_flags_and_show_offers_json(self) -> None:
+        self.assertEqual(sorted(self._run("shad sessions stop ")), ["--all", "--pick"])
         self.assertEqual(self._run("shad sessions show "), ["--json"])
         self.assertEqual(self._run("shad sessions show --json "), [])
 

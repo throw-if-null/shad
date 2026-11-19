@@ -336,8 +336,8 @@ _shad_complete() {
     sessions)
         if ((${#args[@]} == 0)); then
             _shad_offer "$cur" "save restore stop show"
-        elif [[ "${args[0]}" == "save" ]]; then
-            _shad_offer "$cur" "$(_shad_unused "--all" "${flags[@]}")"
+        elif [[ "${args[0]}" == "save" || "${args[0]}" == "stop" ]]; then
+            _shad_offer "$cur" "$(_shad_unused "--all --pick" "${flags[@]}")"
         elif [[ "${args[0]}" == "restore" ]]; then
             _shad_offer "$cur" "$(_shad_unused "--no-attach" "${flags[@]}")"
         elif [[ "${args[0]}" == "show" ]]; then

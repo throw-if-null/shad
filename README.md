@@ -674,16 +674,17 @@ later, for example after a reboot. It also stops running sessions you pick.
 
 | Command | Description |
 |---|---|
-| `shad sessions save` | Pick the running sessions to record, with the conversation each holds |
-| `shad sessions save --all` | Record every running session, without the picker |
+| `shad sessions save <name>...` | Record the named running sessions (session or project names) |
+| `shad sessions save --all` | Record every running session |
+| `shad sessions save --pick` | Choose the sessions in a picker (needs a terminal) |
 | `shad sessions restore` | Create each saved session that is not running, resuming its conversation, then attach |
 | `shad sessions restore --no-attach` | Create the sessions and return, for a script |
-| `shad sessions stop` | Pick running sessions and kill them |
+| `shad sessions stop <name>... \| --all \| --pick` | Kill the named, all, or picked running sessions |
 | `shad sessions show` | Print the saved sessions |
 
 ### The picker
 
-`save` and `stop` show the same picker: one row per running shad session.
+With `--pick`, `save` and `stop` show the same picker: one row per running shad session. Without a flag, they take session or project names; `--all` is every running session. There is no prompt, and no picker is shown unless `--pick` is given, so both work without a terminal.
 
 | Column | Content |
 |---|---|
@@ -704,14 +705,15 @@ later, for example after a reboot. It also stops running sessions you pick.
 
 ### save
 
-The snapshot becomes exactly the checked rows. A row whose conversation is
-already in the snapshot starts checked; with no snapshot yet, every row starts
-checked. Accepting with nothing checked writes an empty snapshot, which is how
-to restore nothing without deleting the file. A saved session that is no longer
-running is dropped on the next `save`. `show` is always what `restore` will do.
-
-`save --all` records every running session without the picker. It is the form
-for a script, and the only one that works without a terminal.
+The snapshot becomes exactly the sessions you select: the named ones, every
+running one with `--all`, or the checked rows with `--pick`. A name is a tmux
+session name or a project name, and a project name selects every running
+session of that project. A name that matches no running session is an error
+and nothing is written. With `--pick`, a row whose conversation is already in
+the snapshot starts checked; accepting with nothing checked writes an empty
+snapshot, which is how to restore nothing without deleting the file. A saved
+session that is no longer running is dropped on the next `save`. `show` is
+always what `restore` will do.
 
 For Claude Code, the conversation comes from the record Claude Code keeps for
 each running process in `~/.claude/sessions/<pid>.json`: its id, its name, and
@@ -758,11 +760,13 @@ run `restore` from a shell outside tmux. To run it from a tmux pane too, add
 
 ### stop
 
-Nothing starts checked. `Enter` kills the checked tmux sessions, panes and
-all: an editor open in the bash pane dies with the session. The conversation
-is kept by its harness, so the picker in `shad projects <name>` offers it
-again. The session the command runs in is not listed, because killing it would
-detach you mid-command.
+`stop <name>...` kills the named sessions, `--all` kills every running one,
+and `--pick` opens the picker. Killing a session takes its panes with it: an
+editor open in the bash pane dies with the session. The conversation is kept
+by its harness, so the picker in `shad projects <name>` offers it again. A
+name that matches no running session is reported and the run exits `1`, after
+killing the ones that did match. The session the command runs in is left out,
+because killing it would detach you mid-command.
 
 Supported harness for `save` and `restore`: Claude Code. A session running
 OpenCode is listed by `save` on stderr with the reason it cannot be saved, and

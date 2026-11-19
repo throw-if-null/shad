@@ -6,9 +6,8 @@ import unittest
 from pathlib import Path
 
 from shad.config import Config, Defaults
-from shad.errors import ShadError
 from shad.sessions import store
-from shad.sessions.model import Entry, Snapshot
+from shad.sessions.model import Entry, Snapshot, parse
 
 _SNAPSHOT = Snapshot(
     saved_at=1700000000,
@@ -22,10 +21,10 @@ class StoreTests(unittest.TestCase):
         self.root = Path(self._tmp.name)
         self.addCleanup(self._tmp.cleanup)
 
-    def test_write_then_read_round_trips(self) -> None:
+    def test_write_round_trips_through_parse(self) -> None:
         path = self.root / "shad" / "sessions.json"
         store.write(path, _SNAPSHOT)
-        self.assertEqual(store.read(path), _SNAPSHOT)
+        self.assertEqual(parse(path.read_text()), _SNAPSHOT)
 
     def test_write_creates_the_directory_and_leaves_no_temp_file(self) -> None:
         path = self.root / "nested" / "sessions.json"
@@ -37,12 +36,7 @@ class StoreTests(unittest.TestCase):
         store.write(path, _SNAPSHOT)
         later = Snapshot(saved_at=1700000001, entries=())
         store.write(path, later)
-        self.assertEqual(store.read(path), later)
-
-    def test_read_of_a_missing_file_says_how_to_create_it(self) -> None:
-        with self.assertRaises(ShadError) as ctx:
-            store.read(self.root / "sessions.json")
-        self.assertIn("shad sessions save", str(ctx.exception))
+        self.assertEqual(parse(path.read_text()), later)
 
     def test_snapshot_path_is_in_the_data_dir(self) -> None:
         cfg = Config(defaults=Defaults(), data_dir=Path("/data/shad"))
