@@ -92,21 +92,21 @@ worktrees — are legal. See
 
 ### First time setup
 
-Run the interactive wizard:
+Add your first project:
 
 ```sh
-shad init
+shad init --path ~/gh/myproject
 ```
 
-On Fedora you can also ask `shad` to install missing runtime dependencies first:
+This creates `~/.config/shad/shad.toml` with a commented `[defaults]` block and the project entry, deriving the key from the directory name. Pass `--group`, `--key`, `--session` or `--harness` to set them explicitly, or `--wizard` to be prompted for each field. Uncomment and adjust the defaults if you want a different layout.
+
+On Fedora you can also ask `shad` to install the harness's runtime dependencies first:
 
 ```sh
 sudo shad init --install-deps
 ```
 
-It will prompt for a project path, key, and optional group, then create `~/.config/shad/shad.toml` with a commented `[defaults]` block and your first project entry. Uncomment and adjust the defaults if you want a different layout.
-
-To add more projects later, run `shad init` again.
+To add more projects later, run `shad init --path ...` again. Re-adding the same project is a no-op; a different path for an existing key is reported as a conflict.
 
 ### Manual setup
 
@@ -253,8 +253,8 @@ path    = "/home/user/gh/alvr/portal"
 ```
 shad --help
 
-# Add a new project interactively (creates config if missing)
-shad init
+# Add a new project (creates config if missing)
+shad init --path ~/gh/myproject
 
 # List all configured projects and groups
 shad projects
@@ -890,10 +890,11 @@ If `shad` is run from **inside** an existing tmux session it uses `switch-client
 
 ### Fedora bootstrap
 
-`shad init --install-deps` is tailored for Fedora and installs missing dependencies before starting the init wizard.
+`shad init --install-deps` is tailored for Fedora and installs the dependencies the harness in use needs. The harness is the project's `--harness`, else `[defaults] harness`.
 
-- `tmux` via `dnf`
-- `opencode` by downloading the pinned Linux x64 release (`OPENCODE_VERSION` in `src/shad/init/command.py`), checking its SHA-256, and installing it into `/usr/local/bin/opencode`. The command refuses other architectures.
+- `tmux` via `dnf`, always.
+- `opencode`, when it is the harness, by downloading the pinned Linux x64 release (`OPENCODE_VERSION` in `src/shad/init/command.py`), checking its SHA-256, and installing it into `/usr/local/bin/opencode`. The command refuses other architectures.
+- Claude Code is not downloaded: `shad` bundles no installer for it, so when it is the harness and `claude` is not on `PATH`, the command points at the official installer instead.
 
 Run it with `sudo`:
 
@@ -936,10 +937,11 @@ validates each at the point it reads it:
   status`) are advisory. A failed or unexpected response leaves the version
   blank; it never changes what a command does.
 
-`shad init --install-deps` downloads a pinned `opencode` release and runs as
-root. It checks the archive against a known SHA-256 before installing and
-refuses architectures other than x86_64, so a tampered download does not
-install.
+`shad init --install-deps` runs as root. When `opencode` is the harness in
+use, it downloads a pinned `opencode` release, checks the archive against a
+known SHA-256 before installing, and refuses architectures other than x86_64,
+so a tampered download does not install. It downloads no Claude Code: when
+`claude` is the harness it points at the official installer instead.
 
 ## Project structure
 

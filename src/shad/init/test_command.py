@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 import os
 import stat
 import tarfile
@@ -17,7 +18,6 @@ from shad.config.loader import load
 from shad.errors import ShadError
 from shad.init import command as init_command
 from shad.init.command import (
-    Dependency,
     _detect_fedora,
     _expand,
     _install_opencode_systemwide,
@@ -27,7 +27,7 @@ from shad.init.command import (
     ensure_dependencies_installed,
 )
 from shad.output import Output
-from shad.testing import Pane, TmuxCase
+from shad.testing import Pane, TmuxCase, run
 
 
 def _out() -> tuple[Output, io.StringIO]:
@@ -51,53 +51,77 @@ class InitCliTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class InstallDepsTests(unittest.TestCase):
+    """
+    Feature:    init --install-deps
+    Boundary:   ensure_dependencies_installed(out, harness). The installers,
+                PATH, Fedora and root checks are mocked. Contract: which
+                installers run, the Fedora/root guards, and the Claude Code
+                pointer.
+    """
+
     def test_install_deps_raises_when_not_fedora(self) -> None:
         with (
-            patch(
-                "shad.init.command._missing_dependencies",
-                return_value=[Dependency(binary="tmux", package="tmux")],
-            ),
+            patch("shad.init.command.shutil.which", return_value=None),
             patch("shad.init.command._detect_fedora", return_value=False),
             self.assertRaises(ShadError) as ctx,
         ):
-            ensure_dependencies_installed(_out()[0])
+            ensure_dependencies_installed(_out()[0], "opencode")
         self.assertIn("Fedora", str(ctx.exception))
 
     def test_install_deps_raises_when_not_root(self) -> None:
         with (
-            patch(
-                "shad.init.command._missing_dependencies",
-                return_value=[Dependency(binary="tmux", package="tmux")],
-            ),
+            patch("shad.init.command.shutil.which", return_value=None),
             patch("shad.init.command._detect_fedora", return_value=True),
             patch("shad.init.command._is_root", return_value=False),
             self.assertRaises(ShadError) as ctx,
         ):
-            ensure_dependencies_installed(_out()[0])
+            ensure_dependencies_installed(_out()[0], "opencode")
         self.assertIn("sudo", str(ctx.exception))
 
-    def test_install_deps_installs_missing_packages_and_opencode(self) -> None:
+    def test_install_deps_installs_tmux_and_opencode_for_opencode(self) -> None:
         tmux_installer = unittest.mock.MagicMock()
         opencode_installer = unittest.mock.MagicMock()
-
-        missing = [
-            Dependency(binary="tmux", package="tmux", installer=tmux_installer),
-            Dependency(binary="opencode", installer=opencode_installer),
-        ]
-
         out, _buffer = _out()
-        with patch("shad.init.command._missing_dependencies", return_value=missing), \
-             patch("shad.init.command._detect_fedora", return_value=True), \
-             patch("shad.init.command._is_root", return_value=True):
-            ensure_dependencies_installed(out)
-
+        with (
+            patch("shad.init.command._install_via_dnf", return_value=tmux_installer),
+            patch("shad.init.command._install_opencode_systemwide", opencode_installer),
+            patch("shad.init.command.shutil.which", return_value=None),
+            patch("shad.init.command._detect_fedora", return_value=True),
+            patch("shad.init.command._is_root", return_value=True),
+        ):
+            ensure_dependencies_installed(out, "opencode")
         tmux_installer.assert_called_once_with(out)
         opencode_installer.assert_called_once_with(out)
 
+    def test_install_deps_skips_opencode_for_the_claude_harness(self) -> None:
+        """
+        Criterion:  install-deps-skips-opencode-for-the-claude-harness
+          Given:    the harness in use is claude, tmux is present and claude
+                    is not on PATH.
+          When:     ensure_dependencies_installed(out, "claude").
+          Then:     opencode is never installed, no Fedora or root check runs,
+                    and the output points at the official Claude Code installer.
+        """
+        opencode_installer = unittest.mock.MagicMock()
+        out, buffer = _out()
+
+        def which(name: str) -> str | None:
+            return None if name == "claude" else f"/usr/bin/{name}"
+
+        with (
+            patch("shad.init.command._install_opencode_systemwide", opencode_installer),
+            patch("shad.init.command.shutil.which", side_effect=which),
+        ):
+            ensure_dependencies_installed(out, "claude")
+
+        opencode_installer.assert_not_called()
+        self.assertIn("Claude Code is not installed", buffer.getvalue())
+        self.assertIn("npm install -g @anthropic-ai/claude-code", buffer.getvalue())
+
     def test_install_deps_skips_work_when_everything_is_present(self) -> None:
         out, buffer = _out()
-        with patch("shad.init.command._missing_dependencies", return_value=[]):
-            ensure_dependencies_installed(out)
+        with patch("shad.init.command.shutil.which", return_value="/usr/bin/tmux"):
+            ensure_dependencies_installed(out, "opencode")
         self.assertIn("dependencies already installed", buffer.getvalue())
 
 
@@ -356,6 +380,92 @@ class AddProjectTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
+class InitNonInteractiveTests(unittest.TestCase):
+    """
+    Feature:    init
+    Boundary:   command. `shad init --path ...` through main(argv) with
+                SHAD_CONFIG and XDG_DATA_HOME under the test root. Contract:
+                exit code + stderr + the config file, read back through
+                `shad projects --json`.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        self.config = self.root / "shad.toml"
+        self.env: dict[str, str | None] = {
+            "SHAD_CONFIG": str(self.config),
+            "HOME": str(self.root),
+            "XDG_DATA_HOME": str(self.root / "data"),
+            "VISUAL": None,
+            "EDITOR": None,
+        }
+
+    def _dir(self, name: str) -> Path:
+        d = self.root / name
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def test_init_adds_a_project_non_interactively(self) -> None:
+        """
+        Criterion:  init-adds-a-project-non-interactively
+          Given:    the config file does not exist.
+          When:     `shad init --path <dir> --key kb`.
+          Then:     exit 0, and `shad projects --json` lists kb with that path.
+        """
+        kb = self._dir("kb")
+        result = run(["init", "--path", str(kb), "--key", "kb"], env=self.env)
+        self.assertEqual((result.code, result.err), (0, ""), result.out)
+        document = json.loads(run(["projects", "--json"], env=self.env).out)
+        rows = {row["key"]: row for row in document["projects"]}
+        self.assertIn("kb", rows)
+        self.assertEqual(rows["kb"]["path"], str(kb))
+
+    def test_init_is_idempotent(self) -> None:
+        """
+        Criterion:  init-is-idempotent
+          Given:    kb was added with <dir>.
+          When:     `shad init --path <dir> --key kb` again.
+          Then:     exit 0, and the config file is byte-identical.
+        """
+        kb = self._dir("kb")
+        run(["init", "--path", str(kb), "--key", "kb"], env=self.env)
+        before = self.config.read_bytes()
+        result = run(["init", "--path", str(kb), "--key", "kb"], env=self.env)
+        self.assertEqual((result.code, result.err), (0, ""), result.out)
+        self.assertEqual(self.config.read_bytes(), before)
+
+    def test_init_same_key_other_path_is_a_conflict(self) -> None:
+        """
+        Criterion:  init-same-key-other-path-is-a-conflict
+          Given:    kb was added with <dir>.
+          When:     `shad init --path <other dir> --key kb`.
+          Then:     exit 1, stderr one line `project_exists: <non-empty>`, and
+                    the file is byte-identical.
+        """
+        kb = self._dir("kb")
+        other = self._dir("other")
+        run(["init", "--path", str(kb), "--key", "kb"], env=self.env)
+        before = self.config.read_bytes()
+        result = run(["init", "--path", str(other), "--key", "kb"], env=self.env)
+        self.assertEqual((result.code, result.out), (1, ""), result.err)
+        self.assertRegex(result.err, r"^project_exists: .+\n$")
+        self.assertEqual(self.config.read_bytes(), before)
+
+    def test_init_without_a_path_or_wizard_is_a_usage_error(self) -> None:
+        result = run(["init"], env=self.env)
+        self.assertEqual((result.code, result.out), (2, ""), result.err)
+        self.assertRegex(result.err, r"^missing_path: .+\n$")
+
+    def test_init_writes_the_harness_when_given(self) -> None:
+        kb = self._dir("kb")
+        run(["init", "--path", str(kb), "--key", "kb", "--harness", "claude"], env=self.env)
+        document = json.loads(run(["projects", "--json"], env=self.env).out)
+        rows = {row["key"]: row for row in document["projects"]}
+        self.assertEqual(rows["kb"]["harness"], "claude")
+
+
 class InitWizardTests(TmuxCase):
     """
     Feature:    init
@@ -383,7 +493,7 @@ class InitWizardTests(TmuxCase):
                     `shad projects` lists kb.
         """
         (self.root / "kb").mkdir()
-        pane = self.pane("init")
+        pane = self.pane("init", "--wizard")
         self._answer(pane, "e.g. ~/gh/myproject", str(self.root / "kb"))
         self._answer(pane, "leave blank for top-level")
         self._answer(pane, "key")
@@ -409,7 +519,7 @@ class InitWizardTests(TmuxCase):
                     session tin-shad.
         """
         (self.root / "tin" / "shad").mkdir(parents=True)
-        pane = self.pane("init")
+        pane = self.pane("init", "--wizard")
         self._answer(pane, "e.g. ~/gh/myproject", str(self.root / "tin" / "shad"))
         self._answer(pane, "leave blank for top-level", "tin")
         self._answer(pane, "key")
@@ -429,7 +539,7 @@ class InitWizardTests(TmuxCase):
                     wizard goes on, and the file holds the second path.
         """
         (self.root / "kb").mkdir()
-        pane = self.pane("init")
+        pane = self.pane("init", "--wizard")
         self._answer(pane, "e.g. ~/gh/myproject", str(self.root / "nope"))
         pane.wait_for("path does not exist")
         pane.type(str(self.root / "kb"))
@@ -453,7 +563,7 @@ class InitWizardTests(TmuxCase):
         (self.root / "kb").mkdir()
         (self.root / "other").mkdir()
         self.write_config(f'[projects.kb]\npath = "{self.root / "kb"}"\n')
-        pane = self.pane("init")
+        pane = self.pane("init", "--wizard")
         self._answer(pane, "e.g. ~/gh/myproject", str(self.root / "other"))
         self._answer(pane, "leave blank for top-level")
         self._answer(pane, "key", "kb")
@@ -476,7 +586,7 @@ class InitWizardTests(TmuxCase):
           Then:     exit 0, the screen says aborted, and no file exists.
         """
         (self.root / "kb").mkdir()
-        pane = self.pane("init")
+        pane = self.pane("init", "--wizard")
         self._answer(pane, "e.g. ~/gh/myproject", str(self.root / "kb"))
         self._answer(pane, "leave blank for top-level")
         self._answer(pane, "key")

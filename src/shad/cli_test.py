@@ -157,11 +157,11 @@ class ErrorContractTests(TmuxCase):
     def test_interrupt_exits_130(self) -> None:
         """
         Criterion:  interrupt-exits-130
-          When:     `shad init` in a pane, then Ctrl-C at its first prompt.
+          When:     `shad init --wizard` in a pane, then Ctrl-C at its first prompt.
           Then:     the pane's exit status is 130 and the last line shad
                     printed is `Aborted.`
         """
-        pane = self.pane("init")
+        pane = self.pane("init", "--wizard")
         pane.wait_for("e.g. ~/gh/myproject")
         pane.send("C-c")
         self.assertEqual(pane.wait_exit(), 130)

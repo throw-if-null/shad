@@ -62,25 +62,33 @@ def write_value(path: Path, key: str, value: object) -> None:
 
 
 def add_project(
-    path: Path, *, key: str, group: str | None, project_path: Path, session: str
+    path: Path,
+    *,
+    key: str,
+    group: str | None,
+    project_path: Path,
+    session: str,
+    harness: str | None = None,
 ) -> None:
     """
     Append the table for a new project to the config file, creating the
     file with the commented defaults block when it does not exist. The
     values are written as TOML strings, so a path with a quote or a
-    backslash reads back as it was given.
+    backslash reads back as it was given. A *harness* writes a `harness`
+    line; without one the project uses `[defaults] harness`.
     """
     text = path.read_text() if path.exists() else defaults_block()
     header = toml_edit.format_key(["projects", *([group] if group else []), key])
-    table = "\n".join(
-        [
-            "",
-            f"[{header}]",
-            f"path    = {toml_edit.format_value(str(project_path))}",
-            f"session = {toml_edit.format_value(session)}",
-            "",
-        ]
-    )
+    lines = [
+        "",
+        f"[{header}]",
+        f"path    = {toml_edit.format_value(str(project_path))}",
+        f"session = {toml_edit.format_value(session)}",
+    ]
+    if harness:
+        lines.append(f"harness = {toml_edit.format_value(harness)}")
+    lines.append("")
+    table = "\n".join(lines)
     if text and not text.endswith("\n"):
         text += "\n"
     commit(path, text + table, hint="for a new project, set its 'path' first.")
