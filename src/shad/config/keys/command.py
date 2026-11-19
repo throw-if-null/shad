@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 
 from shad import parsers
-from shad.config import store
+from shad.config import raw
 from shad.config.schema import known_keys
 from shad.deps import Deps
 
@@ -21,6 +21,6 @@ def register(sub: parsers.Subparsers) -> None:
 
 def run(args: argparse.Namespace, deps: Deps) -> None:
     path = deps.config_file
-    raw = store.read_raw(path) if path.exists() else {}
-    for key, _field in known_keys(store.project_paths(raw)):
+    parsed = raw.parse(path.read_text()) if path.exists() else {}
+    for key, _field in known_keys(raw.project_paths(parsed)):
         deps.out.plain(key)

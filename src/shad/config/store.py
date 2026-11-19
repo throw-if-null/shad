@@ -1,11 +1,11 @@
 """
-The config file as text: every read, and the one write.
+The one validated write of the config file.
 
-The actions read the raw TOML themselves rather than through `load()`,
-because they address keys as the file spells them and `load()` fills in
-defaults. `commit` is the write every action, `write_value` and
-`add_project` go through: the result is parsed and loaded from a temporary
-file first, so a failed edit never replaces a working config.
+Every mutation — `commit`, `write_value`, `add_project` — goes through here:
+the result is parsed and loaded from a temporary file first, so a failed edit
+never replaces a working config. The actions read and parse the file
+themselves (see `config/raw.py`); this module never reads it except to form
+the text it is about to replace.
 """
 
 from __future__ import annotations
@@ -18,57 +18,6 @@ from shad.config import toml_edit
 from shad.config.loader import load
 from shad.config.schema import defaults_block
 from shad.errors import ShadError
-
-MISSING = object()  # what lookup() returns for a key the file does not have
-
-
-def read_text(path: Path) -> str:
-    if not path.exists():
-        raise ShadError.not_found(
-            "no_config_file",
-            f"config file not found: {path}; run 'shad init' to create it"
-        )
-    return path.read_text()
-
-
-def read_raw(path: Path) -> dict:
-    try:
-        return tomllib.loads(read_text(path))
-    except tomllib.TOMLDecodeError as exc:
-        raise ShadError.validation("invalid_config", f"{path} is not valid TOML: {exc}") from None
-
-
-def lookup(raw: dict, parts: list[str]) -> object:
-    node: object = raw
-    for part in parts:
-        if not isinstance(node, dict) or part not in node:
-            return MISSING
-        node = node[part]
-    return node
-
-
-def project_paths(raw: dict) -> list[list[str]]:
-    """Key paths of every configured project, e.g. [["kb"], ["alvr", "db"]]."""
-    found: list[list[str]] = []
-    for key, value in raw.get("projects", {}).items():
-        if not isinstance(value, dict):
-            continue
-        if "path" in value:
-            found.append([key])
-            continue
-        for sub_key, sub_value in value.items():
-            if isinstance(sub_value, dict):
-                found.append([key, sub_key])
-    return sorted(found)
-
-
-def parse_or_fail(text: str) -> dict:
-    try:
-        return tomllib.loads(text)
-    except tomllib.TOMLDecodeError as exc:
-        raise ShadError.validation(
-            "invalid_config", f"refusing to write: result is not valid TOML: {exc}"
-        ) from None
 
 
 def commit(path: Path, text: str, *, hint: str | None = None) -> None:
@@ -121,7 +70,7 @@ def add_project(
     values are written as TOML strings, so a path with a quote or a
     backslash reads back as it was given.
     """
-    text = read_text(path) if path.exists() else defaults_block()
+    text = path.read_text() if path.exists() else defaults_block()
     header = toml_edit.format_key(["projects", *([group] if group else []), key])
     table = "\n".join(
         [

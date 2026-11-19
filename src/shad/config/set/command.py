@@ -8,7 +8,7 @@ from pathlib import Path
 from rich.text import Text
 
 from shad import parsers
-from shad.config import store, toml_edit
+from shad.config import raw, store, toml_edit
 from shad.config.schema import PATH, coerce, field_for, infer
 from shad.deps import Deps
 from shad.errors import ShadError
@@ -52,10 +52,10 @@ def set_config_value(path: Path, key: str, raw_value: str, *, force: bool, out: 
                 f"path does not exist: {value}; pass --force to set it anyway"
             )
 
-    text = store.read_text(path) if path.exists() else ""
+    text = path.read_text() if path.exists() else ""
     updated = toml_edit.set_value(text, parts, literal)
 
-    written = store.lookup(store.parse_or_fail(updated), parts)
+    written = raw.lookup(raw.parse(updated), parts)
     if written != value:
         raise ShadError.conflict(
             "unsafe_edit",

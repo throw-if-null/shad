@@ -12,9 +12,9 @@ class ValidateTests(ConfigCase):
                 with SHAD_CONFIG set. Contract: exit code + stdout + stderr.
     """
 
-    def test_validate_json_reports_the_counts(self) -> None:
+    def test_validate_json_counts_projects(self) -> None:
         """
-        Criterion:  validate-json-reports-the-counts
+        Criterion:  validate-json-counts-projects
           Given:    shad.toml holds the projects kb and alvr db.
           When:     `shad config validate --json`.
           Then:     exit 0, stderr empty, stdout is one JSON object with

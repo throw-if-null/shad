@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from shad import parsers
-from shad.config import Config, store, toml_edit
+from shad.config import Config, raw, toml_edit
 from shad.config.render import display
 from shad.config.schema import field_for
 from shad.deps import Deps
@@ -23,6 +23,14 @@ class ConfigValue:
     source: str  # "file", or "default" for the value shad uses when the file has none
 
 
+def _read(path: Path) -> dict:
+    if not path.exists():
+        raise ShadError.not_found(
+            "no_config_file", f"config file not found: {path}; run 'shad init' to create it"
+        )
+    return raw.parse(path.read_text())
+
+
 def register(sub: parsers.Subparsers) -> None:
     parser = parsers.command(sub, "get", run=run, render=render, help="Print a single value")
     parser.add_argument("key", metavar="KEY", help="Dotted key, e.g. defaults.harness")
@@ -31,14 +39,14 @@ def register(sub: parsers.Subparsers) -> None:
 def run(args: argparse.Namespace, deps: Deps) -> ConfigValue:
     key: str = args.key
     parts = toml_edit.split_dotted(key)
-    value = store.lookup(store.read_raw(deps.config_file), parts)
+    value = raw.lookup(_read(deps.config_file), parts)
     source = "file"
 
-    if value is store.MISSING:
+    if value is raw.MISSING:
         value = _effective(deps.config_file, parts, lambda: deps.config)
         source = "default"
 
-    if value is store.MISSING:
+    if value is raw.MISSING:
         raise ShadError.not_found("no_such_key", f"key not found: {key}")
 
     return ConfigValue(key=key, value=value, source=source)
@@ -68,17 +76,17 @@ def _effective(path: Path, parts: list[str], config: Callable[[], Config]) -> ob
     Resolve a key that is absent from the file to the value shad actually uses.
 
     Covers `[defaults]` fields, the per-project `session` / `harness`
-    fallbacks, and the default todo path. Returns store.MISSING when the
+    fallbacks, and the default todo path. Returns raw.MISSING when the
     key has no resolved value. *config* loads the file only when a value
     has to come from it.
     """
     if field_for(parts) is None:
-        return store.MISSING
+        return raw.MISSING
 
     cfg = config()
 
     if parts[0] == "defaults":
-        return getattr(cfg.defaults, parts[1], store.MISSING)
+        return getattr(cfg.defaults, parts[1], raw.MISSING)
 
     if parts[0] == "todo":
         return str(cfg.todo_dir)
@@ -89,7 +97,7 @@ def _effective(path: Path, parts: list[str], config: Callable[[], Config]) -> ob
         project = cfg.groups.get(parts[1], {}).get(parts[2])
 
     if project is None:
-        return store.MISSING
+        return raw.MISSING
 
-    value = getattr(project, parts[-1], store.MISSING)
+    value = getattr(project, parts[-1], raw.MISSING)
     return str(value) if isinstance(value, Path) else value

@@ -8,10 +8,18 @@ from pathlib import Path
 from rich.text import Text
 
 from shad import parsers
-from shad.config import store, toml_edit
+from shad.config import raw, store, toml_edit
 from shad.deps import Deps
 from shad.errors import ShadError
 from shad.output import Output
+
+
+def _read_text(path: Path) -> str:
+    if not path.exists():
+        raise ShadError.not_found(
+            "no_config_file", f"config file not found: {path}; run 'shad init' to create it"
+        )
+    return path.read_text()
 
 
 def register(sub: parsers.Subparsers) -> None:
@@ -39,10 +47,10 @@ def unset_config_value(path: Path, key: str, *, force: bool = False, out: Output
             f"run 'shad config unset {table}' to remove the project, or pass --force"
         )
 
-    text = store.read_text(path)
+    text = _read_text(path)
     updated = toml_edit.remove_path(text, parts)
 
-    if store.lookup(store.parse_or_fail(updated), parts) is not store.MISSING:
+    if raw.lookup(raw.parse(updated), parts) is not raw.MISSING:
         raise ShadError.conflict(
             "unsafe_edit",
             f"failed to unset '{key}': the file could not be edited safely; "
