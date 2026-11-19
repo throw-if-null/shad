@@ -39,7 +39,7 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from shad.shared.errors import ShadError
+from shad.errors import ShadError
 
 # ── where the config lives ────────────────────────────────────────────────
 
@@ -208,13 +208,15 @@ def _parse_project(
     key: str, data: dict, group: str | None = None, default_harness: str = "opencode"
 ) -> Project:
     if "path" not in data:
-        raise ShadError(
+        raise ShadError.validation(
+            "invalid_config",
             f"Project [{('projects.' + group + '.' if group else 'projects.') + key}] "
             f"is missing required field 'path'"
         )
     harness = data.get("harness", default_harness)
     if harness not in HARNESSES:
-        raise ShadError(
+        raise ShadError.validation(
+            "invalid_config",
             f"invalid harness '{harness}' in project '{key}'; "
             f"must be one of: {', '.join(HARNESSES)}"
         )
@@ -235,24 +237,31 @@ def load(path: Path | None = None) -> Config:
     if path is None:
         path = config_path()
     if not path.exists():
-        raise ShadError(
-            f"config file not found: {path}\n"
-            f"       create it or copy shad.example.toml to get started."
+        raise ShadError.not_found(
+            "no_config_file",
+            f"config file not found: {path}; create it or copy shad.example.toml to get started"
         )
 
     with path.open("rb") as fh:
-        raw = tomllib.load(fh)
+        try:
+            raw = tomllib.load(fh)
+        except tomllib.TOMLDecodeError as exc:
+            raise ShadError.validation(
+                "invalid_config", f"{path} is not valid TOML: {exc}"
+            ) from None
 
     # --- defaults ---
     d = raw.get("defaults", {})
     oc_position = d.get("oc_position", "top")
     if oc_position not in OC_POSITIONS:
-        raise ShadError(
+        raise ShadError.validation(
+            "invalid_config",
             f"invalid oc_position '{oc_position}'; must be one of: {', '.join(OC_POSITIONS)}"
         )
     harness = d.get("harness", "opencode")
     if harness not in HARNESSES:
-        raise ShadError(
+        raise ShadError.validation(
+            "invalid_config",
             f"invalid harness '{harness}' in [defaults]; must be one of: {', '.join(HARNESSES)}"
         )
 
@@ -261,21 +270,24 @@ def load(path: Path | None = None) -> Config:
         try:
             return int(raw_val)
         except (TypeError, ValueError):
-            raise ShadError(
+            raise ShadError.validation(
+                "invalid_config",
                 f"invalid value for '{name}' in [defaults]: expected an integer, got {raw_val!r}"
             )
 
     def _bool_setting(name: str, default: bool) -> bool:
         raw_val = d.get(name, default)
         if not isinstance(raw_val, bool):
-            raise ShadError(
+            raise ShadError.validation(
+                "invalid_config",
                 f"invalid value for '{name}' in [defaults]: expected true or false, got {raw_val!r}"
             )
         return raw_val
 
     todo_percent = _int_setting("todo_percent", 20)
     if not 1 <= todo_percent <= 99:
-        raise ShadError(
+        raise ShadError.validation(
+            "invalid_config",
             f"invalid todo_percent {todo_percent}; must be between 1 and 99 "
             "(set todo_panel = false to hide the todo pane)"
         )
@@ -296,7 +308,7 @@ def load(path: Path | None = None) -> Config:
 
     for key, value in raw.get("projects", {}).items():
         if not isinstance(value, dict):
-            raise ShadError(f"[projects.{key}] must be a TOML table")
+            raise ShadError.validation("invalid_config", f"[projects.{key}] must be a TOML table")
 
         if "path" in value:
             # top-level project
@@ -306,7 +318,8 @@ def load(path: Path | None = None) -> Config:
             group_projects: dict[str, Project] = {}
             for sub_key, sub_value in value.items():
                 if not isinstance(sub_value, dict):
-                    raise ShadError(
+                    raise ShadError.validation(
+                        "invalid_config",
                         f"[projects.{key}.{sub_key}] must be a TOML table"
                     )
                 group_projects[sub_key] = _parse_project(
@@ -329,18 +342,19 @@ def load(path: Path | None = None) -> Config:
 def _parse_labels(todo: object) -> list[str]:
     """The [todo] labels array, validated: an array of unique label names."""
     if not isinstance(todo, dict):
-        raise ShadError("[todo] must be a TOML table")
+        raise ShadError.validation("invalid_config", "[todo] must be a TOML table")
     labels = todo.get("labels", [])
     if not isinstance(labels, list) or not all(isinstance(label, str) for label in labels):
-        raise ShadError("[todo] labels must be an array of strings")
+        raise ShadError.validation("invalid_config", "[todo] labels must be an array of strings")
     seen: set[str] = set()
     for label in labels:
         if not LABEL_RE.match(label):
-            raise ShadError(
+            raise ShadError.validation(
+                "invalid_config",
                 f"invalid todo label {label!r}; use lowercase letters, digits and hyphens"
             )
         if label in seen:
-            raise ShadError(f"duplicate todo label {label!r}")
+            raise ShadError.validation("invalid_config", f"duplicate todo label {label!r}")
         seen.add(label)
     return list(labels)
 
@@ -357,10 +371,12 @@ def _parse_todo_path(todo: dict) -> Path | None:
     if value is None:
         return None
     if not isinstance(value, str) or not value.strip():
-        raise ShadError("[todo] path must be a non-empty string")
+        raise ShadError.validation("invalid_config", "[todo] path must be a non-empty string")
     path = Path(value).expanduser()
     if not path.is_absolute():
-        raise ShadError(f"[todo] path must be absolute or start with ~; got {value!r}")
+        raise ShadError.validation(
+            "invalid_config", f"[todo] path must be absolute or start with ~; got {value!r}"
+        )
     return path
 
 
@@ -387,9 +403,10 @@ def _reject_duplicate_paths(cfg: Config) -> None:
         resolved = project.path.expanduser().resolve()
         first = seen.get(resolved)
         if first is not None:
-            raise ShadError(
-                f"'{first}' and '{project.display_name}' both point at {resolved}\n"
-                f"       two projects must not name the same directory"
+            raise ShadError.validation(
+                "invalid_config",
+                f"'{first}' and '{project.display_name}' both point at {resolved}; "
+                f"two projects must not name the same directory"
             )
         seen[resolved] = project.display_name
 
@@ -407,7 +424,8 @@ def resolve_prefix(candidates: list[str], token: str) -> str | None:
     if len(matches) == 1:
         return matches[0]
     if len(matches) > 1:
-        raise ShadError(
+        raise ShadError.usage(
+            "ambiguous_name",
             f"'{token}' is ambiguous; matches: {', '.join(sorted(matches))}"
         )
     return None  # caller decides how to handle "not found"
@@ -448,7 +466,7 @@ def resolve_target(
         token = tokens[0]
         match = resolve_prefix(list(cfg.projects) + list(cfg.groups), token)
         if match is None:
-            raise ShadError(f"no project or group matching '{token}'")
+            raise ShadError.not_found("no_such_project", f"no project or group matching '{token}'")
         if match in cfg.projects:
             return Target(projects=[cfg.projects[match]])
         group = cfg.groups[match]
@@ -462,22 +480,25 @@ def resolve_target(
             if group_token in cfg.projects or any(
                 k.startswith(group_token) for k in cfg.projects
             ):
-                raise ShadError(
+                raise ShadError.not_found(
+                    "no_such_group",
                     f"'{group_token}' resolves to a top-level project, not a group; "
                     f"did you mean: {usage} {group_token}?"
                 )
-            raise ShadError(f"no group matching '{group_token}'")
+            raise ShadError.not_found("no_such_group", f"no group matching '{group_token}'")
 
         group_projects = cfg.groups[group_match]
         proj_match = resolve_prefix(list(group_projects), proj_token)
         if proj_match is None:
-            raise ShadError(
+            raise ShadError.not_found(
+                "no_such_project",
                 f"no project matching '{proj_token}' in group '{group_match}'; "
                 f"available: {', '.join(sorted(group_projects))}"
             )
 
         return Target(projects=[group_projects[proj_match]])
 
-    raise ShadError(
+    raise ShadError.usage(
+        "too_many_arguments",
         f"too many arguments ({len(tokens)}); usage: {usage} [<group>] [<name>]"
     )

@@ -81,12 +81,13 @@ class StopTests(SessionsCase):
         Criterion:  stop-without-a-terminal-fails
           Given:    kb runs claude on A.
           When:     `shad sessions stop` as a process with no terminal.
-          Then:     exit 1, stdout empty, stderr says a terminal is needed,
-                    and the session still runs.
+          Then:     exit 1, stdout empty, stderr one line `no_terminal:
+                    <non-empty>`, and the session still runs.
         """
         session = self.start_session("kb", UUID_A)
         result = self.run_detached("sessions", "stop")
         self.assertEqual((result.code, result.out), (1, ""), result.err)
+        self.assertRegex(result.err, r"^no_terminal: .+\n$")
         self.assertIn("terminal", result.err)
         self.assertIn(session, self.server.sessions())
 

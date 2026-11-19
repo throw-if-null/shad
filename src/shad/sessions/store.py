@@ -13,9 +13,9 @@ import os
 import tempfile
 from pathlib import Path
 
+from shad.errors import ShadError
 from shad.sessions.model import Snapshot, parse, serialize
 from shad.shared.config import default_data_dir
-from shad.shared.errors import ShadError
 
 FILENAME = "sessions.json"
 
@@ -28,7 +28,9 @@ def read(path: Path) -> Snapshot:
     try:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError:
-        raise ShadError(f"no saved sessions at {path}; run `shad sessions save` first") from None
+        raise ShadError.not_found(
+            "no_snapshot", f"no saved sessions at {path}; run `shad sessions save` first"
+        ) from None
     return parse(text)
 
 

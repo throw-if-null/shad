@@ -8,9 +8,9 @@ import subprocess
 from rich.console import Console
 from rich.text import Text
 
+from shad.errors import ShadError
 from shad.shared.config import Config
 from shad.shared.editor import resolve_editor
-from shad.shared.errors import ShadError
 from shad.todo import store
 from shad.todo.model import problems
 
@@ -24,7 +24,9 @@ def edit_todo(cfg: Config, args: argparse.Namespace) -> None:
     editor = resolve_editor()
     result = subprocess.run([*editor.split(), str(path)], check=False)
     if result.returncode != 0:
-        raise ShadError(f"editor exited with status {result.returncode}")
+        raise ShadError.infrastructure(
+            "editor_failed", f"editor exited with status {result.returncode}"
+        )
     item = store.read_item(directory, key)
     for problem in problems(item, cfg.todo_labels):
         console.print(Text("  ! ", style="bold yellow") + Text(f"{item.key}: {problem}"))

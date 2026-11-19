@@ -6,8 +6,8 @@ import subprocess
 from pathlib import Path
 
 from shad.config.validate.command import validate_config
+from shad.errors import ShadError
 from shad.shared.editor import resolve_editor
-from shad.shared.errors import ShadError
 
 
 def edit_config(path: Path) -> None:
@@ -17,6 +17,8 @@ def edit_config(path: Path) -> None:
 
     result = subprocess.run([*editor.split(), str(path)], check=False)
     if result.returncode != 0:
-        raise ShadError(f"editor exited with status {result.returncode}")
+        raise ShadError.infrastructure(
+            "editor_failed", f"editor exited with status {result.returncode}"
+        )
 
     validate_config(path)

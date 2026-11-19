@@ -27,17 +27,19 @@ class ValidateTests(ConfigCase):
         Criterion:  validate-rejects-a-config-that-does-not-load
           Given:    shad.toml sets oc_position = "sideways".
           When:     `shad config validate`.
-          Then:     exit 1, stdout empty, stderr names `sideways`.
+          Then:     exit 1, stdout empty, stderr one line `invalid_config:
+                    <non-empty>` that names `sideways`.
         """
         self.path.write_text('[defaults]\noc_position = "sideways"\n')
-        self.assertIn("sideways", self._fail("validate"))
+        self.assertIn("sideways", self._fail("validate", code="invalid_config"))
 
     def test_validate_without_a_file_fails(self) -> None:
         """
         Criterion:  validate-without-a-file-fails
           Given:    the config file does not exist.
           When:     `shad config validate`.
-          Then:     exit 1, stdout empty, stderr says the file was not found.
+          Then:     exit 1, stdout empty, stderr one line `no_config_file:
+                    <non-empty>`.
         """
         self.path.unlink()
-        self.assertIn("not found", self._fail("validate"))
+        self.assertIn("not found", self._fail("validate", code="no_config_file"))

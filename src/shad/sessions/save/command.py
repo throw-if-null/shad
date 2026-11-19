@@ -16,12 +16,12 @@ from collections.abc import Sequence
 from rich.console import Console
 from rich.text import Text
 
+from shad.errors import ShadError
 from shad.sessions import live, render, store
 from shad.sessions.live import Running
 from shad.sessions.model import Snapshot
 from shad.sessions.pick import pick
 from shad.shared.config import Config
-from shad.shared.errors import ShadError
 
 console = Console()
 
@@ -38,8 +38,12 @@ def save_sessions(cfg: Config, args: argparse.Namespace) -> None:
     savable = [item for item in running if item.unsupported is None]
     if not savable:
         if running:
-            raise ShadError("no session could be saved; the saved sessions are unchanged")
-        raise ShadError("no shad sessions are running; the saved sessions are unchanged")
+            raise ShadError.conflict(
+                "no_saveable_session", "no session could be saved; the saved sessions are unchanged"
+            )
+        raise ShadError.not_found(
+            "no_running_sessions", "no shad sessions are running; the saved sessions are unchanged"
+        )
 
     if getattr(args, "all", False):
         chosen = savable

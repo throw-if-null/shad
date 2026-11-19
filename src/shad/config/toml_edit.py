@@ -19,7 +19,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from shad.shared.errors import ShadError
+from shad.errors import ShadError
 
 _BARE_KEY = re.compile(r"^[A-Za-z0-9_-]+$")
 
@@ -48,11 +48,11 @@ def split_dotted(key: str) -> list[str]:
             buf.append(ch)
 
     if quote is not None:
-        raise ShadError(f"unterminated quote in key '{key}'")
+        raise ShadError.validation("invalid_key", f"unterminated quote in key '{key}'")
 
     parts.append("".join(buf).strip())
     if any(not part for part in parts):
-        raise ShadError(f"invalid key '{key}'")
+        raise ShadError.validation("invalid_key", f"invalid key '{key}'")
     return parts
 
 
@@ -253,7 +253,9 @@ def set_value(text: str, parts: list[str], literal: str) -> str:
     table when the table exists, and otherwise appends a new table at the end.
     """
     if len(parts) < 2:
-        raise ShadError("key must contain at least one dot, e.g. defaults.harness")
+        raise ShadError.validation(
+            "invalid_key", "key must contain at least one dot, e.g. defaults.harness"
+        )
 
     lines = text.splitlines()
     sections, keys = _scan(lines)
@@ -262,7 +264,8 @@ def set_value(text: str, parts: list[str], literal: str) -> str:
         if key.path != parts:
             continue
         if not key.complete:
-            raise ShadError(
+            raise ShadError.conflict(
+                "multiline_value",
                 f"'{format_key(parts)}' has a multi-line value; edit the file with "
                 f"'shad config edit'"
             )
@@ -311,7 +314,8 @@ def remove_path(text: str, parts: list[str]) -> str:
     for key in keys:
         if _under(key.path):
             if not key.complete:
-                raise ShadError(
+                raise ShadError.conflict(
+                    "multiline_value",
                     f"'{format_key(key.path)}' has a multi-line value; edit the file "
                     f"with 'shad config edit'"
                 )
@@ -323,7 +327,7 @@ def remove_path(text: str, parts: list[str]) -> str:
         drop.update(range(section.header, min(section.end, len(lines))))
 
     if not drop:
-        raise ShadError(f"key not found: {format_key(parts)}")
+        raise ShadError.not_found("no_such_key", f"key not found: {format_key(parts)}")
 
     kept = [line for index, line in enumerate(lines) if index not in drop]
     while kept and not kept[-1].strip():

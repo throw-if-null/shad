@@ -27,6 +27,7 @@ class RemoveTests(TodoCase):
         """
         Criterion:  rm-of-an-unknown-key-fails
           When:     `shad todo rm nothing`.
-          Then:     exit 1, stdout empty, stderr names the key.
+          Then:     exit 1, stdout empty, stderr one line `no_such_todo:
+                    <non-empty>` naming the key.
         """
-        self.assertIn("nothing", self._fail("rm", "nothing"))
+        self.assertIn("nothing", self._fail("rm", "nothing", code="no_such_todo"))

@@ -5,8 +5,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from shad.errors import ShadError
 from shad.git import apply
-from shad.shared.errors import ShadError
 
 REPO = Path("/tmp/repo")
 
@@ -80,7 +80,8 @@ class MutationTests(unittest.TestCase):
         self.assertIn("could not read from remote", outcome.error)
 
     def test_fetch_timeout_is_reported_not_raised(self) -> None:
-        with patch.object(apply, "git", side_effect=ShadError("git fetch timed out after 120s")):
+        boom = ShadError.infrastructure("git_timeout", "git fetch timed out after 120s")
+        with patch.object(apply, "git", side_effect=boom):
             outcome = apply.fetch(REPO, "origin", prune=True)
         self.assertFalse(outcome.ok)
         assert outcome.error is not None
@@ -90,7 +91,7 @@ class MutationTests(unittest.TestCase):
         # apply_plan runs on the main thread with no per-project guard, so a
         # ShadError escaping here aborts the deletions still queued for every
         # other project — after some have already been applied.
-        boom = ShadError("git worktree remove timed out after 60s")
+        boom = ShadError.infrastructure("git_timeout", "git worktree remove timed out after 60s")
         cases = {
             "delete_branch": lambda: apply.delete_branch(REPO, "feat", force=False),
             "remove_worktree": lambda: apply.remove_worktree(REPO, Path("/tmp/wt")),

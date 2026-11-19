@@ -57,10 +57,16 @@ class ConfigCase(unittest.TestCase):
         self.assertEqual((result.code, result.err), (0, ""), result.out)
         return result.out
 
-    def _fail(self, *argv: str, env: dict[str, str | None] | None = None) -> str:
-        """A run that must exit 1 with nothing on stdout. Returns stderr."""
+    def _fail(
+        self, *argv: str, code: str, env: dict[str, str | None] | None = None
+    ) -> str:
+        """
+        A run that must exit 1 with nothing on stdout and one stderr line
+        `<code>: <message>`. Returns that line.
+        """
         result = self._result(*argv, env=env)
         self.assertEqual((result.code, result.out), (1, ""), result.err)
+        self.assertRegex(result.err, rf"^{code}: .+\n$")
         return result.err
 
     def _raw(self) -> dict:

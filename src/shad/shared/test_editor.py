@@ -3,8 +3,8 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
+from shad.errors import ShadError
 from shad.shared.editor import resolve_editor
-from shad.shared.errors import ShadError
 
 
 class ResolveEditorTests(unittest.TestCase):

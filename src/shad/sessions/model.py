@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass
 
-from shad.shared.errors import ShadError
+from shad.errors import ShadError
 
 FORMAT = 1
 
@@ -55,44 +55,62 @@ def parse(text: str) -> Snapshot:
     try:
         data = json.loads(text)
     except json.JSONDecodeError as exc:
-        raise ShadError(f"saved sessions are not valid JSON: {exc}") from None
+        raise ShadError.validation(
+            "invalid_snapshot", f"saved sessions are not valid JSON: {exc}"
+        ) from None
     if not isinstance(data, dict):
-        raise ShadError("saved sessions are not a JSON object")
+        raise ShadError.validation("invalid_snapshot", "saved sessions are not a JSON object")
     if data.get("format") != FORMAT:
-        raise ShadError(f"saved sessions format {data.get('format')!r} is not supported")
+        raise ShadError.validation(
+            "invalid_snapshot", f"saved sessions format {data.get('format')!r} is not supported"
+        )
 
     saved_at = data.get("saved_at")
     if not isinstance(saved_at, int):
-        raise ShadError("saved sessions have no saved_at timestamp")
+        raise ShadError.validation("invalid_snapshot", "saved sessions have no saved_at timestamp")
     raw_entries = data.get("sessions")
     if not isinstance(raw_entries, list):
-        raise ShadError("saved sessions have no sessions list")
+        raise ShadError.validation("invalid_snapshot", "saved sessions have no sessions list")
 
     entries = []
     for index, raw in enumerate(raw_entries):
         if not isinstance(raw, dict):
-            raise ShadError(f"saved session {index} is not a JSON object")
+            raise ShadError.validation(
+                "invalid_snapshot", f"saved session {index} is not a JSON object"
+            )
         key = raw.get("key")
         group = raw.get("group")
         harness = raw.get("harness")
         session_id = raw.get("session_id")
         attached = raw.get("attached", False)
         if not isinstance(key, str) or not key:
-            raise ShadError(f"saved session {index} has no project key")
+            raise ShadError.validation(
+                "invalid_snapshot", f"saved session {index} has no project key"
+            )
         if group is not None and not isinstance(group, str):
-            raise ShadError(f"saved session {index} has an invalid group")
+            raise ShadError.validation(
+                "invalid_snapshot", f"saved session {index} has an invalid group"
+            )
         if not isinstance(harness, str) or not harness:
-            raise ShadError(f"saved session {index} has no harness")
+            raise ShadError.validation("invalid_snapshot", f"saved session {index} has no harness")
         if session_id is not None and not isinstance(session_id, str):
-            raise ShadError(f"saved session {index} has an invalid session_id")
+            raise ShadError.validation(
+                "invalid_snapshot", f"saved session {index} has an invalid session_id"
+            )
         if not isinstance(attached, bool):
-            raise ShadError(f"saved session {index} has an invalid attached flag")
+            raise ShadError.validation(
+                "invalid_snapshot", f"saved session {index} has an invalid attached flag"
+            )
         name = raw.get("name")
         title = raw.get("title")
         if name is not None and not isinstance(name, str):
-            raise ShadError(f"saved session {index} has an invalid name")
+            raise ShadError.validation(
+                "invalid_snapshot", f"saved session {index} has an invalid name"
+            )
         if title is not None and not isinstance(title, str):
-            raise ShadError(f"saved session {index} has an invalid title")
+            raise ShadError.validation(
+                "invalid_snapshot", f"saved session {index} has an invalid title"
+            )
         entries.append(
             Entry(
                 group=group,

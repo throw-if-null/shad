@@ -10,7 +10,7 @@ from shad.config.toml_edit import (
     set_value,
     split_dotted,
 )
-from shad.shared.errors import ShadError
+from shad.errors import ShadError
 
 
 class SplitDottedTests(unittest.TestCase):

@@ -18,6 +18,11 @@ shad sessions save|restore|stop|show     # the running shad sessions, as a snaps
 
 Config file: --config PATH, else $SHAD_CONFIG, else the per-OS default
 (~/.config/shad/shad.toml on Linux). `shad config path` prints the resolved one.
+--config precedes the subcommand; --debug goes before or after it.
+
+Exit codes: 0 success, 2 invalid invocation, 1 every other failure. A failure
+is one undecorated stderr line, `<code>: <message>`; --debug adds the
+traceback. This module is the only place that renders an error.
 
 Actions: status
 
@@ -27,6 +32,7 @@ Resolution uses exact-match first, then unique prefix match per level.
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 from rich.console import Console
@@ -43,6 +49,7 @@ from shad.config.set.command import set_config_value
 from shad.config.show.command import show_config
 from shad.config.unset.command import unset_config_value
 from shad.config.validate.command import validate_config
+from shad.errors import ShadError
 from shad.git.command import cmd_git
 from shad.init.command import cmd_init
 from shad.projects.open.banner import print_banner
@@ -60,7 +67,6 @@ from shad.shared.config import (
     load,
     resolve_prefix,
 )
-from shad.shared.errors import ShadError
 from shad.todo.add.command import add_todo
 from shad.todo.edit.command import edit_todo
 from shad.todo.label.command import manage_labels
@@ -69,9 +75,12 @@ from shad.todo.model import STATUSES
 from shad.todo.panel.command import open_todo_panel
 from shad.todo.rm.command import remove_todo
 from shad.todo.status.command import set_todo_status
+from shad.trace import Trace
 
 console = Console()
-err_console = Console(stderr=True)
+
+# The category to exit code map ([CLI-8]); every category not listed exits 1.
+EXIT_CODES = {"usage": 2}
 
 ACTIONS = ("status",)
 CONFIG_ACTIONS = ("show", "path", "keys", "get", "set", "unset", "edit", "validate")
@@ -116,7 +125,7 @@ def _list_group(cfg: Config, group_name: str) -> None:
 
 
 def _run_action(
-    cfg: Config, project: Project, action: str | None, harness: str | None
+    cfg: Config, project: Project, action: str | None, harness: str | None, trace: Trace
 ) -> int | None:
     """Dispatch open / status for a resolved project. Returns the tmux exit
     code when the project was opened, None otherwise.
@@ -127,15 +136,18 @@ def _run_action(
         print_banner()
         return open_project(project, cfg.defaults, harness=harness)
     if action == "status":
-        print_status(project)
+        print_status(project, trace)
         return None
-    raise ShadError(f"unknown action '{action}'; available: status")
+    raise ShadError.usage("unknown_action", f"unknown action '{action}'; available: status")
 
 
-def cmd_projects(cfg: Config, args: argparse.Namespace) -> int | None:
+def cmd_projects(
+    cfg: Config, args: argparse.Namespace, trace: Trace | None = None
+) -> int | None:
     """List, or run an action on one project. Returns what _run_action returns."""
     parts: list[str] = args.name  # 0–3 tokens: [group] [name] [action]
     harness: str | None = args.harness
+    trace = trace or Trace()
 
     # --- no args: list everything ---
     if not parts:
@@ -156,12 +168,13 @@ def cmd_projects(cfg: Config, args: argparse.Namespace) -> int | None:
         match = resolve_prefix(top_candidates, token)
 
         if match is None:
-            raise ShadError(f"no project or group matching '{token}'")
+            raise ShadError.not_found("no_such_project", f"no project or group matching '{token}'")
 
         if match in cfg.projects:
-            return _run_action(cfg, cfg.projects[match], action, harness)
+            return _run_action(cfg, cfg.projects[match], action, harness, trace)
         if action:
-            raise ShadError(
+            raise ShadError.usage(
+                "group_needs_project",
                 f"'{match}' is a group, not a project; specify a project within the group"
             )
         _list_group(cfg, match)
@@ -176,25 +189,28 @@ def cmd_projects(cfg: Config, args: argparse.Namespace) -> int | None:
             if group_token in cfg.projects or any(
                 k.startswith(group_token) for k in cfg.projects
             ):
-                raise ShadError(
+                raise ShadError.not_found(
+                    "no_such_group",
                     f"'{group_token}' resolves to a top-level project, not a group; "
                     f"did you mean: shad projects {group_token}?"
                 )
             else:
-                raise ShadError(f"no group matching '{group_token}'")
+                raise ShadError.not_found("no_such_group", f"no group matching '{group_token}'")
 
         group_projects = cfg.groups[group_match]
         proj_match = resolve_prefix(list(group_projects), proj_token)
         if proj_match is None:
-            raise ShadError(
+            raise ShadError.not_found(
+                "no_such_project",
                 f"no project matching '{proj_token}' in group '{group_match}'; "
                 f"available: {', '.join(sorted(group_projects))}"
             )
 
-        return _run_action(cfg, group_projects[proj_match], action, harness)
+        return _run_action(cfg, group_projects[proj_match], action, harness, trace)
 
     # --- too many tokens ---
-    raise ShadError(
+    raise ShadError.usage(
+        "too_many_arguments",
         f"too many arguments ({len(parts)}); "
         "usage: shad projects [<group>] [<name>] [status]"
     )
@@ -209,7 +225,9 @@ def cmd_sessions(cfg: Config, args: argparse.Namespace) -> int | None:
     """Dispatch save / restore / stop / show. Returns restore's attach exit code."""
     action = getattr(args, "sessions_action", None)
     if action is None:
-        raise ShadError(f"no sessions action given; available: {', '.join(SESSIONS_ACTIONS)}")
+        raise ShadError.usage(
+            "no_action", f"no sessions action given; available: {', '.join(SESSIONS_ACTIONS)}"
+        )
     if action == "save":
         save_sessions(cfg, args)
     elif action == "restore":
@@ -219,7 +237,8 @@ def cmd_sessions(cfg: Config, args: argparse.Namespace) -> int | None:
     elif action == "show":
         show_sessions(cfg, args)
     else:
-        raise ShadError(
+        raise ShadError.usage(
+            "unknown_action",
             f"unknown sessions action '{action}'; available: {', '.join(SESSIONS_ACTIONS)}"
         )
     return None
@@ -234,7 +253,9 @@ def cmd_todo(cfg: Config, args: argparse.Namespace, path: Path | None = None) ->
     """Dispatch the todo actions. *path* is the config file `label` writes to."""
     action = getattr(args, "todo_action", None)
     if action is None:
-        raise ShadError(f"no todo action given; available: {', '.join(TODO_ACTIONS)}")
+        raise ShadError.usage(
+            "no_action", f"no todo action given; available: {', '.join(TODO_ACTIONS)}"
+        )
     if action == "panel":
         open_todo_panel(cfg, args)
     elif action == "add":
@@ -250,7 +271,10 @@ def cmd_todo(cfg: Config, args: argparse.Namespace, path: Path | None = None) ->
     elif action == "label":
         manage_labels(cfg, args, path or config_path())
     else:
-        raise ShadError(f"unknown todo action '{action}'; available: {', '.join(TODO_ACTIONS)}")
+        raise ShadError.usage(
+            "unknown_action",
+            f"unknown todo action '{action}'; available: {', '.join(TODO_ACTIONS)}",
+        )
 
 
 def cmd_config(args: argparse.Namespace, path: Path | None = None) -> None:
@@ -274,7 +298,8 @@ def cmd_config(args: argparse.Namespace, path: Path | None = None) -> None:
     elif action == "validate":
         validate_config(target)
     else:
-        raise ShadError(
+        raise ShadError.usage(
+            "unknown_action",
             f"unknown config action '{action}'; available: {', '.join(CONFIG_ACTIONS)}"
         )
 
@@ -284,10 +309,41 @@ def cmd_config(args: argparse.Namespace, path: Path | None = None) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _debug_parent() -> argparse.ArgumentParser:
+    """
+    The parser every subcommand inherits `--debug` from, so the flag is
+    accepted before and after the subcommand. The default is SUPPRESS, not
+    False: argparse applies a subparser's defaults after the root parsed, so
+    a False default on the subcommand would overwrite a `--debug` given
+    before it. `main` reads the flag with getattr.
+    """
+    parent = argparse.ArgumentParser(add_help=False)
+    parent.add_argument(
+        "--debug",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="Print the traceback of a failure and shad's diagnostics on stderr",
+    )
+    return parent
+
+
+def _subcommand(
+    sub: argparse._SubParsersAction[argparse.ArgumentParser],
+    name: str,
+    **kwargs: object,
+) -> argparse.ArgumentParser:
+    """A subcommand parser that also accepts --debug."""
+    return sub.add_parser(name, parents=[_DEBUG], **kwargs)  # type: ignore[arg-type]
+
+
+_DEBUG = _debug_parent()
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="shad",
         description="Attach or create project-specific tmux sessions.",
+        parents=[_DEBUG],
     )
     parser.add_argument("--version", action="version", version=f"shad {__version__}")
     parser.add_argument(
@@ -301,7 +357,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub = parser.add_subparsers(dest="command", metavar="<command>")
 
-    p_projects = sub.add_parser(
+    p_projects = _subcommand(sub, 
         "projects",
         help="List, open, or manage a project",
         description=(
@@ -334,7 +390,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
-    p_git = sub.add_parser(
+    p_git = _subcommand(sub, 
         "git",
         help="Run git maintenance across configured projects",
         description=(
@@ -353,7 +409,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     git_sub = p_git.add_subparsers(dest="git_action", metavar="<action>")
 
-    p_git_sync = git_sub.add_parser(
+    p_git_sync = _subcommand(git_sub, 
         "sync",
         help="Fetch, fast-forward, and prune dead branches and worktrees",
         description=(
@@ -410,7 +466,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Report what would change; still fetches, but deletes nothing",
     )
 
-    p_git_panel = git_sub.add_parser(
+    p_git_panel = _subcommand(git_sub, 
         "panel",
         help="Read-only branch, worktree and stash view for one repository",
         description=(
@@ -453,7 +509,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip the fetch on open; show local state only",
     )
 
-    p_todo = sub.add_parser(
+    p_todo = _subcommand(sub, 
         "todo",
         help="Manage the todo list",
         description=(
@@ -487,9 +543,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     todo_sub = p_todo.add_subparsers(dest="todo_action", metavar="<action>")
 
-    todo_sub.add_parser("panel", help="Show the todo pane")
+    _subcommand(todo_sub, "panel", help="Show the todo pane")
 
-    p_todo_add = todo_sub.add_parser("add", help="Create an item")
+    p_todo_add = _subcommand(todo_sub, "add", help="Create an item")
     p_todo_add.add_argument(
         "title",
         metavar="TITLE",
@@ -503,33 +559,33 @@ def build_parser() -> argparse.ArgumentParser:
         help="A configured label; repeat for more than one",
     )
 
-    p_todo_list = todo_sub.add_parser("list", help="Print the items")
+    p_todo_list = _subcommand(todo_sub, "list", help="Print the items")
     p_todo_list.add_argument(
         "--keys", action="store_true", help="Print only the item keys, one per line"
     )
 
-    p_todo_status = todo_sub.add_parser("status", help="Set an item's status")
+    p_todo_status = _subcommand(todo_sub, "status", help="Set an item's status")
     p_todo_status.add_argument("key", metavar="KEY", help="Item key, or a unique prefix")
     p_todo_status.add_argument("status", metavar="STATUS", choices=STATUSES)
 
-    p_todo_edit = todo_sub.add_parser("edit", help="Open an item in $EDITOR")
+    p_todo_edit = _subcommand(todo_sub, "edit", help="Open an item in $EDITOR")
     p_todo_edit.add_argument("key", metavar="KEY", help="Item key, or a unique prefix")
 
-    p_todo_rm = todo_sub.add_parser("rm", help="Delete an item")
+    p_todo_rm = _subcommand(todo_sub, "rm", help="Delete an item")
     p_todo_rm.add_argument("key", metavar="KEY", help="Item key, or a unique prefix")
 
-    p_todo_label = todo_sub.add_parser("label", help="Manage the label vocabulary")
+    p_todo_label = _subcommand(todo_sub, "label", help="Manage the label vocabulary")
     label_sub = p_todo_label.add_subparsers(dest="label_action", metavar="<action>")
-    p_label_add = label_sub.add_parser("add", help="Add a label to [todo] labels")
+    p_label_add = _subcommand(label_sub, "add", help="Add a label to [todo] labels")
     p_label_add.add_argument("name", metavar="NAME")
-    p_label_rm = label_sub.add_parser("rm", help="Remove a label from [todo] labels")
+    p_label_rm = _subcommand(label_sub, "rm", help="Remove a label from [todo] labels")
     p_label_rm.add_argument("name", metavar="NAME")
     p_label_rm.add_argument(
         "--force", action="store_true", help="Remove the label even when items still carry it"
     )
-    label_sub.add_parser("list", help="Print the labels, one per line")
+    _subcommand(label_sub, "list", help="Print the labels, one per line")
 
-    p_sessions = sub.add_parser(
+    p_sessions = _subcommand(sub, 
         "sessions",
         help="Save the running shad sessions, bring them back, or stop them",
         description=(
@@ -570,7 +626,7 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     sessions_sub = p_sessions.add_subparsers(dest="sessions_action", metavar="<action>")
-    p_sessions_save = sessions_sub.add_parser(
+    p_sessions_save = _subcommand(sessions_sub, 
         "save", help="Pick the running shad sessions to record"
     )
     p_sessions_save.add_argument(
@@ -578,7 +634,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Record every running session without the picker; works without a terminal",
     )
-    p_sessions_restore = sessions_sub.add_parser(
+    p_sessions_restore = _subcommand(sessions_sub, 
         "restore", help="Create the saved sessions that are not running, then attach"
     )
     p_sessions_restore.add_argument(
@@ -586,10 +642,10 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Create the sessions without attaching to one or opening tabs",
     )
-    sessions_sub.add_parser("stop", help="Pick running shad sessions and kill them")
-    sessions_sub.add_parser("show", help="Print the saved sessions")
+    _subcommand(sessions_sub, "stop", help="Pick running shad sessions and kill them")
+    _subcommand(sessions_sub, "show", help="Print the saved sessions")
 
-    p_completion = sub.add_parser(
+    p_completion = _subcommand(sub, 
         "completion",
         help="Print the bash completion script",
         description=(
@@ -608,7 +664,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Shell to generate completions for",
     )
 
-    p_init = sub.add_parser(
+    p_init = _subcommand(sub, 
         "init",
         help="Add a new project to the config interactively",
         description=(
@@ -634,7 +690,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Install missing tmux and opencode dependencies on Fedora before prompting",
     )
 
-    p_config = sub.add_parser(
+    p_config = _subcommand(sub, 
         "config",
         help="Inspect or edit the shad config file",
         description=(
@@ -667,18 +723,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     config_sub = p_config.add_subparsers(dest="config_action", metavar="<action>")
 
-    p_config_show = config_sub.add_parser("show", help="Print a rendered config summary")
+    p_config_show = _subcommand(config_sub, "show", help="Print a rendered config summary")
     p_config_show.add_argument(
         "--raw", action="store_true", help="Print the raw file contents instead"
     )
 
-    config_sub.add_parser("path", help="Print the config file path")
-    config_sub.add_parser("keys", help="Print every settable key, one per line")
+    _subcommand(config_sub, "path", help="Print the config file path")
+    _subcommand(config_sub, "keys", help="Print every settable key, one per line")
 
-    p_config_get = config_sub.add_parser("get", help="Print a single value")
+    p_config_get = _subcommand(config_sub, "get", help="Print a single value")
     p_config_get.add_argument("key", metavar="KEY", help="Dotted key, e.g. defaults.harness")
 
-    p_config_set = config_sub.add_parser("set", help="Set a single value")
+    p_config_set = _subcommand(config_sub, "set", help="Set a single value")
     p_config_set.add_argument("key", metavar="KEY", help="Dotted key, e.g. defaults.harness")
     p_config_set.add_argument("value", metavar="VALUE", help="New value")
     p_config_set.add_argument(
@@ -687,7 +743,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip key and path checks (still requires the result to be a loadable config)",
     )
 
-    p_config_unset = config_sub.add_parser("unset", help="Remove a key or a project table")
+    p_config_unset = _subcommand(config_sub, "unset", help="Remove a key or a project table")
     p_config_unset.add_argument("key", metavar="KEY", help="Dotted key, e.g. projects.kb")
     p_config_unset.add_argument(
         "--force",
@@ -695,10 +751,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Allow removing a required key such as a project's path",
     )
 
-    config_sub.add_parser("edit", help="Open the config file in $EDITOR")
-    config_sub.add_parser("validate", help="Check that the config parses and loads")
+    _subcommand(config_sub, "edit", help="Open the config file in $EDITOR")
+    _subcommand(config_sub, "validate", help="Check that the config parses and loads")
 
-    sub.add_parser(
+    _subcommand(sub, 
         "cheat",
         help="Show a tmux cheat sheet in a popup (or stdout if outside tmux)",
         description=(
@@ -728,6 +784,8 @@ def main(argv: list[str] | None = None) -> int:
         # argparse has already printed: --help and --version exit 0, a bad
         # command line exits 2.
         return _exit_code(exc.code)
+
+    trace = Trace(enabled=getattr(args, "debug", False))
 
     # None means "resolve normally"; shared.config.config_path() then applies
     # $SHAD_CONFIG and the per-OS default. Readers and writers get the same
@@ -759,9 +817,9 @@ def main(argv: list[str] | None = None) -> int:
 
         code: int | None = None
         if args.command == "projects":
-            code = cmd_projects(cfg, args)
+            code = cmd_projects(cfg, args, trace)
         elif args.command == "git":
-            cmd_git(cfg, args)
+            cmd_git(cfg, args, trace)
         elif args.command == "todo":
             cmd_todo(cfg, args, path=override)
         elif args.command == "sessions":
@@ -769,11 +827,22 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if code is None else code
 
     except ShadError as exc:
-        err_console.print(Text(f"✗ {exc}", style="bold red"))
-        return 1
+        return _report(exc, exc, trace)
     except (KeyboardInterrupt, EOFError):
-        err_console.print(Text("\nAborted.", style="dim"))
+        print("\nAborted.", file=sys.stderr)
         return 130
+    except Exception as exc:  # noqa: BLE001 — the one place a failure of any type is rendered
+        return _report(ShadError.internal("unexpected", f"{type(exc).__name__}: {exc}"), exc, trace)
+
+
+def _report(error: ShadError, cause: BaseException, trace: Trace) -> int:
+    """
+    Render *error* as the one stderr line, the traceback of *cause* when
+    tracing, and return the exit code its category maps to.
+    """
+    print(f"{error.code}: {error.message}", file=sys.stderr)
+    trace.exception(cause)
+    return EXIT_CODES.get(error.category, 1)
 
 
 def _exit_code(code: object) -> int:

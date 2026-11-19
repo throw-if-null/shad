@@ -25,7 +25,7 @@ import shutil
 import sqlite3
 import time
 import uuid
-import warnings
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -34,6 +34,11 @@ from rich.panel import Panel
 from rich.text import Text
 
 from shad.shared.picker import NoTerminal, pick_one, render_bytes
+
+
+class Unreadable(Exception):
+    """A session store exists but could not be read; the message says why."""
+
 
 DB_PATH = Path.home() / ".local" / "share" / "opencode" / "opencode.db"
 CLAUDE_PROJECTS_DIR = Path.home() / ".claude" / "projects"
@@ -115,8 +120,7 @@ def _query_sessions(project_path: Path, limit: int = SESSION_LIMIT) -> list[OcSe
             rows = cur.fetchall()
         return [OcSession(id=r[0], title=r[1], time_updated=r[2]) for r in rows]
     except sqlite3.DatabaseError as exc:
-        warnings.warn(f"shad: could not read opencode session DB: {exc}", stacklevel=2)
-        return []
+        raise Unreadable(f"could not read the opencode session database: {exc}") from None
 
 
 def claude_project_dir(project_path: Path) -> Path:
@@ -211,10 +215,7 @@ def _query_claude_sessions(
             reverse=True,
         )
     except OSError as exc:
-        warnings.warn(
-            f"shad: could not read claude session directory: {exc}", stacklevel=2
-        )
-        return []
+        raise Unreadable(f"could not read the Claude Code session directory: {exc}") from None
 
     sessions: list[OcSession] = []
     for transcript in transcripts:
@@ -239,9 +240,13 @@ def _truncate(text: str, max_len: int) -> str:
 
 
 def _render_picker(
-    sessions: list[OcSession], selected: int, project_name: str, harness: str
+    sessions: list[OcSession],
+    selected: int,
+    project_name: str,
+    harness: str,
+    note: str | None = None,
 ) -> Panel:
-    """Build the Rich renderable for the current picker state."""
+    """The picker frame for *selected*. *note* is a problem shown above the key help."""
     items = [None] + sessions  # index 0 = new session sentinel
 
     lines = Text()
@@ -270,6 +275,8 @@ def _render_picker(
         lines.append_text(row)
         lines.append("\n")
 
+    if note:
+        lines.append(f"\n {note}\n", style="yellow")
     footer = Text("\n ↑↓ / j k  navigate   Enter  select   q  cancel", style="dim")
     lines.append_text(footer)
     # A row with a name is wider than an 80-column terminal; crop it rather
@@ -286,7 +293,10 @@ def _render_picker(
 
 
 def _run_picker(
-    sessions: list[OcSession], project_name: str, harness: str = "opencode"
+    sessions: list[OcSession],
+    project_name: str,
+    harness: str = "opencode",
+    note: str | None = None,
 ) -> int | None:
     """
     Session picker.
@@ -298,7 +308,7 @@ def _run_picker(
 
     def render(selected: int) -> bytes:
         return render_bytes(
-            _render_picker(sessions, selected, project_name, harness), term_width
+            _render_picker(sessions, selected, project_name, harness, note), term_width
         )
 
     try:
@@ -314,16 +324,17 @@ def pick_opencode_target(project_path: Path, base_cmd: str) -> OpencodeTarget | 
     """
     Show an interactive session picker and return the opencode target to run.
 
-    Returns None if the user explicitly cancelled (q / Esc).
-    Falls back to base_cmd on error or no sessions.
+    Returns None if the user explicitly cancelled (q / Esc). With no
+    recorded session the target is a fresh one without a picker. A session
+    store that cannot be read is reported in the picker instead.
     """
-    sessions = _query_sessions(project_path)
-    if not sessions:
+    sessions, note = _query_or_note(_query_sessions, project_path)
+    if not sessions and note is None:
         fresh_key = f"fresh-{int(time.time())}"
         return OpencodeTarget(command=base_cmd, session_key=fresh_key, fresh=True)
 
     project_name = project_path.name
-    chosen = _run_picker(sessions, project_name)
+    chosen = _run_picker(sessions, project_name, note=note)
 
     if chosen is None:
         return None  # user cancelled — caller should abort
@@ -341,14 +352,15 @@ def pick_claude_target(
     """
     Show an interactive session picker and return the Claude Code target to run.
 
-    Returns None if the user explicitly cancelled (q / Esc).
-    Falls back to base_cmd when the project has no recorded sessions.
+    Returns None if the user explicitly cancelled (q / Esc). With no
+    recorded session the target is a fresh one without a picker. A session
+    store that cannot be read is reported in the picker instead.
     """
-    sessions = _query_claude_sessions(project_path)
-    if not sessions:
+    sessions, note = _query_or_note(_query_claude_sessions, project_path)
+    if not sessions and note is None:
         return _fresh_claude_target(base_cmd)
 
-    chosen = _run_picker(sessions, project_path.name, harness="claude")
+    chosen = _run_picker(sessions, project_path.name, harness="claude", note=note)
 
     if chosen is None:
         return None  # user cancelled — caller should abort
@@ -361,6 +373,16 @@ def pick_claude_target(
         session_key=session.id,
         session_prefix="cc",
     )
+
+
+def _query_or_note(
+    query: Callable[[Path], list[OcSession]], project_path: Path
+) -> tuple[list[OcSession], str | None]:
+    """*query*'s sessions, or no sessions and the reason the store could not be read."""
+    try:
+        return query(project_path), None
+    except Unreadable as exc:
+        return [], str(exc)
 
 
 def _fresh_claude_target(base_cmd: str) -> OpencodeTarget:

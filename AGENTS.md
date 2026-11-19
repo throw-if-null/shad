@@ -35,12 +35,13 @@ The codebase follows a **vertical slice** layout — each CLI subcommand owns it
 
 ```
 src/shad/
-├── cli.py                      # arg parsing, dispatch, top-level error handling; main(argv) -> exit code
+├── cli.py                      # arg parsing, dispatch, the one place an error is rendered; main(argv) -> exit code
 ├── __main__.py                 # `python -m shad`
+├── errors.py                   # the error model: ShadError(category, code, message), one constructor per category
+├── trace.py                    # Trace: diagnostics on stderr under --debug, quiet by default; the root injects it
 ├── testing.py                  # test support: run() calls main in-process; TmuxCase, Pane drive an isolated tmux server
 ├── shared/                     # cross-cutting utilities
 │   ├── config.py               # TOML config loading, Project/Defaults, target resolution, data dir
-│   ├── errors.py               # ShadError exception
 │   ├── editor.py               # resolve_editor(): $VISUAL, $EDITOR, then the first installed fallback
 │   ├── render.py               # make_table() and relative_age() — shared presentation
 │   ├── picker.py               # the arrow-key pickers: pure key loops, and the /dev/tty wrapper
@@ -193,4 +194,6 @@ CI installs tmux for this.
 - **A textual `App` subclass must not set `self._name`**: `DOMNode.__init__` owns that attribute and `App.name` reads it. mypy catches the collision only when the value type differs.
 - **Todo panel polling**: the panel calls `store.signature()` once a second and reloads on any change — name, mtime, or size of any item file. `load()` is synchronous because the directory is tens of files; do not move it to a worker. The panel's tests call `app.poll()` directly rather than waiting out the interval.
 - **Completion input for todo**: the script parses `shad todo list --keys` and `shad todo label list`, both one plain word per line. The keys call carries `--config` from the command line, so the keys come from the `[todo] path` of the config the command will read. `shad todo list` without `--keys` is a rich table for humans and is not safe to parse.
+- **Errors are raised, never printed, below the root**: a slice raises `ShadError.<category>(code, message)` from `errors.py`, with the six `[ERR-5]` categories and a `code` the slice owns. `cli.main` is the only place that renders one: `<code>: <message>` on stderr, `usage` exits 2 and every other category 1, the traceback under `--debug`, and any other exception becomes `internal`/`unexpected`. A stdlib or subprocess failure is converted where it occurs: `tomllib.TOMLDecodeError` in `shared/config.py::load` and `config/store.py`, tmux in `shared/tmux.py::_run`, git in `git/run.py`, an editor exit in the three commands that run one. `NoTerminal` (picker) and `NotUsable` (git discover) are control flow caught inside their packages; a `NoTerminal` that reaches a command boundary becomes `infrastructure`/`no_terminal`. The messages are one line, because the contract is one line.
+- **`--debug` is a parent parser with `default=argparse.SUPPRESS`**: every subcommand parser is built through `cli._subcommand`, which adds the `_DEBUG` parent, so the flag is accepted before and after the subcommand. The default is SUPPRESS because argparse applies a subparser's defaults after the root has parsed, and a `False` default on the subcommand would overwrite a `--debug` given before it; `main` reads it with `getattr`. Diagnostics go through the `Trace` the root constructs from the flag and injects (`print_status`, `sync_projects`); no module writes to stderr on its own, and `warnings.warn` is not used.
 - **Pane sizes are `-l N%`, never `-p N`**: tmux 3.4 (Ubuntu 24.04) rejects `split-window -p` with "size missing", so `shad projects` could not build a layout there. `layout.py::_size` spells the size as `-l N%`, which every tmux since 3.1 accepts. The behavior tests run the layout on CI's tmux; the layout unit tests assert the spelling.

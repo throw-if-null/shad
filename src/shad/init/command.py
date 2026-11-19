@@ -29,8 +29,8 @@ from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 from rich.text import Text
 
+from shad.errors import ShadError
 from shad.shared.config import config_path
-from shad.shared.errors import ShadError
 
 console = Console()
 err_console = Console(stderr=True)
@@ -151,7 +151,7 @@ def _run_install_command(command: list[str], description: str) -> None:
     console.print(Text(f"  → {description}", style="cyan"))
     result = subprocess.run(command, check=False)
     if result.returncode != 0:
-        raise ShadError(f"command failed: {' '.join(command)}")
+        raise ShadError.infrastructure("install_failed", f"command failed: {' '.join(command)}")
 
 
 def _install_via_dnf(package: str) -> Callable[[], None]:
@@ -163,7 +163,10 @@ def _install_via_dnf(package: str) -> Callable[[], None]:
 
 def _install_opencode_systemwide() -> None:
     if platform.machine() != "x86_64":
-        raise ShadError(f"--install-deps installs opencode on x86_64 only, not on {platform.machine()}")
+        raise ShadError.infrastructure(
+            "unsupported_platform",
+            f"--install-deps installs opencode on x86_64 only, not on {platform.machine()}",
+        )
 
     # This runs as root. A predictable directory under /tmp lets another local user create it
     # first and replace the binary before `install` copies it into /usr/local/bin.
@@ -179,7 +182,8 @@ def _install_opencode_systemwide() -> None:
         with archive.open("rb") as fh:
             digest = hashlib.file_digest(fh, "sha256").hexdigest()
         if digest != OPENCODE_LINUX_X64_SHA256:
-            raise ShadError(
+            raise ShadError.infrastructure(
+                "checksum_mismatch",
                 f"opencode archive checksum mismatch: expected {OPENCODE_LINUX_X64_SHA256}, got {digest}"
             )
 
@@ -188,7 +192,9 @@ def _install_opencode_systemwide() -> None:
     except ShadError:
         raise
     except Exception as exc:
-        raise ShadError(f"failed to install opencode: {exc}") from exc
+        raise ShadError.infrastructure(
+            "install_failed", f"failed to install opencode: {exc}"
+        ) from exc
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
@@ -212,12 +218,14 @@ def ensure_dependencies_installed() -> None:
         return
 
     if not _detect_fedora():
-        raise ShadError("--install-deps currently supports Fedora only")
+        raise ShadError.infrastructure(
+            "unsupported_platform", "--install-deps currently supports Fedora only"
+        )
 
     if not _is_root():
-        raise ShadError(
-            "--install-deps must be run with sudo on Fedora\n"
-            "    try: sudo shad init --install-deps"
+        raise ShadError.infrastructure(
+            "not_root",
+            "--install-deps must be run with sudo on Fedora; try: sudo shad init --install-deps"
         )
 
     for dep in missing:

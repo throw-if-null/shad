@@ -45,12 +45,12 @@ class AddTests(TodoCase):
         Criterion:  add-of-a-duplicate-key-fails-and-keeps-the-item
           Given:    `shad todo add "Fix panel resize" --label chore` ran.
           When:     `shad todo add "Fix panel resize"`.
-          Then:     exit 1, stdout empty, stderr says the key exists, and
-                    the item file is byte-identical.
+          Then:     exit 1, stdout empty, stderr one line `todo_exists:
+                    <non-empty>`, and the item file is byte-identical.
         """
         self._run("add", "Fix panel resize", "--label", "chore")
         before = (self._dir() / "fix-panel-resize.md").read_text()
-        self.assertIn("already exists", self._fail("add", "Fix panel resize"))
+        self.assertIn("already exists", self._fail("add", "Fix panel resize", code="todo_exists"))
         self.assertEqual((self._dir() / "fix-panel-resize.md").read_text(), before)
 
     def test_add_rejects_an_unknown_label_before_any_effect(self) -> None:
@@ -58,11 +58,11 @@ class AddTests(TodoCase):
         Criterion:  add-rejects-an-unknown-label-before-any-effect
           Given:    the configured labels are chore and poc.
           When:     `shad todo add x --label nope`.
-          Then:     exit 1, stdout empty, stderr names nope and the
-                    configured labels, and `shad todo list --keys` still
-                    prints nothing.
+          Then:     exit 1, stdout empty, stderr one line `unknown_label:
+                    <non-empty>` naming nope and the configured labels, and
+                    `shad todo list --keys` still prints nothing.
         """
-        err = self._fail("add", "x", "--label", "nope")
+        err = self._fail("add", "x", "--label", "nope", code="unknown_label")
         self.assertIn("nope", err)
         self.assertIn("chore, poc", err)
         self.assertEqual(self._run("list", "--keys"), "")
@@ -96,11 +96,11 @@ class AddTests(TodoCase):
         Criterion:  add-without-a-title-needs-a-terminal
           Given:    stdin is not a terminal, and EDITOR is `false`.
           When:     `shad todo add`.
-          Then:     exit 1, stdout empty, stderr says a terminal is needed,
-                    and no item exists.
+          Then:     exit 1, stdout empty, stderr one line `no_terminal:
+                    <non-empty>`, and no item exists.
         """
         self.env["EDITOR"] = "false"
-        self.assertIn("not a terminal", self._fail("add"))
+        self.assertIn("not a terminal", self._fail("add", code="no_terminal"))
         self.assertEqual(self._run("list", "--keys"), "")
 
 
@@ -150,11 +150,13 @@ class AddInEditorTests(TodoTerminalCase):
         """
         Criterion:  the-label-flag-is-checked-before-the-editor-opens
           When:     `shad todo add --label nope` in a terminal.
-          Then:     exit 1, and the editor never ran.
+          Then:     exit 1 with `unknown_label` on the screen, and the editor
+                    never ran.
         """
         editor = self.editor()
         pane = self.pane("todo", "add", "--label", "nope")
         self.assertEqual(pane.wait_exit(), 1)
+        self.assertIn("unknown_label: ", pane.screen())
         self.assertEqual(editor.shown(), [])
 
     def test_an_untouched_template_creates_nothing(self) -> None:
@@ -162,12 +164,14 @@ class AddInEditorTests(TodoTerminalCase):
         Criterion:  an-untouched-template-creates-nothing
           Given:    EDITOR leaves the draft as it was.
           When:     `shad todo add` in a terminal.
-          Then:     exit 1, the screen says no todo was created, no item
-                    exists, and the draft is gone.
+          Then:     exit 1, the screen holds one line `empty_todo:
+                    <non-empty>` saying no todo was created, no item exists,
+                    and the draft is gone.
         """
         editor = self.editor(None)
         pane = self.pane("todo", "add")
         self.assertEqual(pane.wait_exit(), 1)
+        self.assertIn("empty_todo: ", pane.screen())
         self.assertIn("no todo created", pane.screen())
         [(draft, text)] = editor.shown()
         self.assertIn("# statuses:", text)
@@ -209,8 +213,9 @@ class AddInEditorTests(TodoTerminalCase):
         Criterion:  declining-to-edit-again-keeps-the-draft
           Given:    EDITOR saves a draft with an unknown status.
           When:     `shad todo add` in a terminal, and `n` at "Edit again?".
-          Then:     exit 1, the screen names the kept draft, the draft holds
-                    the typed text, and no item exists.
+          Then:     exit 1, the screen holds one line `draft_rejected:
+                    <non-empty>` naming the kept draft, the draft holds the
+                    typed text, and no item exists.
         """
         bad = DRAFT.replace("status: todo", "status: doing")
         editor = self.editor(bad)
@@ -220,6 +225,7 @@ class AddInEditorTests(TodoTerminalCase):
         self.assertEqual(pane.wait_exit(), 1)
         [(draft, _)] = editor.shown()
         self.addCleanup(draft.unlink, missing_ok=True)
+        self.assertIn("draft_rejected: ", pane.screen())
         self.assertIn(str(draft), pane.screen())
         self.assertEqual(draft.read_text(), bad)
         self.assertEqual(self.keys(), [])
@@ -229,12 +235,14 @@ class AddInEditorTests(TodoTerminalCase):
         Criterion:  a-failing-editor-creates-nothing
           Given:    EDITOR exits with status 1.
           When:     `shad todo add` in a terminal.
-          Then:     exit 1, the screen names the status, no item exists, and
-                    the draft is gone.
+          Then:     exit 1, the screen holds one line `editor_failed:
+                    <non-empty>` naming the status, no item exists, and the
+                    draft is gone.
         """
         editor = self.editor(DRAFT, status=1)
         pane = self.pane("todo", "add")
         self.assertEqual(pane.wait_exit(), 1)
+        self.assertIn("editor_failed: ", pane.screen())
         self.assertIn("status 1", pane.screen())
         self.assertEqual(self.keys(), [])
         self.assertFalse(editor.shown()[0][0].exists())

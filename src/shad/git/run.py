@@ -21,7 +21,7 @@ import signal
 import subprocess
 from pathlib import Path
 
-from shad.shared.errors import ShadError
+from shad.errors import ShadError
 
 # Minimum git that supports `worktree list --porcelain -z` and the
 # locked/prunable annotations this module relies on for safety.
@@ -212,7 +212,9 @@ def git(
             except subprocess.TimeoutExpired:
                 _kill_group(proc)
                 out, err = proc.communicate()
-                raise ShadError(f"git {' '.join(args)} timed out after {timeout:.0f}s")
+                raise ShadError.infrastructure(
+                    "git_timeout", f"git {' '.join(args)} timed out after {timeout:.0f}s"
+                )
             return subprocess.CompletedProcess(argv, proc.returncode, out, err)
     except FileNotFoundError:
         raise GitMissing("git is not installed or not on PATH") from None
@@ -264,7 +266,9 @@ def git_version() -> tuple[int, int]:
         bits = part.split(".")
         if len(bits) >= 2 and bits[0].isdigit() and bits[1].isdigit():
             return int(bits[0]), int(bits[1])
-    raise ShadError(f"could not parse git version from: {result.stdout.strip()!r}")
+    raise ShadError.infrastructure(
+        "git_version_unknown", f"could not parse git version from: {result.stdout.strip()!r}"
+    )
 
 
 def require_git() -> None:
@@ -272,9 +276,10 @@ def require_git() -> None:
     try:
         found = git_version()
     except GitMissing as exc:
-        raise ShadError(str(exc)) from None
+        raise ShadError.infrastructure("git_missing", str(exc)) from None
     if found < MIN_GIT:
-        raise ShadError(
+        raise ShadError.infrastructure(
+            "git_too_old",
             f"git {found[0]}.{found[1]} is too old; "
             f"shad git sync needs {MIN_GIT[0]}.{MIN_GIT[1]} or newer"
         )

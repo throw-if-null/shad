@@ -62,11 +62,13 @@ class SaveAllTests(SessionsCase):
         Criterion:  save-all-with-nothing-running-fails
           Given:    no shad session runs.
           When:     `shad sessions save --all`.
-          Then:     exit 1, stdout empty, stderr says no shad session is
-                    running, and no snapshot is written.
+          Then:     exit 1, stdout empty, stderr one line
+                    `no_running_sessions: <non-empty>`, and no snapshot is
+                    written.
         """
         result = self.run_detached("sessions", "save", "--all")
         self.assertEqual((result.code, result.out), (1, ""), result.err)
+        self.assertRegex(result.err, r"^no_running_sessions: .+\n$")
         self.assertIn("no shad sessions are running", result.err)
         self.assertFalse(self.snapshot.exists())
 
@@ -75,12 +77,13 @@ class SaveAllTests(SessionsCase):
         Criterion:  save-all-with-only-unsupported-sessions-fails
           Given:    the only shad session runs opencode.
           When:     `shad sessions save --all`.
-          Then:     exit 1, stderr says no session could be saved, and no
-                    snapshot is written.
+          Then:     exit 1, stderr one line `no_saveable_session:
+                    <non-empty>`, and no snapshot is written.
         """
         self.start_session("kb", "fresh-1", harness="opencode")
         result = self.run_detached("sessions", "save", "--all")
         self.assertEqual(result.code, 1)
+        self.assertRegex(result.err, r"^no_saveable_session: .+\n$")
         self.assertIn("no session could be saved", result.err)
         self.assertFalse(self.snapshot.exists())
 
@@ -184,11 +187,13 @@ class SavePickerTests(SessionsCase):
         Criterion:  save-without-a-terminal-points-at-all
           Given:    kb runs A.
           When:     `shad sessions save` as a process with no terminal.
-          Then:     exit 1, stdout empty, stderr names `--all`, and no
-                    snapshot is written.
+          Then:     exit 1, stdout empty, stderr one line `no_terminal:
+                    <non-empty>` that names `--all`, and no snapshot is
+                    written.
         """
         self.start_session("kb", UUID_A)
         result = self.run_detached("sessions", "save")
         self.assertEqual((result.code, result.out), (1, ""), result.err)
+        self.assertRegex(result.err, r"^no_terminal: .+\n$")
         self.assertIn("--all", result.err)
         self.assertFalse(self.snapshot.exists())

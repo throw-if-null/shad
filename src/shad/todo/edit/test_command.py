@@ -43,16 +43,18 @@ class EditTests(TodoCase):
         Criterion:  edit-reports-a-failing-editor
           Given:    EDITOR exits with status 1.
           When:     `shad todo edit fix`.
-          Then:     exit 1, stdout empty, stderr names the status.
+          Then:     exit 1, stdout empty, stderr one line `editor_failed:
+                    <non-empty>` naming the status.
         """
         self._run("add", "Fix panel resize")
         self.editor(None, status=1)
-        self.assertIn("status 1", self._fail("edit", "fix"))
+        self.assertIn("status 1", self._fail("edit", "fix", code="editor_failed"))
 
     def test_edit_of_an_unknown_key_fails(self) -> None:
         """
         Criterion:  edit-of-an-unknown-key-fails
           When:     `shad todo edit nothing`.
-          Then:     exit 1, stdout empty, stderr names the key.
+          Then:     exit 1, stdout empty, stderr one line `no_such_todo:
+                    <non-empty>` naming the key.
         """
-        self.assertIn("nothing", self._fail("edit", "nothing"))
+        self.assertIn("nothing", self._fail("edit", "nothing", code="no_such_todo"))

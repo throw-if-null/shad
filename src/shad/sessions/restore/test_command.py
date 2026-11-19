@@ -99,11 +99,12 @@ class RestoreTests(SessionsCase):
         Criterion:  restore-without-a-snapshot-fails
           Given:    no snapshot was saved.
           When:     `shad sessions restore --no-attach`.
-          Then:     exit 1, stdout empty, stderr says there are no saved
-                    sessions.
+          Then:     exit 1, stdout empty, stderr one line `no_snapshot:
+                    <non-empty>` saying there are no saved sessions.
         """
         result = self.run_detached("sessions", "restore", "--no-attach")
         self.assertEqual((result.code, result.out), (1, ""), result.err)
+        self.assertRegex(result.err, r"^no_snapshot: .+\n$")
         self.assertIn("no saved sessions", result.err)
 
     def test_restore_attaches_to_the_session_attached_at_save(self) -> None:

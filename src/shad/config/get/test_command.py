@@ -61,17 +61,19 @@ class GetTests(ConfigCase):
         Criterion:  get-of-an-unknown-key-fails
           When:     `shad config get defaults.nope`, and
                     `shad config get projects.nope.session`.
-          Then:     exit 1, stdout empty, stderr names the problem.
+          Then:     exit 1, stdout empty, stderr one line `no_such_key:
+                    <non-empty>`.
         """
-        self.assertIn("key not found", self._fail("get", "defaults.nope"))
-        self.assertIn("nope", self._fail("get", "projects.nope.session"))
+        self.assertIn("key not found", self._fail("get", "defaults.nope", code="no_such_key"))
+        self.assertIn("nope", self._fail("get", "projects.nope.session", code="no_such_key"))
 
     def test_get_without_a_file_names_shad_init(self) -> None:
         """
         Criterion:  get-without-a-file-names-shad-init
           Given:    the config file does not exist.
           When:     `shad config get defaults.harness`.
-          Then:     exit 1, stdout empty, stderr names `shad init`.
+          Then:     exit 1, stdout empty, stderr one line `no_config_file:
+                    <non-empty>` that names `shad init`.
         """
         self.path.unlink()
-        self.assertIn("shad init", self._fail("get", "defaults.harness"))
+        self.assertIn("shad init", self._fail("get", "defaults.harness", code="no_config_file"))

@@ -49,10 +49,12 @@ class ShowTests(SessionsCase):
         Criterion:  show-without-a-snapshot-fails
           Given:    no snapshot was saved.
           When:     `shad sessions show`.
-          Then:     exit 1, stdout empty, stderr says there are no saved
-                    sessions and names `shad sessions save`.
+          Then:     exit 1, stdout empty, stderr one line `no_snapshot:
+                    <non-empty>` that says there are no saved sessions and
+                    names `shad sessions save`.
         """
         result = self.run_shad("sessions", "show")
         self.assertEqual((result.code, result.out), (1, ""), result.err)
+        self.assertRegex(result.err, r"^no_snapshot: .+\n$")
         self.assertIn("no saved sessions", result.err)
         self.assertIn("shad sessions save", result.err)

@@ -11,6 +11,8 @@ import os
 import re
 import subprocess
 
+from shad.errors import ShadError
+
 _SESSION_KEY_RE = re.compile(r"[^A-Za-z0-9_-]+")
 
 # The segment each harness puts in its scoped tmux session names,
@@ -21,7 +23,22 @@ SESSION_PREFIXES = {"opencode": "oc", "claude": "cc"}
 
 
 def _run(args: list[str], *, check: bool = True) -> subprocess.CompletedProcess:
-    return subprocess.run(args, check=check, capture_output=True, text=True)
+    """
+    Run one tmux command. A tmux that is not installed raises
+    `infrastructure`/`tmux_missing`; with *check*, a non-zero exit raises
+    `infrastructure`/`tmux_failed`.
+    """
+    try:
+        return subprocess.run(args, check=check, capture_output=True, text=True)
+    except FileNotFoundError:
+        raise ShadError.infrastructure(
+            "tmux_missing", "tmux is not installed or not on PATH"
+        ) from None
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or "").strip().splitlines()
+        raise ShadError.infrastructure(
+            "tmux_failed", f"tmux {args[1]} failed: {detail[0] if detail else exc.returncode}"
+        ) from None
 
 
 def session_exists(name: str) -> bool:
@@ -141,5 +158,10 @@ def _attach(session: str) -> int:
     else:
         cmd = ["tmux", "attach-session", "-t", session]
 
-    result = subprocess.run(cmd, check=False)
+    try:
+        result = subprocess.run(cmd, check=False)
+    except FileNotFoundError:
+        raise ShadError.infrastructure(
+            "tmux_missing", "tmux is not installed or not on PATH"
+        ) from None
     return result.returncode

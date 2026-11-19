@@ -18,8 +18,8 @@ second process launch.
 
 from __future__ import annotations
 
+from shad.errors import ShadError
 from shad.shared.config import HARNESSES, OC_POSITIONS
-from shad.shared.errors import ShadError
 from shad.todo.model import STATUSES
 
 # Helper functions read `cur`, `args`, `flags`, `_shad_cmd` and the project
@@ -290,7 +290,7 @@ _shad_complete() {
 
     # positional[0] is the command name itself.
     if ((${#positional[@]} == 1)); then
-        local top_flags="--version --help"
+        local top_flags="--debug --version --help"
         ((${#_shad_cmd[@]} == 1)) && top_flags="--config $top_flags"
         _shad_offer "$cur" \
             "projects git config completion init cheat todo sessions" \
@@ -409,5 +409,5 @@ BASH_COMPLETION = (
 
 def print_completion(shell: str) -> None:
     if shell != "bash":
-        raise ShadError(f"unsupported shell: {shell!r}")
+        raise ShadError.usage("unsupported_shell", f"unsupported shell: {shell!r}")
     print(BASH_COMPLETION)

@@ -27,8 +27,8 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import StrEnum
 
+from shad.errors import ShadError
 from shad.shared.config import LABEL_RE
-from shad.shared.errors import ShadError
 
 
 class Status(StrEnum):
@@ -88,7 +88,9 @@ def slugify(title: str) -> str:
     key = _NOT_KEY.sub("-", title.lower()).strip("-")
     key = key[:KEY_MAX].rstrip("-")
     if not key:
-        raise ShadError(f"title {title!r} has no letters or digits to make a key from")
+        raise ShadError.validation(
+            "invalid_title", f"title {title!r} has no letters or digits to make a key from"
+        )
     return key
 
 
@@ -178,12 +180,14 @@ def check_labels(labels: list[str], vocabulary: list[str]) -> None:
     """Reject a label the config does not list, naming the ones it does."""
     for label in labels:
         if not LABEL_RE.match(label):
-            raise ShadError(
+            raise ShadError.validation(
+                "invalid_label",
                 f"invalid label {label!r}; use lowercase letters, digits and hyphens"
             )
         if label not in vocabulary:
             known = ", ".join(vocabulary) if vocabulary else "none configured"
-            raise ShadError(
-                f"unknown label {label!r}; configured labels: {known}\n"
-                f"       add it with 'shad todo label add {label}'"
+            raise ShadError.validation(
+                "unknown_label",
+                f"unknown label {label!r}; configured labels: {known}; "
+                f"add it with 'shad todo label add {label}'"
             )

@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from shad.cli import build_parser
+from shad.errors import ShadError
 from shad.init import command as init_command
 from shad.init.command import (
     Dependency,
@@ -24,7 +25,6 @@ from shad.init.command import (
     _toml_key,
     ensure_dependencies_installed,
 )
-from shad.shared.errors import ShadError
 from shad.testing import Pane, TmuxCase
 
 # ---------------------------------------------------------------------------

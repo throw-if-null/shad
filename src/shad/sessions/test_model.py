@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 import unittest
 
+from shad.errors import ShadError
 from shad.sessions.model import FORMAT, Entry, Snapshot, parse, serialize
-from shad.shared.errors import ShadError
 
 _ENTRIES = (
     Entry(

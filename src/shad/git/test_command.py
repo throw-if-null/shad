@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import unittest
 from pathlib import Path
+from typing import Any
 from unittest.mock import Mock, patch
 
+from shad.errors import ShadError
 from shad.git import apply, refs
 from shad.git import command as C
 from shad.git.model import BranchInfo, ProjectOutcome, ProjectPlan, Repo, WorktreeInfo
 from shad.git.testing import GitCase, git, words
 from shad.shared.config import Project
-from shad.shared.errors import ShadError
 
 ROOT = Path("/tmp/repo")
 
@@ -48,7 +49,9 @@ def _branch(
     return BranchInfo(name=name, sha=sha, reason="merged", force=force, oid=oid)
 
 
-def _resolve_all(projects: list[Project], plans: list[ProjectPlan | None]):
+def _resolve_all(
+    projects: list[Project], plans: list[ProjectPlan | None], trace: object = None
+):
     """
     Stand-in for C._resolve: every project resolves to its own repository.
 
@@ -74,7 +77,7 @@ class SyncGateTests(unittest.TestCase):
     def setUp(self) -> None:
         self.plan = _plan(branches=[_branch()], worktrees=[_worktree()])
 
-    def _run(self, **kwargs: bool) -> tuple[Mock, Mock]:
+    def _run(self, **kwargs: Any) -> tuple[Mock, Mock]:
         with (
             patch.object(C, "require_git"),
             patch.object(C, "_resolve", side_effect=_resolve_all),
@@ -283,7 +286,7 @@ class FailureIsolationTests(unittest.TestCase):
 
         def fake(path: Path) -> Repo:
             if path == projects[1].path:
-                raise ShadError("git rev-parse timed out after 15s")
+                raise ShadError.infrastructure("git_timeout", "git rev-parse timed out after 15s")
             return Repo(root=path, common_dir=path / ".git")
 
         plans: list[ProjectPlan | None] = [None] * 3
@@ -302,7 +305,9 @@ class FailureIsolationTests(unittest.TestCase):
 
         def fake(plan: ProjectPlan) -> ProjectOutcome:
             if plan.project.key == "b":
-                raise ShadError("git for-each-ref timed out after 15s")
+                raise ShadError.infrastructure(
+                    "git_timeout", "git for-each-ref timed out after 15s"
+                )
             return ProjectOutcome(plan=plan, deleted_branches=list(plan.branch_deletions))
 
         with (
@@ -328,7 +333,9 @@ class FailureIsolationTests(unittest.TestCase):
         def fake_oid(_root: Path, refname: str) -> str:
             calls["n"] += 1
             if calls["n"] > 1:
-                raise ShadError("git for-each-ref timed out after 15s")
+                raise ShadError.infrastructure(
+                    "git_timeout", "git for-each-ref timed out after 15s"
+                )
             return "abc1234def"
 
         with (
@@ -516,25 +523,30 @@ class SyncTests(GitCase):
         """
         Criterion:  sync-of-an-unknown-target-fails
           When:     `shad git sync nope`, and `shad git sync kb shad`.
-          Then:     each exits 1 with stdout empty; the first names nope, the
-                    second names the `shad git sync kb` form.
+          Then:     each exits 1 with stdout empty; the first is one line
+                    `no_such_project: <non-empty>` naming nope, the second one
+                    line `no_such_group: <non-empty>` naming the `shad git
+                    sync kb` form.
         """
         result = self.run_detached("git", "sync", "nope")
         self.assertEqual((result.code, result.out), (1, ""), result.err)
+        self.assertRegex(result.err, r"^no_such_project: .+\n$")
         self.assertIn("nope", result.err)
         result = self.run_detached("git", "sync", "kb", "shad")
         self.assertEqual((result.code, result.out), (1, ""), result.err)
+        self.assertRegex(result.err, r"^no_such_group: .+\n$")
         self.assertIn("shad git sync kb", words(result.err))
 
     def test_git_without_an_action_fails(self) -> None:
         """
         Criterion:  git-without-an-action-fails
           When:     `shad git`, and `shad git frob`.
-          Then:     the first exits 1 with stderr saying no action was given;
-                    the second exits 2.
+          Then:     the first exits 2, stdout empty, stderr one line
+                    `no_action: <non-empty>`; the second exits 2.
         """
         result = self.run_shad("git")
-        self.assertEqual((result.code, result.out), (1, ""), result.err)
+        self.assertEqual((result.code, result.out), (2, ""), result.err)
+        self.assertRegex(result.err, r"^no_action: .+\n$")
         self.assertIn("no git action given", result.err)
         self.assertEqual(self.run_shad("git", "frob").code, 2)
 
@@ -582,11 +594,13 @@ class PanelTests(GitCase):
         """
         Criterion:  panel-of-a-group-with-several-projects-fails
           When:     `shad git panel tin`.
-          Then:     exit 1, stdout empty, stderr says the panel shows one
-                    repository and that tin matches 2 projects.
+          Then:     exit 2, stdout empty, stderr one line
+                    `ambiguous_target: <non-empty>` that says the panel shows
+                    one repository and that tin matches 2 projects.
         """
         result = self.run_detached("git", "panel", "tin")
-        self.assertEqual((result.code, result.out), (1, ""), result.err)
+        self.assertEqual((result.code, result.out), (2, ""), result.err)
+        self.assertRegex(result.err, r"^ambiguous_target: .+\n$")
         self.assertIn("matches 2 projects", result.err)
         self.assertIn("shows one repository", words(result.err))
 
@@ -595,12 +609,13 @@ class PanelTests(GitCase):
         Criterion:  panel-of-a-plain-directory-fails
           Given:    kb is a plain directory.
           When:     `shad git panel kb`.
-          Then:     exit 1, stdout empty, stderr non-empty.
+          Then:     exit 1, stdout empty, stderr one line `no_repository:
+                    <non-empty>`.
         """
         self.path("kb").mkdir()
         result = self.run_detached("git", "panel", "kb")
         self.assertEqual((result.code, result.out), (1, ""), result.err)
-        self.assertNotEqual(result.err, "")
+        self.assertRegex(result.err, r"^no_repository: .+\n$")
 
 
 if __name__ == "__main__":

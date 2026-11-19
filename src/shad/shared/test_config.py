@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from shad.errors import ShadError
 from shad.shared.config import (
     CONFIG_ENV,
     Config,
@@ -19,7 +20,6 @@ from shad.shared.config import (
     resolve_prefix,
     resolve_target,
 )
-from shad.shared.errors import ShadError
 
 # ---------------------------------------------------------------------------
 # resolve_prefix

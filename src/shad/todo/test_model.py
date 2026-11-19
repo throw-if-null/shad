@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from shad.shared.errors import ShadError
+from shad.errors import ShadError
 from shad.todo.model import (
     STATUSES,
     Item,

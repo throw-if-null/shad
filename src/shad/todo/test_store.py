@@ -6,8 +6,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from shad.errors import ShadError
 from shad.shared.config import Config, Defaults
-from shad.shared.errors import ShadError
 from shad.todo import store
 
 VOCAB = ["chore", "poc"]

@@ -6,9 +6,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from shad.errors import ShadError
 from shad.sessions import store
 from shad.sessions.model import Entry, Snapshot
-from shad.shared.errors import ShadError
 
 _SNAPSHOT = Snapshot(
     saved_at=1700000000,

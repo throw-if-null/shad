@@ -41,11 +41,12 @@ class UnsetTests(ConfigCase):
         Criterion:  unset-guards-a-required-key-unless-forced
           When:     `shad config unset projects.kb.path`, then the same with
                     `--force` after the project's session was removed.
-          Then:     the first exits 1 with stdout empty, stderr saying the
-                    key is required, and the path still in the file; the
-                    second exits 0 and leaves an empty project table.
+          Then:     the first exits 1 with stdout empty, stderr one line
+                    `required_key: <non-empty>`, and the path still in the
+                    file; the second exits 0 and leaves an empty project
+                    table.
         """
-        self.assertIn("is required", self._fail("unset", "projects.kb.path"))
+        self.assertIn("is required", self._fail("unset", "projects.kb.path", code="required_key"))
         self.assertIn(f"{self.root}/kb", self.path.read_text())
         self._run("unset", "projects.kb.session")
         self._run("unset", "--force", "projects.kb.path")
@@ -54,7 +55,8 @@ class UnsetTests(ConfigCase):
     def test_a_forced_key_is_still_refused_when_it_breaks_the_config(self) -> None:
         before = self.path.read_text()
         self.assertIn(
-            "resulting config is invalid", self._fail("unset", "--force", "projects.kb.path")
+            "resulting config is invalid",
+            self._fail("unset", "--force", "projects.kb.path", code="invalid_config"),
         )
         self.assertEqual(self.path.read_text(), before)
 
@@ -62,6 +64,7 @@ class UnsetTests(ConfigCase):
         """
         Criterion:  unset-of-an-unknown-key-fails
           When:     `shad config unset projects.nothere`.
-          Then:     exit 1, stdout empty, stderr non-empty.
+          Then:     exit 1, stdout empty, stderr one line `no_such_key:
+                    <non-empty>`.
         """
-        self.assertNotEqual(self._fail("unset", "projects.nothere"), "")
+        self._fail("unset", "projects.nothere", code="no_such_key")

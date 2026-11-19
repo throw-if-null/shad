@@ -107,10 +107,12 @@ class OpenTests(ProjectsCase):
         """
         Criterion:  open-of-an-unknown-project-fails
           When:     `shad projects nope`.
-          Then:     exit 1, stdout empty, stderr names nope.
+          Then:     exit 1, stdout empty, stderr one line `no_such_project:
+                    <non-empty>` naming nope.
         """
         result = self.run_shad("projects", "nope")
         self.assertEqual((result.code, result.out), (1, ""), result.err)
+        self.assertRegex(result.err, r"^no_such_project: .+\n$")
         self.assertIn("nope", result.err)
 
     def test_open_of_an_ambiguous_prefix_fails(self) -> None:
@@ -118,11 +120,12 @@ class OpenTests(ProjectsCase):
         Criterion:  open-of-an-ambiguous-prefix-fails
           Given:    the projects kb and kc exist.
           When:     `shad projects k`.
-          Then:     exit 1, stdout empty, stderr says the prefix is
-                    ambiguous and lists both.
+          Then:     exit 2, stdout empty, stderr one line
+                    `ambiguous_name: <non-empty>` that lists both.
         """
         result = self.run_shad("projects", "k")
-        self.assertEqual((result.code, result.out), (1, ""), result.err)
+        self.assertEqual((result.code, result.out), (2, ""), result.err)
+        self.assertRegex(result.err, r"^ambiguous_name: .+\n$")
         self.assertIn("ambiguous", result.err)
         self.assertIn("kb, kc", result.err)
 
@@ -130,20 +133,24 @@ class OpenTests(ProjectsCase):
         """
         Criterion:  open-rejects-an-action-on-a-group
           When:     `shad projects tin status`.
-          Then:     exit 1, stdout empty, stderr says tin is a group.
+          Then:     exit 2, stdout empty, stderr one line
+                    `group_needs_project: <non-empty>` that says tin is a group.
         """
         result = self.run_shad("projects", "tin", "status")
-        self.assertEqual((result.code, result.out), (1, ""), result.err)
+        self.assertEqual((result.code, result.out), (2, ""), result.err)
+        self.assertRegex(result.err, r"^group_needs_project: .+\n$")
         self.assertIn("group", result.err)
 
     def test_open_rejects_too_many_tokens(self) -> None:
         """
         Criterion:  open-rejects-too-many-tokens
           When:     `shad projects a b c d`.
-          Then:     exit 1, stdout empty, stderr says too many arguments.
+          Then:     exit 2, stdout empty, stderr one line
+                    `too_many_arguments: <non-empty>`.
         """
         result = self.run_shad("projects", "a", "b", "c", "d")
-        self.assertEqual((result.code, result.out), (1, ""), result.err)
+        self.assertEqual((result.code, result.out), (2, ""), result.err)
+        self.assertRegex(result.err, r"^too_many_arguments: .+\n$")
         self.assertIn("too many arguments", result.err)
 
     def test_open_rejects_an_unknown_harness(self) -> None:
