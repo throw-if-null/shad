@@ -99,3 +99,26 @@ def _harness_for_prefix(prefix: str) -> str:
         # list_project_sessions filters on the same table, so this is unreachable.
         raise ValueError(f"no harness uses the session prefix {prefix!r}")
     return name
+
+
+def resolve_names(rows: Sequence[Running], names: Sequence[str]) -> tuple[list[int], list[str]]:
+    """
+    Map each name to the running rows it selects, preserving row order.
+
+    A name matches a row by its tmux session name (exact), its project key,
+    its project's base session name, or its display name. Returns the matched
+    row indexes (unique, in row order) and the names that matched nothing.
+    """
+    matched: set[int] = set()
+    unmatched: list[str] = []
+    for name in names:
+        hits = [
+            index
+            for index, row in enumerate(rows)
+            if name in (row.session, row.project.key, row.project.session, row.project.display_name)
+        ]
+        if hits:
+            matched.update(hits)
+        else:
+            unmatched.append(name)
+    return sorted(matched), unmatched

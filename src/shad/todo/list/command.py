@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+from pathlib import Path
 
 from rich.text import Text
 
@@ -13,7 +14,7 @@ from shad.errors import ShadError
 from shad.output import Output
 from shad.style import make_table
 from shad.todo import store
-from shad.todo.model import problems
+from shad.todo.model import Item, problems, sort_key
 from shad.todo.render import labels_text, status_glyph, status_word, title_style
 
 
@@ -33,6 +34,18 @@ class TodoRow:
 class TodoList:
     labels: tuple[str, ...]  # the configured vocabulary
     items: tuple[TodoRow, ...]
+
+
+def _load_items(directory: Path) -> list[Item]:
+    """Every item in *directory*, in display order. A file removed between the
+    listing and its read is skipped; a missing directory is empty."""
+    items: list[Item] = []
+    for key in store.keys(directory):
+        try:
+            items.append(store.read_item(directory, key))
+        except ShadError:
+            continue
+    return sorted(items, key=sort_key)
 
 
 def register(sub: parsers.Subparsers) -> None:
@@ -66,7 +79,7 @@ def run(args: argparse.Namespace, deps: Deps) -> TodoList | None:
                 body=item.body,
                 problems=tuple(problems(item, cfg.todo_labels)),
             )
-            for item in store.list_items(directory)
+            for item in _load_items(directory)
         )
     )
 

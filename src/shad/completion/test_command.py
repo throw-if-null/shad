@@ -247,7 +247,8 @@ class CompletionScriptTests(unittest.TestCase):
 
     def test_harness_value_does_not_shift_sub_project_positions(self) -> None:
         self.assertEqual(
-            sorted(self._run("shad projects --harness claude alvr ")), ["api", "db"]
+            sorted(self._run("shad projects --harness claude alvr ")),
+            ["--pick", "--resume", "api", "db"],
         )
 
     def test_harness_flag_is_not_offered_twice(self) -> None:
@@ -270,23 +271,26 @@ class CompletionScriptTests(unittest.TestCase):
 
     def test_projects_offers_sub_projects_of_a_group(self) -> None:
         self.assertEqual(
-            sorted(self._run("shad projects alvr ")), ["--harness", "api", "db"]
+            sorted(self._run("shad projects alvr ")),
+            ["--harness", "--pick", "--resume", "api", "db"],
         )
 
     def test_projects_offers_actions_for_a_top_level_project(self) -> None:
         self.assertEqual(
-            sorted(self._run("shad projects kb ")), ["--harness", "status"]
+            sorted(self._run("shad projects kb ")),
+            ["--harness", "--pick", "--resume", "status"],
         )
 
     def test_projects_offers_actions_for_a_prefix_of_a_project(self) -> None:
         self.assertEqual(
-            sorted(self._run("shad projects k ")), ["--harness", "status"]
+            sorted(self._run("shad projects k ")),
+            ["--harness", "--pick", "--resume", "status"],
         )
 
     def test_projects_offers_actions_for_a_grouped_project(self) -> None:
         self.assertEqual(
             sorted(self._run("shad projects alvr db ")),
-            ["--harness", "status"],
+            ["--harness", "--pick", "--resume", "status"],
         )
 
     def test_project_that_is_also_a_group_prefix_offers_both_continuations(self) -> None:
@@ -294,8 +298,14 @@ class CompletionScriptTests(unittest.TestCase):
         # the grouped one. Both resolve, so both are completable.
         self.assertEqual(
             sorted(self._run("shad projects al ")),
-            ["--harness", "api", "db", "status"],
+            ["--harness", "--pick", "--resume", "api", "db", "status"],
         )
+
+    def test_projects_offers_the_open_options_for_a_project(self) -> None:
+        """--resume and --pick open a project; they follow a project name."""
+        self.assertIn("--resume", self._run("shad projects kb "))
+        self.assertIn("--pick", self._run("shad projects kb "))
+        self.assertNotIn("--resume", self._run("shad projects kb status "))
 
     def test_projects_offers_only_json_after_an_action(self) -> None:
         self.assertEqual(self._run("shad projects kb status "), ["--json"])
@@ -474,9 +484,20 @@ class CompletionScriptTests(unittest.TestCase):
     def test_completion_offers_only_supported_shells(self) -> None:
         self.assertEqual(self._run("shad completion "), ["bash"])
 
-    def test_init_offers_its_flag_once(self) -> None:
-        self.assertEqual(self._run("shad init "), ["--install-deps"])
-        self.assertEqual(self._run("shad init --install-deps "), [])
+    def test_init_offers_its_flags_once(self) -> None:
+        self.assertEqual(
+            sorted(self._run("shad init ")),
+            ["--group", "--harness", "--install-deps", "--key", "--path", "--session", "--wizard"],
+        )
+        self.assertNotIn("--install-deps", self._run("shad init --install-deps "))
+        self.assertNotIn("--wizard", self._run("shad init --wizard "))
+
+    def test_init_completes_the_path_as_a_directory(self) -> None:
+        self.assertEqual(self._run("shad init --path "), [])
+        self.assertEqual(self._compopt(), ["-o", "dirnames"])
+
+    def test_init_harness_offers_every_known_harness(self) -> None:
+        self.assertEqual(sorted(self._run("shad init --harness ")), sorted(HARNESSES))
 
     def test_cheat_offers_nothing(self) -> None:
         self.assertEqual(self._run("shad cheat "), [])
@@ -489,14 +510,19 @@ class CompletionScriptSessionsTests(CompletionScriptTests):
     def test_sessions_offers_its_actions(self) -> None:
         self.assertEqual(self._run("shad sessions "), ["save", "restore", "stop", "show"])
 
-    def test_sessions_save_offers_its_flag_once(self) -> None:
-        self.assertEqual(self._run("shad sessions save "), ["--all"])
-        self.assertEqual(self._run("shad sessions save --all "), [])
+    def test_sessions_save_offers_its_flags_once(self) -> None:
+        self.assertEqual(sorted(self._run("shad sessions save ")), ["--all", "--pick"])
+        self.assertEqual(self._run("shad sessions save --all "), ["--pick"])
 
-    def test_sessions_stop_offers_nothing_and_show_offers_json(self) -> None:
-        self.assertEqual(self._run("shad sessions stop "), [])
+    def test_sessions_stop_offers_its_flags_and_show_offers_json(self) -> None:
+        self.assertEqual(sorted(self._run("shad sessions stop ")), ["--all", "--pick"])
         self.assertEqual(self._run("shad sessions show "), ["--json"])
         self.assertEqual(self._run("shad sessions show --json "), [])
+
+    def test_sessions_save_and_stop_take_name_arguments(self) -> None:
+        """A session name is a positional argument; the flags still follow it."""
+        self.assertEqual(sorted(self._run("shad sessions save kb ")), ["--all", "--pick"])
+        self.assertEqual(sorted(self._run("shad sessions stop kb ")), ["--all", "--pick"])
 
     def test_sessions_restore_offers_its_flag_once(self) -> None:
         self.assertEqual(self._run("shad sessions restore "), ["--no-attach"])

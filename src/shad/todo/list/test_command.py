@@ -66,6 +66,24 @@ class ListTests(TodoCase):
         self.assertEqual((result.code, result.out), (2, ""), result.err)
         self.assertRegex(result.err, r"^no_json: .+\n$")
 
+    def test_list_is_in_display_order_and_skips_non_items(self) -> None:
+        """
+        Criterion:  list-is-in-display-order-and-skips-non-items
+          Given:    an in-progress item, a done item, a non-item file and a
+                    dot-prefixed temporary file in the todo directory.
+          When:     `shad todo list --json`.
+          Then:     the items are the two .md items in display order
+                    (in-progress before done); the other files are not read.
+        """
+        self._run("add", "Active")
+        self._run("add", "Done thing")
+        self._run("status", "active", "in-progress")
+        self._run("status", "done-thing", "done")
+        (self._dir() / "notes.txt").write_text("not an item")
+        (self._dir() / ".active.123.tmp").write_text("title: ghost\n")
+        document = json.loads(self._run("list", "--json"))
+        self.assertEqual([item["key"] for item in document["items"]], ["active", "done-thing"])
+
     def test_list_keys_prints_one_key_per_line_in_order(self) -> None:
         """
         Criterion:  list-keys-prints-one-key-per-line-in-order

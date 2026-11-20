@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+from pathlib import Path
 
 from rich.text import Text
 
 from shad import parsers
-from shad.config import Config, Project, store
+from shad.config import Config, Project, raw
 from shad.config.render import display
 from shad.deps import Deps
 from shad.errors import ShadError
@@ -61,6 +62,14 @@ class ConfigText:
     text: str
 
 
+def _read_text(path: Path) -> str:
+    if not path.exists():
+        raise ShadError.not_found(
+            "no_config_file", f"config file not found: {path}; run 'shad init' to create it"
+        )
+    return path.read_text()
+
+
 def register(sub: parsers.Subparsers) -> None:
     parser = parsers.command(
         sub, "show", run=run, render=render, help="Print a rendered config summary"
@@ -77,11 +86,11 @@ def run(args: argparse.Namespace, deps: Deps) -> ConfigView | ConfigText:
     if getattr(args, "raw", False):
         if getattr(args, "json", False):
             raise ShadError.usage("no_json", "--raw prints the file itself; it has no --json form")
-        return ConfigText(path=str(path), text=store.read_text(path))
+        return ConfigText(path=str(path), text=_read_text(path))
 
-    raw = store.read_raw(path)
+    parsed = raw.parse(_read_text(path))
     cfg = deps.config
-    configured = raw.get("defaults", {})
+    configured = parsed.get("defaults", {})
     if not isinstance(configured, dict):
         configured = {}
     defaults = {

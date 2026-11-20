@@ -74,18 +74,15 @@ class StoreTests(unittest.TestCase):
     # -- list / keys / resolve -------------------------------------------
 
     def test_missing_directory_lists_nothing(self) -> None:
-        self.assertEqual(store.list_items(self.dir), [])
         self.assertEqual(store.keys(self.dir), [])
         self.assertEqual(store.signature(self.dir), frozenset())
 
-    def test_list_is_in_display_order_and_skips_non_items(self) -> None:
+    def test_keys_skips_non_item_files(self) -> None:
         store.add(self.dir, "Done thing", [], VOCAB)
         store.add(self.dir, "Active", [], VOCAB)
-        store.set_status(self.dir, "done-thing", "done")
-        store.set_status(self.dir, "active", "in-progress")
         (self.dir / "notes.txt").write_text("not an item")
         (self.dir / ".active.123.tmp").write_text("title: ghost\n")
-        self.assertEqual([i.key for i in store.list_items(self.dir)], ["active", "done-thing"])
+        self.assertEqual(store.keys(self.dir), ["active", "done-thing"])
 
     def test_resolve_key_accepts_a_unique_prefix(self) -> None:
         store.add(self.dir, "alpha one", [], VOCAB)
@@ -144,16 +141,6 @@ class StoreTests(unittest.TestCase):
 
         store.remove(self.dir, "t")
         self.assertEqual(store.signature(self.dir), frozenset())
-
-    # -- label usage ------------------------------------------------------
-
-    def test_label_usage_counts_the_items_that_carry_the_label(self) -> None:
-        store.add(self.dir, "one", ["chore"], VOCAB)
-        store.add(self.dir, "two", ["chore", "poc"], VOCAB)
-        store.add(self.dir, "three", [], VOCAB)
-        self.assertEqual(store.label_usage(self.dir, "chore"), 2)
-        self.assertEqual(store.label_usage(self.dir, "poc"), 1)
-        self.assertEqual(store.label_usage(self.dir / "nope", "poc"), 0)
 
 
 if __name__ == "__main__":

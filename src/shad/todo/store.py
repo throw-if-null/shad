@@ -9,9 +9,10 @@ in every project session shows the same files.
 
 Every write touches one file, through `shad.atomic`: a new item is an
 exclusive create, so two adds of the same key cannot both succeed, and a
-status change is a replacement, so a reader never sees a partial file.
-Nothing here holds a lock, because nothing here reads one file to write
-another.
+status change is a whole-file replacement, so a reader never sees a
+partial file. There is no lock: concurrent writers of one item file race,
+and the last replacement wins. Nothing here reads one file to write
+another, so no write needs more than one file to be consistent.
 
 This module is synchronous and does no rendering: the panel calls it from the
 UI thread (a directory of tens of files reads in well under a millisecond)
@@ -34,7 +35,6 @@ from shad.todo.model import (
     parse,
     serialize,
     slugify,
-    sort_key,
 )
 
 SUFFIX = ".md"
@@ -60,18 +60,6 @@ def signature(directory: Path) -> frozenset[tuple[str, int, int]]:
             continue
         found.add((path.name, stat.st_mtime_ns, stat.st_size))
     return frozenset(found)
-
-
-def list_items(directory: Path) -> list[Item]:
-    """Every item in *directory*, in display order. A missing directory is empty."""
-    items = []
-    for path in _item_files(directory):
-        try:
-            item = _read(path)
-        except FileNotFoundError:
-            continue
-        items.append(item)
-    return sorted(items, key=sort_key)
 
 
 def keys(directory: Path) -> list[str]:
@@ -159,11 +147,6 @@ def remove(directory: Path, key: str) -> Path:
     except FileNotFoundError:
         raise ShadError.not_found("no_such_todo", f"no todo '{key}' in {directory}") from None
     return path
-
-
-def label_usage(directory: Path, label: str) -> int:
-    """How many items in *directory* carry *label*."""
-    return sum(1 for item in list_items(directory) if label in item.labels)
 
 
 # ── file primitives ───────────────────────────────────────────────────────

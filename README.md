@@ -92,21 +92,21 @@ worktrees — are legal. See
 
 ### First time setup
 
-Run the interactive wizard:
+Add your first project:
 
 ```sh
-shad init
+shad init --path ~/gh/myproject
 ```
 
-On Fedora you can also ask `shad` to install missing runtime dependencies first:
+This creates `~/.config/shad/shad.toml` with a commented `[defaults]` block and the project entry, deriving the key from the directory name. Pass `--group`, `--key`, `--session` or `--harness` to set them explicitly, or `--wizard` to be prompted for each field. Uncomment and adjust the defaults if you want a different layout.
+
+On Fedora you can also ask `shad` to install the harness's runtime dependencies first:
 
 ```sh
 sudo shad init --install-deps
 ```
 
-It will prompt for a project path, key, and optional group, then create `~/.config/shad/shad.toml` with a commented `[defaults]` block and your first project entry. Uncomment and adjust the defaults if you want a different layout.
-
-To add more projects later, run `shad init` again.
+To add more projects later, run `shad init --path ...` again. Re-adding the same project is a no-op; a different path for an existing key is reported as a conflict.
 
 ### Manual setup
 
@@ -253,16 +253,19 @@ path    = "/home/user/gh/alvr/portal"
 ```
 shad --help
 
-# Add a new project interactively (creates config if missing)
-shad init
+# Add a new project (creates config if missing)
+shad init --path ~/gh/myproject
 
 # List all configured projects and groups
 shad projects
 shad projects --json
 
-# Open a top-level project (exact or prefix match)
+# Open a top-level project (a new conversation by default)
 shad projects kb
 shad projects k         # prefix: resolves to kb if unambiguous
+shad projects kb --resume          # resume the most recent conversation
+shad projects kb --resume <id>     # resume a specific conversation
+shad projects kb --pick            # choose a conversation in a picker
 
 # List sub-projects in a group
 shad projects alvr
@@ -674,16 +677,17 @@ later, for example after a reboot. It also stops running sessions you pick.
 
 | Command | Description |
 |---|---|
-| `shad sessions save` | Pick the running sessions to record, with the conversation each holds |
-| `shad sessions save --all` | Record every running session, without the picker |
+| `shad sessions save <name>...` | Record the named running sessions (session or project names) |
+| `shad sessions save --all` | Record every running session |
+| `shad sessions save --pick` | Choose the sessions in a picker (needs a terminal) |
 | `shad sessions restore` | Create each saved session that is not running, resuming its conversation, then attach |
 | `shad sessions restore --no-attach` | Create the sessions and return, for a script |
-| `shad sessions stop` | Pick running sessions and kill them |
+| `shad sessions stop <name>... \| --all \| --pick` | Kill the named, all, or picked running sessions |
 | `shad sessions show` | Print the saved sessions |
 
 ### The picker
 
-`save` and `stop` show the same picker: one row per running shad session.
+With `--pick`, `save` and `stop` show the same picker: one row per running shad session. Without a flag, they take session or project names; `--all` is every running session. There is no prompt, and no picker is shown unless `--pick` is given, so both work without a terminal.
 
 | Column | Content |
 |---|---|
@@ -704,14 +708,15 @@ later, for example after a reboot. It also stops running sessions you pick.
 
 ### save
 
-The snapshot becomes exactly the checked rows. A row whose conversation is
-already in the snapshot starts checked; with no snapshot yet, every row starts
-checked. Accepting with nothing checked writes an empty snapshot, which is how
-to restore nothing without deleting the file. A saved session that is no longer
-running is dropped on the next `save`. `show` is always what `restore` will do.
-
-`save --all` records every running session without the picker. It is the form
-for a script, and the only one that works without a terminal.
+The snapshot becomes exactly the sessions you select: the named ones, every
+running one with `--all`, or the checked rows with `--pick`. A name is a tmux
+session name or a project name, and a project name selects every running
+session of that project. A name that matches no running session is an error
+and nothing is written. With `--pick`, a row whose conversation is already in
+the snapshot starts checked; accepting with nothing checked writes an empty
+snapshot, which is how to restore nothing without deleting the file. A saved
+session that is no longer running is dropped on the next `save`. `show` is
+always what `restore` will do.
 
 For Claude Code, the conversation comes from the record Claude Code keeps for
 each running process in `~/.claude/sessions/<pid>.json`: its id, its name, and
@@ -758,11 +763,13 @@ run `restore` from a shell outside tmux. To run it from a tmux pane too, add
 
 ### stop
 
-Nothing starts checked. `Enter` kills the checked tmux sessions, panes and
-all: an editor open in the bash pane dies with the session. The conversation
-is kept by its harness, so the picker in `shad projects <name>` offers it
-again. The session the command runs in is not listed, because killing it would
-detach you mid-command.
+`stop <name>...` kills the named sessions, `--all` kills every running one,
+and `--pick` opens the picker. Killing a session takes its panes with it: an
+editor open in the bash pane dies with the session. The conversation is kept
+by its harness, so the picker in `shad projects <name>` offers it again. A
+name that matches no running session is reported and the run exits `1`, after
+killing the ones that did match. The session the command runs in is left out,
+because killing it would detach you mid-command.
 
 Supported harness for `save` and `restore`: Claude Code. A session running
 OpenCode is listed by `save` on stderr with the reason it cannot be saved, and
@@ -883,10 +890,11 @@ If `shad` is run from **inside** an existing tmux session it uses `switch-client
 
 ### Fedora bootstrap
 
-`shad init --install-deps` is tailored for Fedora and installs missing dependencies before starting the init wizard.
+`shad init --install-deps` is tailored for Fedora and installs the dependencies the harness in use needs. The harness is the project's `--harness`, else `[defaults] harness`.
 
-- `tmux` via `dnf`
-- `opencode` by downloading the pinned Linux x64 release (`OPENCODE_VERSION` in `src/shad/init/command.py`), checking its SHA-256, and installing it into `/usr/local/bin/opencode`. The command refuses other architectures.
+- `tmux` via `dnf`, always.
+- `opencode`, when it is the harness, by downloading the pinned Linux x64 release (`OPENCODE_VERSION` in `src/shad/init/command.py`), checking its SHA-256, and installing it into `/usr/local/bin/opencode`. The command refuses other architectures.
+- Claude Code is not downloaded: `shad` bundles no installer for it, so when it is the harness and `claude` is not on `PATH`, the command points at the official installer instead.
 
 Run it with `sudo`:
 
@@ -929,10 +937,11 @@ validates each at the point it reads it:
   status`) are advisory. A failed or unexpected response leaves the version
   blank; it never changes what a command does.
 
-`shad init --install-deps` downloads a pinned `opencode` release and runs as
-root. It checks the archive against a known SHA-256 before installing and
-refuses architectures other than x86_64, so a tampered download does not
-install.
+`shad init --install-deps` runs as root. When `opencode` is the harness in
+use, it downloads a pinned `opencode` release, checks the archive against a
+known SHA-256 before installing, and refuses architectures other than x86_64,
+so a tampered download does not install. It downloads no Claude Code: when
+`claude` is the harness it points at the official installer instead.
 
 ## Project structure
 

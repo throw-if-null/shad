@@ -95,7 +95,7 @@ class SaveAllTests(SessionsCase):
 class SavePickerTests(SessionsCase):
     """
     Feature:    sessions/save (the picker)
-    Boundary:   command. `shad sessions save` in a terminal pane of the
+    Boundary:   command. `shad sessions save --pick` in a terminal pane of the
                 test's tmux server. Contract: exit code + screen + the
                 snapshot.
     """
@@ -105,13 +105,13 @@ class SavePickerTests(SessionsCase):
         Criterion:  save-picker-starts-with-every-row-checked-without-a-snapshot
           Given:    kb runs claude on A and tin shad on B, and no snapshot
                     exists.
-          When:     `shad sessions save` in a terminal, then Enter.
+          When:     `shad sessions save --pick` in a terminal, then Enter.
           Then:     the picker shows both rows checked, exit 0, and the
                     snapshot holds A and B.
         """
         self.start_session("kb", UUID_A)
         self.start_session("tin-shad", UUID_B)
-        pane = self.pane("sessions", "save")
+        pane = self.pane("sessions", "save", "--pick")
         screen = pane.wait_for("save sessions")
         self.assertEqual(screen.count("[x]"), 2)
         pane.send("Enter")
@@ -122,14 +122,14 @@ class SavePickerTests(SessionsCase):
         """
         Criterion:  save-picker-prechecks-the-rows-the-snapshot-holds
           Given:    the snapshot holds B, and kb runs A while tin shad runs B.
-          When:     `shad sessions save` in a terminal, then Enter.
+          When:     `shad sessions save --pick` in a terminal, then Enter.
           Then:     the picker shows one row unchecked and one checked, exit
                     0, and the snapshot still holds B only.
         """
         self.write_snapshot(entry("shad", UUID_B, group="tin"))
         self.start_session("kb", UUID_A)
         self.start_session("tin-shad", UUID_B)
-        pane = self.pane("sessions", "save")
+        pane = self.pane("sessions", "save", "--pick")
         screen = pane.wait_for("save sessions")
         self.assertEqual((screen.count("[ ]"), screen.count("[x]")), (1, 1))
         pane.send("Enter")
@@ -140,13 +140,13 @@ class SavePickerTests(SessionsCase):
         """
         Criterion:  save-picker-writes-the-toggled-rows
           Given:    kb runs A and tin shad runs B, and no snapshot exists.
-          When:     `shad sessions save` in a terminal, Space on the first
+          When:     `shad sessions save --pick` in a terminal, Space on the first
                     row, then Enter.
           Then:     exit 0, and the snapshot holds B only.
         """
         self.start_session("kb", UUID_A)
         self.start_session("tin-shad", UUID_B)
-        pane = self.pane("sessions", "save")
+        pane = self.pane("sessions", "save", "--pick")
         pane.wait_for("save sessions")
         pane.send("Space", "Enter")
         self.assertEqual(pane.wait_exit(), 0)
@@ -156,13 +156,13 @@ class SavePickerTests(SessionsCase):
         """
         Criterion:  save-picker-accepts-an-empty-selection
           Given:    the snapshot holds A, and kb runs A.
-          When:     `shad sessions save` in a terminal, `a` to clear every
+          When:     `shad sessions save --pick` in a terminal, `a` to clear every
                     row, then Enter.
           Then:     exit 0, and the snapshot holds no entry.
         """
         self.write_snapshot(entry("kb", UUID_A))
         self.start_session("kb", UUID_A)
-        pane = self.pane("sessions", "save")
+        pane = self.pane("sessions", "save", "--pick")
         pane.wait_for("save sessions")
         pane.send("a", "Enter")
         self.assertEqual(pane.wait_exit(), 0)
@@ -172,32 +172,73 @@ class SavePickerTests(SessionsCase):
         """
         Criterion:  save-picker-cancel-leaves-the-snapshot-alone
           Given:    the snapshot holds A, and kb runs B.
-          When:     `shad sessions save` in a terminal, then `q`.
+          When:     `shad sessions save --pick` in a terminal, then `q`.
           Then:     exit 0, the screen says cancelled, and the snapshot is
                     byte-identical.
         """
         self.write_snapshot(entry("kb", UUID_A))
         before = self.snapshot.read_text()
         self.start_session("kb", UUID_B)
-        pane = self.pane("sessions", "save")
+        pane = self.pane("sessions", "save", "--pick")
         pane.wait_for("save sessions")
         pane.send("q")
         self.assertEqual(pane.wait_exit(), 0)
         self.assertIn("cancelled", pane.screen())
         self.assertEqual(self.snapshot.read_text(), before)
 
-    def test_save_without_a_terminal_points_at_all(self) -> None:
+    def test_save_pick_without_a_terminal_is_an_error(self) -> None:
         """
-        Criterion:  save-without-a-terminal-points-at-all
+        Criterion:  save-pick-without-terminal-is-an-error
           Given:    kb runs A.
-          When:     `shad sessions save` as a process with no terminal.
+          When:     `shad sessions save --pick` as a process with no terminal.
           Then:     exit 1, stdout empty, stderr one line `no_terminal:
-                    <non-empty>` that names `--all`, and no snapshot is
-                    written.
+                    <non-empty>`, and no snapshot is written.
+        """
+        self.start_session("kb", UUID_A)
+        result = self.run_detached("sessions", "save", "--pick")
+        self.assertEqual((result.code, result.out), (1, ""), result.err)
+        self.assertRegex(result.err, r"^no_terminal: .+\n$")
+        self.assertFalse(self.snapshot.exists())
+
+    def test_save_with_no_selector_is_a_usage_error(self) -> None:
+        """
+        Criterion:  save-with-no-selector-is-a-usage-error
+          Given:    kb runs A.
+          When:     `shad sessions save` with no names, --all or --pick.
+          Then:     exit 2, stdout empty, stderr one line `no_selection:
+                    <non-empty>` naming --all and --pick, and no snapshot.
         """
         self.start_session("kb", UUID_A)
         result = self.run_detached("sessions", "save")
-        self.assertEqual((result.code, result.out), (1, ""), result.err)
-        self.assertRegex(result.err, r"^no_terminal: .+\n$")
+        self.assertEqual((result.code, result.out), (2, ""), result.err)
+        self.assertRegex(result.err, r"^no_selection: .+\n$")
         self.assertIn("--all", result.err)
+        self.assertIn("--pick", result.err)
+        self.assertFalse(self.snapshot.exists())
+
+    def test_save_records_sessions_by_name(self) -> None:
+        """
+        Criterion:  save-records-sessions-by-name
+          Given:    kb runs A and tin shad runs B.
+          When:     `shad sessions save kb`.
+          Then:     exit 0, and the snapshot holds A only.
+        """
+        self.start_session("kb", UUID_A)
+        self.start_session("tin-shad", UUID_B)
+        result = self.run_detached("sessions", "save", "kb")
+        self.assertEqual(result.code, 0, result.err)
+        self.assertEqual([e["session_id"] for e in self.read_snapshot()], [UUID_A])
+
+    def test_save_of_a_name_that_is_not_running_is_an_error(self) -> None:
+        """
+        Criterion:  save-of-an-unknown-name-is-an-error
+          Given:    kb runs A.
+          When:     `shad sessions save nope`.
+          Then:     exit 1, stderr one line `no_such_session: <non-empty>`,
+                    and no snapshot is written.
+        """
+        self.start_session("kb", UUID_A)
+        result = self.run_detached("sessions", "save", "nope")
+        self.assertEqual((result.code, result.out), (1, ""), result.err)
+        self.assertRegex(result.err, r"^no_such_session: .+\n$")
         self.assertFalse(self.snapshot.exists())

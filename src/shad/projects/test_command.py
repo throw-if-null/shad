@@ -44,7 +44,7 @@ class ResolutionTests(unittest.TestCase):
         ):
             code = run(_args(["tin", "shad"]), deps(cfg))
         self.assertEqual(code, 0)
-        open_project.assert_called_once_with(project, cfg.defaults, ANY, ANY, harness=None)
+        open_project.assert_called_once_with(project, cfg.defaults, ANY, ANY, harness=None, resume=None, pick=False)
 
     def test_a_top_level_name_opens_the_project(self) -> None:
         project = _make_project("shad")
@@ -55,7 +55,7 @@ class ResolutionTests(unittest.TestCase):
         ):
             code = run(_args(["shad"]), deps(cfg))
         self.assertEqual(code, 0)
-        open_project.assert_called_once_with(project, cfg.defaults, ANY, ANY, harness=None)
+        open_project.assert_called_once_with(project, cfg.defaults, ANY, ANY, harness=None, resume=None, pick=False)
 
     def test_no_name_lists_everything(self) -> None:
         cfg = Config(
@@ -184,7 +184,7 @@ class HarnessOverrideTests(unittest.TestCase):
             patch("shad.projects.command.open_project", return_value=0) as open_project,
         ):
             run(_args(["shad"], harness="claude"), deps(cfg))
-        open_project.assert_called_once_with(project, cfg.defaults, ANY, ANY, harness="claude")
+        open_project.assert_called_once_with(project, cfg.defaults, ANY, ANY, harness="claude", resume=None, pick=False)
 
     def test_the_override_reaches_a_grouped_open(self) -> None:
         project = _make_project("shad", group="tin")
@@ -194,7 +194,7 @@ class HarnessOverrideTests(unittest.TestCase):
             patch("shad.projects.command.open_project", return_value=0) as open_project,
         ):
             run(_args(["tin", "shad"], harness="opencode"), deps(cfg))
-        open_project.assert_called_once_with(project, cfg.defaults, ANY, ANY, harness="opencode")
+        open_project.assert_called_once_with(project, cfg.defaults, ANY, ANY, harness="opencode", resume=None, pick=False)
 
     def test_status_ignores_the_override(self) -> None:
         project = _make_project("shad")

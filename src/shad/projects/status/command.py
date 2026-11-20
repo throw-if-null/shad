@@ -170,9 +170,8 @@ def _git(path: Path) -> Git | None:
         return None
     head = head_branch(path)
     tag = latest_tag(path)
-    # Counts every untracked file, where `status --short` collapsed an
-    # untracked directory into a single entry. An untracked directory holding
-    # two files reads as two, which is what the "file(s)" label claims.
+    # untracked=True counts every untracked file, so an untracked directory
+    # holding two files reads as two, which is what the "file(s)" label claims.
     _clean, changed, untracked = is_clean(path, untracked=True)
     return Git(
         branch=short_branch(head) if head else None,

@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+from pathlib import Path
 
 from rich.text import Text
 
 from shad import parsers
 from shad.deps import Deps
+from shad.errors import ShadError
 from shad.output import Output
 from shad.sessions import render, store
-from shad.sessions.model import Entry
+from shad.sessions.model import Entry, parse
 from shad.style import relative_age
 
 
@@ -26,8 +28,17 @@ def register(sub: parsers.Subparsers) -> None:
 
 
 def run(args: argparse.Namespace, deps: Deps) -> SavedSessions:
-    snapshot = store.read(store.snapshot_path(deps.config))
+    snapshot = parse(_read(store.snapshot_path(deps.config)))
     return SavedSessions(saved_at=snapshot.saved_at, sessions=snapshot.entries)
+
+
+def _read(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        raise ShadError.not_found(
+            "no_snapshot", f"no saved sessions at {path}; run `shad sessions save` first"
+        ) from None
 
 
 def render_saved(result: SavedSessions, out: Output) -> None:

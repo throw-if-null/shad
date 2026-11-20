@@ -138,7 +138,15 @@ def _act(
             "no_json", "shad projects <name> opens a session; --json applies to the list and status"
         )
     print_banner(deps.out)
-    return open_project(project, cfg.defaults, deps.tmux, deps.harnesses, harness=args.harness)
+    return open_project(
+        project,
+        cfg.defaults,
+        deps.tmux,
+        deps.harnesses,
+        harness=args.harness,
+        resume=getattr(args, "resume", None),
+        pick=getattr(args, "pick", False),
+    )
 
 
 def render(result: ProjectList | Status, out: Output) -> None:
