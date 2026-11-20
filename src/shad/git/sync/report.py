@@ -273,5 +273,8 @@ def render_summary(out: Output, run: SyncRun) -> None:
     out.print()
 
 
-def render_aborted(out: Output) -> None:
-    out.print(Text("  Aborted.", style="dim"))
+def render_review_footer(out: Output) -> None:
+    """After the pending table, when --yes was not given: nothing was deleted."""
+    out.print()
+    out.print(Text("  reviewed only — re-run with --yes to apply these deletions", style="dim"))
+    out.print()

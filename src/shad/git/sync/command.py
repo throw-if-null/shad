@@ -27,7 +27,6 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from rich.prompt import Confirm
 from rich.text import Text
 
 from shad import parsers
@@ -350,38 +349,24 @@ def sync_projects(
         if pending:
             report.render_pending(out, plans)
         report.render_dry_run_footer(out)
-        run = SyncRun(
-            outcomes=[ProjectOutcome(plan=p) for p in plans], dry_run=True
-        )
-        _raise_if_all_failed(run)
-        return run
+        return SyncRun(outcomes=[ProjectOutcome(plan=p) for p in plans], dry_run=True)
 
-    if not pending:
+    if not yes:
+        # No confirmation prompt ([CLI-6]): without --yes the deletions are
+        # only reported. Fetch, prune and fast-forward have already run.
+        if pending:
+            report.render_pending(out, plans)
+            report.render_review_footer(out)
         run = SyncRun(outcomes=[ProjectOutcome(plan=p) for p in plans])
         report.render_summary(out, run)
-        _raise_if_all_failed(run)
         return run
 
-    report.render_pending(out, plans)
-    out.print()
-    if not yes and not Confirm.ask(
-        "  Delete these branches and worktrees?", default=False
-    ):
-        report.render_aborted(out)
-        # Still summarise: the fetch and fast-forward already happened, and a
-        # project that failed during them must not vanish because the user
-        # declined the deletions.
-        run = SyncRun(
-            outcomes=[ProjectOutcome(plan=p) for p in plans], confirmed=False
-        )
-        report.render_summary(out, run)
-        return run
-
+    if pending:
+        report.render_pending(out, plans)
     outcomes = [_apply_one(p, trace) for p in plans]
-    run = SyncRun(outcomes=outcomes)
+    run = SyncRun(outcomes=outcomes, applied=True)
     report.render_results(out, outcomes)
     report.render_summary(out, run)
-    _raise_if_all_failed(run)
     return run
 
 
@@ -514,10 +499,21 @@ def _resolve(
     return jobs
 
 
-def _raise_if_all_failed(run: SyncRun) -> None:
-    """A run where every project failed is a real failure; a partial one is not."""
-    if run.outcomes and all(o.plan.status == "failed" for o in run.outcomes):
-        raise ShadError.infrastructure("sync_failed", f"all {len(run.outcomes)} project(s) failed")
+def raise_for_failures(run: SyncRun) -> None:
+    """
+    A per-project failure exits 1 ([CLI-2]): every project failing is
+    `sync_failed`, and some-but-not-all is `partial_failure` ([ERR-4]: the
+    per-project outcomes are reported, so a partial outcome is explicit).
+    """
+    failed = [o for o in run.outcomes if o.plan.status == "failed"]
+    if not failed:
+        return
+    total = len(run.outcomes)
+    if len(failed) == total:
+        raise ShadError.infrastructure("sync_failed", f"all {total} project(s) failed")
+    raise ShadError.infrastructure(
+        "partial_failure", f"{len(failed)} of {total} project(s) failed; see the report above"
+    )
 
 
 def register(sub: parsers.Subparsers) -> None:
@@ -534,15 +530,16 @@ def register(sub: parsers.Subparsers) -> None:
             "     pruned in this run after every commit had been pushed\n"
             "  4. prune worktree records whose directory is gone, and remove\n"
             "     clean worktrees whose branch is being deleted\n\n"
-            "Steps 1 and 2 are applied immediately and are NOT undone if you\n"
-            "decline the prompt. Only the deletions in steps 3 and 4 are gated.\n\n"
+            "Steps 1 and 2 are applied immediately. The deletions in steps 3\n"
+            "and 4 happen only with --yes; without it they are listed and\n"
+            "nothing is deleted. There is no confirmation prompt.\n\n"
             "Never deleted: the default branch, a branch checked out in a\n"
             "worktree that is staying, a branch with unpushed commits, a branch\n"
             "that never had an upstream, a locked worktree, or a worktree with\n"
             "local changes.\n\n"
             "Options:\n"
             "  --switch    check out the default branch in each main worktree\n"
-            "  --yes       skip the confirmation prompt (use this in scripts)\n"
+            "  --yes       apply the deletions (without it they are only listed)\n"
             "  --dry-run   report only; still fetches, but deletes nothing\n\n"
             "--switch is the only step that touches a working tree. A project\n"
             "is skipped, with the reason, when its tree is dirty, its HEAD is\n"
@@ -572,7 +569,7 @@ def register(sub: parsers.Subparsers) -> None:
     sync.add_argument(
         "--yes",
         action="store_true",
-        help="Skip the confirmation prompt and apply every listed deletion",
+        help="Apply the branch and worktree deletions; without it they are only listed",
     )
     sync.add_argument(
         "--dry-run",
@@ -583,7 +580,7 @@ def register(sub: parsers.Subparsers) -> None:
 
 def run(args: argparse.Namespace, deps: Deps) -> None:
     target = resolve_target(deps.config, list(args.name), usage="shad git sync")
-    sync_projects(
+    outcome = sync_projects(
         target.projects,
         deps.out,
         yes=getattr(args, "yes", False),
@@ -591,3 +588,4 @@ def run(args: argparse.Namespace, deps: Deps) -> None:
         switch=getattr(args, "switch", False),
         trace=deps.trace,
     )
+    raise_for_failures(outcome)

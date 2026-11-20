@@ -9,7 +9,14 @@ from unittest.mock import Mock, patch
 from shad.config import Project
 from shad.errors import ShadError
 from shad.git import apply, refs
-from shad.git.model import BranchInfo, ProjectOutcome, ProjectPlan, Repo, WorktreeInfo
+from shad.git.model import (
+    BranchInfo,
+    ProjectOutcome,
+    ProjectPlan,
+    Repo,
+    SyncRun,
+    WorktreeInfo,
+)
 from shad.git.sync import command as C
 from shad.git.testing import GitCase, git, words
 from shad.output import Output
@@ -79,66 +86,45 @@ def _worktree(path: str = "/tmp/wt", prune_only: bool = False) -> WorktreeInfo:
 
 
 class SyncGateTests(unittest.TestCase):
-    """The confirmation gate is the only thing standing in front of deletions."""
+    """--yes is the gate: without it, the deletions are reported but not applied."""
 
     def setUp(self) -> None:
         self.plan = _plan(branches=[_branch()], worktrees=[_worktree()])
 
-    def _run(self, **kwargs: Any) -> tuple[Mock, Mock]:
+    def _apply_plan(self, **kwargs: Any) -> Mock:
         with (
             patch.object(C, "require_git"),
             patch.object(C, "_resolve", side_effect=_resolve_all),
             patch.object(C, "fetch_and_plan", return_value=self.plan),
             patch.object(C, "report"),
             patch.object(C, "apply_plan") as apply_plan,
-            patch.object(C, "Confirm") as confirm,
         ):
-            confirm.ask.return_value = kwargs.pop("answer", False)
             C.sync_projects([_project("kb")], _out(), **kwargs)
-        return apply_plan, confirm
+        return apply_plan
 
-    def test_dry_run_never_prompts_and_never_applies(self) -> None:
-        apply_plan, confirm = self._run(dry_run=True)
-        apply_plan.assert_not_called()
-        confirm.ask.assert_not_called()
+    def test_without_yes_applies_nothing(self) -> None:
+        self.assertFalse(self._apply_plan().called)
 
-    def test_yes_skips_the_prompt_but_still_applies(self) -> None:
-        apply_plan, confirm = self._run(yes=True)
-        confirm.ask.assert_not_called()
-        apply_plan.assert_called_once_with(self.plan)
+    def test_dry_run_applies_nothing(self) -> None:
+        self.assertFalse(self._apply_plan(dry_run=True).called)
 
-    def test_declining_applies_nothing_and_raises_nothing(self) -> None:
-        apply_plan, confirm = self._run(answer=False)
-        confirm.ask.assert_called_once()
-        apply_plan.assert_not_called()
+    def test_yes_applies_the_pending_plan(self) -> None:
+        self._apply_plan(yes=True).assert_called_once_with(self.plan)
 
-    def test_accepting_applies(self) -> None:
-        apply_plan, confirm = self._run(answer=True)
-        confirm.ask.assert_called_once()
-        apply_plan.assert_called_once_with(self.plan)
-
-    def test_prompt_defaults_to_no(self) -> None:
-        _apply, confirm = self._run(answer=False)
-        self.assertIs(confirm.ask.call_args.kwargs["default"], False)
-
-    def test_nothing_pending_never_prompts(self) -> None:
+    def test_yes_with_nothing_pending_applies_nothing(self) -> None:
         self.plan = _plan()
-        apply_plan, confirm = self._run()
-        confirm.ask.assert_not_called()
-        apply_plan.assert_not_called()
+        self.assertFalse(self._apply_plan(yes=True).called)
 
-    def test_declining_marks_the_run_unconfirmed(self) -> None:
+    def test_the_run_records_whether_the_deletions_were_applied(self) -> None:
         with (
             patch.object(C, "require_git"),
             patch.object(C, "_resolve", side_effect=_resolve_all),
             patch.object(C, "fetch_and_plan", return_value=self.plan),
             patch.object(C, "report"),
             patch.object(C, "apply_plan"),
-            patch.object(C, "Confirm") as confirm,
         ):
-            confirm.ask.return_value = False
-            run = C.sync_projects([_project("kb")], _out())
-        self.assertFalse(run.confirmed)
+            self.assertFalse(C.sync_projects([_project("kb")], _out()).applied)
+            self.assertTrue(C.sync_projects([_project("kb")], _out(), yes=True).applied)
 
 
 class SyncOrchestrationTests(unittest.TestCase):
@@ -176,7 +162,9 @@ class SyncOrchestrationTests(unittest.TestCase):
             run = C.sync_projects(projects, _out())
         self.assertEqual([o.plan.project.key for o in run.outcomes], ["a", "b", "c"])
 
-    def test_a_partial_failure_is_not_a_shad_error(self) -> None:
+    def test_sync_projects_records_a_partial_failure_without_raising(self) -> None:
+        # sync_projects reports and returns; the entry point raises. This keeps
+        # the report on stdout before the error line reaches stderr.
         def fake(project: Project, **_kw: object) -> ProjectPlan:
             if project.key == "a":
                 raise RuntimeError("nope")
@@ -190,6 +178,30 @@ class SyncOrchestrationTests(unittest.TestCase):
         ):
             run = C.sync_projects([_project("a"), _project("b")], _out())
         self.assertEqual(len(run.outcomes), 2)
+        self.assertEqual({o.plan.status for o in run.outcomes}, {"failed", "ok"})
+
+
+class RaiseForFailuresTests(unittest.TestCase):
+    """The entry point turns a per-project failure into the exit code ([CLI-2])."""
+
+    def _run(self, *statuses: str) -> SyncRun:
+        return SyncRun(
+            outcomes=[ProjectOutcome(plan=_plan(_project(f"p{i}"), status=s))
+                      for i, s in enumerate(statuses)]
+        )
+
+    def test_no_failure_does_not_raise(self) -> None:
+        C.raise_for_failures(self._run("ok", "skipped"))  # no exception
+
+    def test_every_project_failed_is_sync_failed(self) -> None:
+        with self.assertRaises(ShadError) as ctx:
+            C.raise_for_failures(self._run("failed", "failed"))
+        self.assertEqual(ctx.exception.code, "sync_failed")
+
+    def test_some_but_not_all_failed_is_partial_failure(self) -> None:
+        with self.assertRaises(ShadError) as ctx:
+            C.raise_for_failures(self._run("ok", "failed", "skipped"))
+        self.assertEqual(ctx.exception.code, "partial_failure")
 
 
 class ApplyPlanTests(unittest.TestCase):
@@ -408,6 +420,45 @@ class SyncTests(GitCase):
         self.assertIn("restore: git branch feat/merged", words(result.out))
         self.assertIn("1 branch deleted", result.out)
         self.assertNotIn("feat/merged", self.branches("kb"))
+
+    def test_sync_without_yes_reports_deletions_and_deletes_nothing(self) -> None:
+        """
+        Criterion:  sync-without-yes-deletes-nothing
+          Given:    kb tracks feat/merged, which the remote's main has merged.
+          When:     `shad git sync kb` (no --yes).
+          Then:     exit 0, stderr empty, stdout lists feat/merged as a
+                    pending deletion, there is no prompt, and the branch
+                    still exists.
+        """
+        self.clone("kb", merged=True)
+        result = self.run_detached("git", "sync", "kb")
+        self.assertEqual((result.code, result.err), (0, ""), result.out)
+        self.assertIn("pending deletions", result.out)
+        self.assertIn("feat/merged", result.out)
+        self.assertIn("--yes", result.out)
+        self.assertNotIn("deleted branch", result.out)
+        self.assertIn("feat/merged", self.branches("kb"))
+
+    def test_sync_partial_failure_exits_1(self) -> None:
+        """
+        Criterion:  sync-partial-failure-exits-1
+          Given:    kb is a healthy clone, tin shad is a clone whose remote
+                    cannot be fetched, and tin coral is a plain directory.
+          When:     `shad git sync`.
+          Then:     exit 1, stdout reports kb up to date and tin shad failed
+                    with a reason, and stderr is one line
+                    `partial_failure: <non-empty>`.
+        """
+        self.clone("kb")
+        self.clone("tin/shad")
+        self.break_remote("tin/shad")
+        (self.root / "tin" / "coral").mkdir(parents=True)
+        result = self.run_detached("git", "sync")
+        self.assertEqual(result.code, 1, result.out)
+        self.assertIn("up to date", result.out)
+        self.assertIn("tin shad", result.out)
+        self.assertIn("1 project failed", result.out)
+        self.assertRegex(result.err, r"^partial_failure: .+\n$")
 
     def test_sync_keeps_a_branch_with_unpushed_commits(self) -> None:
         """
