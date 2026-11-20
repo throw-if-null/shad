@@ -272,12 +272,12 @@ class GitCliTests(unittest.TestCase):
         cfg = Config(defaults=Defaults())
         with (
             patch("shad.deps.load", return_value=cfg) as load,
-            patch("shad.git.sync.command.run", return_value=None) as run_sync,
+            patch("shad.git.sync.command.run", autospec=True, return_value=None) as run_sync,
         ):
             self.assertEqual(main(["git", "sync"]), 0)
             run_sync.assert_called_once()
-            # The config loads on first use, through the Deps the root built.
-            self.assertIs(run_sync.call_args.args[1].config, cfg)
+            # The config loads on first use, through the Deps the root supplied.
+            self.assertIs(run_sync.call_args.kwargs["deps"].config, cfg)
             load.assert_called_once()
 
     def test_git_errors_exit_one(self) -> None:

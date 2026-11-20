@@ -971,6 +971,7 @@ shad/
         ├── style.py
         ├── tmux.py
         ├── trace.py
+        ├── wiring.py
         ├── cheat/
         │   └── command.py
         ├── completion/

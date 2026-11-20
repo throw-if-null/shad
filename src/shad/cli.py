@@ -18,10 +18,10 @@ shad sessions save|restore|stop|show     # the running shad sessions, as a snaps
 shad init | cheat | completion bash
 
 Each package registers its own parser (`register`) and records the function
-the root runs (`run(args, deps)`) and, for a read command, the one that
-renders its result as text (`render(result, out)`). This module constructs
-the crosscuts, parses, runs, renders, and maps errors; it holds no command
-logic.
+the root runs (`run(args, **declared)`) and, for a read command, the one
+that renders its result as text (`render(result, out)`). This module parses,
+supplies each command what it declares (`shad.wiring`), runs, renders, and
+maps errors; it holds no command logic.
 
 Config file: --config PATH, else $SHAD_CONFIG, else the per-OS default
 (~/.config/shad/shad.toml on Linux). `shad config path` prints the resolved one.
@@ -43,7 +43,6 @@ import os
 import sys
 from collections.abc import Callable
 from dataclasses import asdict
-from pathlib import Path
 
 from shad import (
     __version__,
@@ -57,15 +56,11 @@ from shad import (
     todo,
 )
 from shad.banner import print_banner
-from shad.config import config_path, default_data_dir
-from shad.deps import Deps
-from shad.editor import Editor
 from shad.errors import ShadError
-from shad.harness import Harnesses
 from shad.output import Output
 from shad.parsers import DEBUG, JSON
-from shad.tmux import Tmux
 from shad.trace import Trace
+from shad.wiring import Supply, arguments
 
 # The category to exit code map ([CLI-8]); every category not listed exits 1.
 EXIT_CODES = {"usage": 2}
@@ -136,23 +131,10 @@ def _dispatch(args: argparse.Namespace, out: Output, trace: Trace) -> int:
             "no_json", "--json applies to a read command, and this command has no result to encode"
         )
 
-    # None means "resolve normally": config_path() applies $SHAD_CONFIG and
-    # the per-OS default. Readers and writers get the same answer because
-    # they all go through the one Deps.
-    config_file = Path(args.config).expanduser() if args.config else config_path(os.environ)
-    # The crosscuts that read the environment do so here, once, and are
-    # handed what they read; no slice reads it.
-    deps = Deps(
-        out=out,
-        trace=trace,
-        tmux=Tmux(os.environ),
-        editor=Editor.from_env(os.environ),
-        harnesses=Harnesses.from_env(os.environ),
-        config_file=config_file,
-        data_dir=default_data_dir(os.environ),
-    )
-
-    result = args.run(args, deps)
+    # The one read of the environment; the crosscuts constructed from it
+    # are handed what they read, and no slice reads it.
+    supply = Supply(out=out, trace=trace, config_arg=args.config, environ=os.environ)
+    result = args.run(args, **arguments(args.run, supply))
     if result is None:
         return 0
     if isinstance(result, int):
