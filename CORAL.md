@@ -24,5 +24,30 @@ adopts:
 exceptions: []
 
 # Local rules Coral does not have, namespaced per [VER-4] and scoped to a path per [VER-5].
-extensions: []
+extensions:
+  - rule: SHAD-1
+    path: src/shad
+    statement: >
+      textual is imported only inside the panel app modules, git/panel.py and
+      todo/panel/app.py. Every other module imports it lazily from inside a
+      function, never at module scope.
+    reason: >
+      Coral has no rule confining a heavy optional UI dependency. Importing
+      textual.app costs about 100ms, which every `shad projects` and `shad git
+      sync` would otherwise pay. Touches module-boundary and dependency
+      placement.
+    upstream: not-a-candidate
+  - rule: SHAD-2
+    path: src/shad/git
+    statement: >
+      git output is read only from plumbing commands with explicit formats, and
+      every outcome is decided from exit codes. Porcelain and human-facing output
+      are never parsed.
+    reason: >
+      Coral has no rule on parsing a third-party CLI. git porcelain is
+      gettext-translated, `fetch.output=compact` rewrites ref names, and `git
+      branch` layout depends on terminal width, so only plumbing with explicit
+      formats and exit codes is a stable contract. Touches the external-tool
+      trust boundary.
+    upstream: not-a-candidate
 ```
