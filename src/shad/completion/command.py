@@ -23,7 +23,7 @@ import argparse
 from shad import parsers
 from shad.config import HARNESSES, OC_POSITIONS
 from shad.deps import Deps
-from shad.todo.model import STATUSES
+from shad.todo import STATUSES
 
 # Helper functions read `cur`, `args`, `flags`, `_shad_cmd` and the project
 # arrays as locals of `_shad_complete`. Bash scopes locals dynamically, so a

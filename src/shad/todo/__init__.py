@@ -1,6 +1,7 @@
 """
 The `todo` package. The panel's key bindings run the commands that own
-each change through the names published here.
+each change through the names published here. `STATUSES` is the status
+vocabulary the completion script reads.
 """
 
 from __future__ import annotations
@@ -8,10 +9,11 @@ from __future__ import annotations
 from shad import parsers
 from shad.todo.add.command import add_in_editor
 from shad.todo.edit.command import edit_in_editor
+from shad.todo.model import STATUSES
 from shad.todo.rm.command import remove
 from shad.todo.status.command import set_status
 
-__all__ = ["add_in_editor", "edit_in_editor", "register", "remove", "set_status"]
+__all__ = ["STATUSES", "add_in_editor", "edit_in_editor", "register", "remove", "set_status"]
 
 
 def register(sub: parsers.Subparsers) -> None:
