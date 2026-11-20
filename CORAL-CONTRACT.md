@@ -107,3 +107,13 @@ not because they are inapplicable. Their reasoning lives in the Coral documents.
 - `[XCUT-2]` Give every crosscut a precise domain or infrastructure name.
 - `[XCUT-3]` Consume a crosscut through its published surface, never its internals. Inject one that holds configuration, a connection, or per-trigger state.
 - `[XCUT-5]` A domain entity may be a crosscut only as type + invariants, never its queries or storage.
+
+## Project extensions
+
+Local rules this project adds. Coral does not define them; inside their path they are
+normative here exactly as a Coral rule is.
+
+- `[SHAD-1]` — `src/shad` and descendants
+  - textual is imported only inside the panel app modules, git/panel.py and todo/panel/app.py. Every other module imports it lazily from inside a function, never at module scope.
+- `[SHAD-2]` — `src/shad/git` and descendants
+  - git output is read only from git's documented machine formats: plumbing commands and the stable scripting formats (`for-each-ref` and `log` with explicit `%`-formats, `status --porcelain=v2`). Every outcome is decided from exit codes. The default human-facing output is never parsed.
