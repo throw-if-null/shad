@@ -11,7 +11,6 @@ from shad.config.loader import (
     Config,
     Defaults,
     Project,
-    all_projects,
     config_path,
     default_config_dir,
     default_data_dir,
@@ -191,7 +190,7 @@ class LoadConfigTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# all_projects / resolve_target
+# ProjectTable
 # ---------------------------------------------------------------------------
 
 
@@ -215,13 +214,20 @@ def _config() -> Config:
     )
 
 
-class AllProjectsTests(unittest.TestCase):
+class ProjectTableTests(unittest.TestCase):
     def test_top_level_projects_come_first_then_groups(self) -> None:
-        names = [p.display_name for p in all_projects(_config())]
+        names = [p.display_name for p in _config().project_table.all()]
         self.assertEqual(names, ["kb", "orfe", "cv sol", "tin coral", "tin shad"])
 
     def test_empty_config_returns_empty_list(self) -> None:
-        self.assertEqual(all_projects(Config(defaults=Defaults())), [])
+        self.assertEqual(Config(defaults=Defaults()).project_table.all(), [])
+
+    def test_find_reads_the_top_level_without_a_group_and_the_group_with_one(self) -> None:
+        table = _config().project_table
+        self.assertEqual(table.find(None, "kb"), _project("kb"))
+        self.assertEqual(table.find("tin", "shad"), _project("shad", "tin"))
+        self.assertIsNone(table.find(None, "shad"))
+        self.assertIsNone(table.find("nope", "shad"))
 
 
 class TodoConfigTests(unittest.TestCase):

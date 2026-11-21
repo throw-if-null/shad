@@ -100,8 +100,7 @@ class ArgumentsTests(unittest.TestCase):
     def test_each_value_is_constructed_once_per_run(self) -> None:
         supply = _supply()
         self.assertIs(supply.tmux, supply.tmux)
-        self.assertIs(supply.deps, supply.deps)
-        self.assertIs(supply.deps.tmux, supply.tmux)
+        self.assertIs(supply.harnesses, supply.harnesses)
 
 
 if __name__ == "__main__":

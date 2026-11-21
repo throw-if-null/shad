@@ -10,7 +10,6 @@ from rich.text import Text
 from shad import parsers
 from shad.config import raw, store, toml_edit
 from shad.config.schema import PATH, coerce, field_for, infer
-from shad.deps import Deps
 from shad.errors import ShadError
 from shad.output import Output
 
@@ -26,9 +25,9 @@ def register(sub: parsers.Subparsers) -> None:
     )
 
 
-def run(args: argparse.Namespace, deps: Deps) -> None:
+def run(args: argparse.Namespace, *, out: Output, config_file: Path) -> None:
     set_config_value(
-        deps.config_file, args.key, args.value, force=getattr(args, "force", False), out=deps.out
+        config_file, args.key, args.value, force=getattr(args, "force", False), out=out
     )
 
 

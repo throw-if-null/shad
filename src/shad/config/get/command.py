@@ -8,10 +8,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from shad import parsers
-from shad.config import Config, raw, toml_edit
+from shad.config import Config, load, raw, toml_edit
 from shad.config.render import display
 from shad.config.schema import field_for
-from shad.deps import Deps
 from shad.errors import ShadError
 from shad.output import Output
 
@@ -36,14 +35,14 @@ def register(sub: parsers.Subparsers) -> None:
     parser.add_argument("key", metavar="KEY", help="Dotted key, e.g. defaults.harness")
 
 
-def run(args: argparse.Namespace, deps: Deps) -> ConfigValue:
+def run(args: argparse.Namespace, *, config_file: Path, data_dir: Path) -> ConfigValue:
     key: str = args.key
     parts = toml_edit.split_dotted(key)
-    value = raw.lookup(_read(deps.config_file), parts)
+    value = raw.lookup(_read(config_file), parts)
     source = "file"
 
     if value is raw.MISSING:
-        value = _effective(deps.config_file, parts, lambda: deps.config)
+        value = _effective(config_file, parts, lambda: load(config_file, data_dir=data_dir))
         source = "default"
 
     if value is raw.MISSING:

@@ -960,7 +960,6 @@ shad/
         ├── addressing.py
         ├── atomic.py
         ├── banner.py
-        ├── deps.py
         ├── editor.py
         ├── errors.py
         ├── harness.py

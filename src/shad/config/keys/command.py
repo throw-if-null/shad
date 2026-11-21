@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 from shad import parsers
 from shad.config import raw
 from shad.config.schema import known_keys
-from shad.deps import Deps
+from shad.output import Output
 
 
 def register(sub: parsers.Subparsers) -> None:
@@ -19,8 +20,8 @@ def register(sub: parsers.Subparsers) -> None:
     )
 
 
-def run(args: argparse.Namespace, deps: Deps) -> None:
-    path = deps.config_file
+def run(args: argparse.Namespace, *, out: Output, config_file: Path) -> None:
+    path = config_file
     parsed = raw.parse(path.read_text()) if path.exists() else {}
     for key, _field in known_keys(raw.project_paths(parsed)):
-        deps.out.plain(key)
+        out.plain(key)

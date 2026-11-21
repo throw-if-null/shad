@@ -10,7 +10,6 @@ from rich.text import Text
 
 from shad import parsers
 from shad.config import load
-from shad.deps import Deps
 from shad.output import Output
 
 
@@ -28,8 +27,8 @@ def register(sub: parsers.Subparsers) -> None:
     )
 
 
-def run(args: argparse.Namespace, deps: Deps) -> ConfigValidation:
-    return validate(deps.config_file)
+def run(args: argparse.Namespace, *, config_file: Path) -> ConfigValidation:
+    return validate(config_file)
 
 
 def validate(path: Path) -> ConfigValidation:

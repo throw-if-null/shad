@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 from shad import parsers
-from shad.deps import Deps
+from shad.editor import Editor
+from shad.output import Output
 
 
 def register(sub: parsers.Subparsers) -> None:
@@ -14,10 +16,16 @@ def register(sub: parsers.Subparsers) -> None:
     )
 
 
-def run(args: argparse.Namespace, deps: Deps) -> None:
+def run(
+    args: argparse.Namespace,
+    *,
+    out: Output,
+    editor: Editor,
+    todo_dir: Path,
+    todo_labels: list[str],
+) -> None:
     # Imported here, not at module scope: textual costs roughly 100ms to
     # import, and `shad todo add` from a script must not pay it.
     from shad.todo.panel.app import run_panel
 
-    cfg = deps.config
-    run_panel(cfg.todo_dir, cfg.todo_labels, deps.out, deps.editor)
+    run_panel(todo_dir, todo_labels, out, editor)

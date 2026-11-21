@@ -8,8 +8,8 @@ from pathlib import Path
 from rich.text import Text
 
 from shad import parsers
-from shad.deps import Deps
 from shad.errors import ShadError
+from shad.output import Output
 from shad.todo import store
 from shad.todo.model import STATUSES, Item
 from shad.todo.render import status_word
@@ -21,9 +21,9 @@ def register(sub: parsers.Subparsers) -> None:
     parser.add_argument("status", metavar="STATUS", choices=STATUSES)
 
 
-def run(args: argparse.Namespace, deps: Deps) -> None:
-    item = set_status(deps.config.todo_dir, args.key, args.status)
-    deps.out.print(
+def run(args: argparse.Namespace, *, out: Output, todo_dir: Path) -> None:
+    item = set_status(todo_dir, args.key, args.status)
+    out.print(
         Text("  ✓ ", style="bold green")
         + Text(item.key, style="bright_white")
         + Text("  ")

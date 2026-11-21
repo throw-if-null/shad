@@ -40,7 +40,7 @@ class CollectTests(unittest.TestCase):
             Claude, "_process_record", autospec=True,
             side_effect=lambda self, name: (records or {}).get(name),
         ):
-            return collect(CFG, tmux, self.harnesses)
+            return collect(CFG.project_table, tmux, self.harnesses)
 
     def test_lists_every_running_session_in_config_order(self) -> None:
         sessions = {"tin-shad": [f"tin-shad--cc-{UUID_A}"], "kb": ["kb--cc-fresh-9"]}

@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 from shad import parsers
-from shad.deps import Deps
+from shad.output import Output
 
 
 def register(sub: parsers.Subparsers) -> None:
@@ -14,5 +15,5 @@ def register(sub: parsers.Subparsers) -> None:
     )
 
 
-def run(args: argparse.Namespace, deps: Deps) -> None:
-    deps.out.plain(str(deps.config_file))
+def run(args: argparse.Namespace, *, out: Output, config_file: Path) -> None:
+    out.plain(str(config_file))

@@ -9,7 +9,6 @@ from pathlib import Path
 from rich.text import Text
 
 from shad import parsers
-from shad.deps import Deps
 from shad.errors import ShadError
 from shad.output import Output
 from shad.style import make_table
@@ -57,17 +56,22 @@ def register(sub: parsers.Subparsers) -> None:
     )
 
 
-def run(args: argparse.Namespace, deps: Deps) -> TodoList | None:
-    cfg = deps.config
-    directory = cfg.todo_dir
+def run(
+    args: argparse.Namespace,
+    *,
+    out: Output,
+    todo_dir: Path,
+    todo_labels: list[str],
+) -> TodoList | None:
+    directory = todo_dir
     if getattr(args, "keys", False):
         if getattr(args, "json", False):
             raise ShadError.usage("no_json", "--keys prints the keys as they are; drop --json")
         for key in store.keys(directory):
-            deps.out.plain(key)
+            out.plain(key)
         return None
     return TodoList(
-        labels=tuple(cfg.todo_labels),
+        labels=tuple(todo_labels),
         items=tuple(
             TodoRow(
                 key=item.key,
@@ -77,7 +81,7 @@ def run(args: argparse.Namespace, deps: Deps) -> TodoList | None:
                 created=item.created,
                 updated=item.updated,
                 body=item.body,
-                problems=tuple(problems(item, cfg.todo_labels)),
+                problems=tuple(problems(item, todo_labels)),
             )
             for item in _load_items(directory)
         )

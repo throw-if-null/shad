@@ -5,7 +5,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from shad.config import Config, Defaults
 from shad.sessions import store
 from shad.sessions.model import Entry, Snapshot, parse
 
@@ -39,5 +38,4 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(parse(path.read_text()), later)
 
     def test_snapshot_path_is_in_the_data_dir(self) -> None:
-        cfg = Config(defaults=Defaults(), data_dir=Path("/data/shad"))
-        self.assertEqual(store.snapshot_path(cfg), Path("/data/shad/sessions.json"))
+        self.assertEqual(store.snapshot_path(Path("/data/shad")), Path("/data/shad/sessions.json"))

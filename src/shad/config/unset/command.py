@@ -9,7 +9,6 @@ from rich.text import Text
 
 from shad import parsers
 from shad.config import raw, store, toml_edit
-from shad.deps import Deps
 from shad.errors import ShadError
 from shad.output import Output
 
@@ -32,8 +31,8 @@ def register(sub: parsers.Subparsers) -> None:
     )
 
 
-def run(args: argparse.Namespace, deps: Deps) -> None:
-    unset_config_value(deps.config_file, args.key, force=getattr(args, "force", False), out=deps.out)
+def run(args: argparse.Namespace, *, out: Output, config_file: Path) -> None:
+    unset_config_value(config_file, args.key, force=getattr(args, "force", False), out=out)
 
 
 def unset_config_value(path: Path, key: str, *, force: bool = False, out: Output) -> None:

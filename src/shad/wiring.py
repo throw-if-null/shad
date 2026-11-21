@@ -24,8 +24,14 @@ from functools import cached_property
 from pathlib import Path
 from typing import Any
 
-from shad.config import Config, config_path, default_data_dir, load
-from shad.deps import Deps
+from shad.config import (
+    Config,
+    Defaults,
+    ProjectTable,
+    config_path,
+    default_data_dir,
+    load,
+)
 from shad.editor import Editor
 from shad.errors import ShadError
 from shad.harness import Harnesses
@@ -42,7 +48,10 @@ PROVIDED = (
     "config_file",
     "data_dir",
     "config",
-    "deps",
+    "defaults",
+    "projects",
+    "todo_dir",
+    "todo_labels",
 )
 
 
@@ -76,8 +85,8 @@ class Supply:
     def config_file(self) -> Path:
         """
         --config, else $SHAD_CONFIG, else the per-OS default. The config
-        actions and `init` edit this file and every other command reads it as
-        `config`, so readers and writers resolve the same file.
+        actions and `init` edit this file and every other command receives
+        values loaded from it, so readers and writers resolve the same file.
         """
         if self._config_arg:
             return Path(self._config_arg).expanduser()
@@ -93,16 +102,20 @@ class Supply:
         return load(self.config_file, data_dir=self.data_dir)
 
     @cached_property
-    def deps(self) -> Deps:
-        return Deps(
-            out=self.out,
-            trace=self.trace,
-            tmux=self.tmux,
-            editor=self.editor,
-            harnesses=self.harnesses,
-            config_file=self.config_file,
-            data_dir=self.data_dir,
-        )
+    def defaults(self) -> Defaults:
+        return self.config.defaults
+
+    @cached_property
+    def projects(self) -> ProjectTable:
+        return self.config.project_table
+
+    @cached_property
+    def todo_dir(self) -> Path:
+        return self.config.todo_dir
+
+    @cached_property
+    def todo_labels(self) -> list[str]:
+        return self.config.todo_labels
 
 
 def declared(run: Callable[..., Any]) -> list[str]:

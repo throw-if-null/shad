@@ -37,7 +37,6 @@ from rich.text import Text
 from shad import parsers
 from shad.config import raw, store
 from shad.config.schema import HARNESSES, field_for
-from shad.deps import Deps
 from shad.errors import ShadError
 from shad.output import Output
 
@@ -269,13 +268,13 @@ def register(sub: parsers.Subparsers) -> None:
     )
 
 
-def run(args: argparse.Namespace, deps: Deps) -> None:
+def run(args: argparse.Namespace, *, out: Output, config_file: Path) -> None:
     if args.install_deps:
-        ensure_dependencies_installed(deps.out, _effective_harness(deps.config_file, args.harness))
-        deps.out.print()
+        ensure_dependencies_installed(out, _effective_harness(config_file, args.harness))
+        out.print()
 
     if args.wizard:
-        init_wizard(deps.config_file, deps.out)
+        init_wizard(config_file, out)
         return
 
     if args.path is None:
@@ -284,8 +283,8 @@ def run(args: argparse.Namespace, deps: Deps) -> None:
         raise ShadError.usage("missing_path", "give --path DIR, or --wizard to be prompted")
 
     add_project_entry(
-        deps.config_file,
-        deps.out,
+        config_file,
+        out,
         path=args.path,
         group=args.group,
         key=args.key,
