@@ -23,7 +23,7 @@ from shad.errors import ShadError
 if TYPE_CHECKING:
     # Generic in typeshed only; annotations are strings, so the alias is never evaluated.
     Subparsers = argparse._SubParsersAction[argparse.ArgumentParser]
-# run(args, deps): None, an exit status a child process returned, or a result.
+# run(args, **declared): None, an exit status a child process returned, or a result.
 Run = Callable[..., Any]
 # render(result, out): the result as text.
 Render = Callable[..., None]
@@ -45,7 +45,9 @@ def command(
     """
     Add the parser for *name* to *sub* and record what the root runs.
 
-    *run* takes the parsed arguments and the root's Deps. A command whose
+    *run* takes the parsed arguments, then, as keyword-only parameters, the
+    dependencies it uses, each named after one of `shad.wiring.PROVIDED`;
+    the root supplies them. A command whose
     `run` returns a result passes *render*, which prints it as text; with
     --json the root encodes the result instead. A command that prints as it
     goes, or hands the terminal over, passes no *render* and returns None
@@ -74,7 +76,7 @@ def group(
     actions = parser.add_subparsers(dest=dest, metavar="<action>")
     if run is None:
 
-        def run(args: argparse.Namespace, deps: object) -> None:
+        def run(args: argparse.Namespace) -> None:
             available = ", ".join(actions.choices)
             raise ShadError.usage("no_action", f"no {name} action given; available: {available}")
 
