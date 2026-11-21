@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import argparse
 import unittest
+from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import patch
 
@@ -230,9 +232,17 @@ class MainErrorHandlingTests(unittest.TestCase):
             self.assertEqual(main([]), 0)
 
     def test_the_exit_status_a_hand_over_returns_is_the_exit_code(self) -> None:
-        with patch("shad.sessions.restore.command.run", autospec=True, return_value=3):
+        # A stub that declares no dependency, so the root constructs nothing
+        # and the test does not read the user's config.
+        def handed_over(status: int) -> Callable[[argparse.Namespace], int]:
+            def run(args: argparse.Namespace) -> int:
+                return status
+
+            return run
+
+        with patch("shad.sessions.restore.command.run", handed_over(3)):
             self.assertEqual(main(["sessions", "restore"]), 3)
-        with patch("shad.cheat.command.run", autospec=True, return_value=4):
+        with patch("shad.cheat.command.run", handed_over(4)):
             self.assertEqual(main(["cheat"]), 4)
 
     def test_json_on_a_command_without_a_result_is_refused_before_it_runs(self) -> None:
