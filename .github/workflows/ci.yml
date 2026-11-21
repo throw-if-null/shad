@@ -35,6 +35,19 @@ jobs:
         shell: bash
         run: pytest
 
+  coral-contract:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      - name: Verify the Coral contract
+        shell: bash
+        run: make coral-contract
+
   auto-merge:
     needs: test
     if: github.actor == 'dependabot[bot]'
