@@ -39,7 +39,7 @@ from shad.harness import Harnesses
 from shad.output import Output
 from shad.tmux import Tmux
 from shad.trace import Trace
-from shad.wiring import Supply, arguments
+from shad.wiring import PROVIDED, Supply, arguments
 
 # The directory `import shad` resolved to. A shad subprocess gets it as
 # PYTHONPATH so it runs the code under test: an editable install of another
@@ -119,6 +119,9 @@ def supplied(
         "editor": editor or Editor(None),
         "harnesses": harnesses,
     }
+    # A seed under a name Supply does not provide would be ignored, and the
+    # real value constructed in its place.
+    assert set(seeded) <= set(PROVIDED), set(seeded) - set(PROVIDED)
     supply.__dict__.update({name: value for name, value in seeded.items() if value is not None})
     return arguments(run, supply)
 

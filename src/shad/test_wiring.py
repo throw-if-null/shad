@@ -7,7 +7,7 @@ import unittest
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any
+from typing import Any, get_type_hints
 from unittest.mock import MagicMock, patch
 
 from shad.cli import build_parser
@@ -38,8 +38,30 @@ def _runs(
                 yield from _runs(sub, (*path, name))
 
 
+def _mismatches(run: Callable[..., Any]) -> list[str]:
+    """
+    Each name *run* declares whose annotation the provider's type does not
+    satisfy: the same type, or a subclass of the annotated class. A missing
+    annotation is a mismatch, because nothing then verifies the binding.
+    """
+    hints = get_type_hints(run)
+    found = []
+    for name in declared(run):
+        provided, wanted = PROVIDED.get(name), hints.get(name)
+        if provided is not None and provided == wanted:
+            continue
+        if isinstance(provided, type) and isinstance(wanted, type) and issubclass(provided, wanted):
+            continue
+        found.append(f"{name}: {wanted!r} is declared, {provided!r} is provided")
+    return found
+
+
 class RegisteredCommandTests(unittest.TestCase):
-    """Every command the root can dispatch declares only what the root provides."""
+    """
+    Every command the root can dispatch binds each declared name to one
+    provider of a compatible type (`[DEPS-1]`). The root's one composition is
+    the only supported configuration.
+    """
 
     def test_every_command_declares_only_provided_names(self) -> None:
         runs = list(_runs(build_parser()))
@@ -47,6 +69,30 @@ class RegisteredCommandTests(unittest.TestCase):
         for path, run in runs:
             with self.subTest(command=" ".join(path)):
                 self.assertLessEqual(set(declared(run)), set(PROVIDED))
+
+    def test_every_declared_dependency_has_the_type_its_provider_supplies(self) -> None:
+        for path, run in _runs(build_parser()):
+            with self.subTest(command=" ".join(path)):
+                self.assertEqual(_mismatches(run), [])
+
+    def test_a_declared_type_the_provider_does_not_supply_is_a_mismatch(self) -> None:
+        def run(args: argparse.Namespace, *, out: Output, tmux: Path, editor) -> None: ...  # type: ignore[no-untyped-def]
+
+        self.assertEqual(
+            [entry.split(":")[0] for entry in _mismatches(run)], ["tmux", "editor"]
+        )
+
+
+class ProvidedTests(unittest.TestCase):
+    """`PROVIDED` is read from `Supply`, so every name has exactly one provider."""
+
+    def test_every_provided_name_is_a_supply_attribute(self) -> None:
+        supply = _supply()
+        for name in ("out", "trace"):
+            self.assertIs(PROVIDED[name], type(getattr(supply, name)))
+        for name in set(PROVIDED) - {"out", "trace"}:
+            with self.subTest(name=name):
+                self.assertTrue(hasattr(Supply, name))
 
 
 class ArgumentsTests(unittest.TestCase):
