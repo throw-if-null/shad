@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from shad.config import Config, Project, all_projects
+from shad.config import Project, ProjectTable
 from shad.harness import Conversation, Harnesses, RunningSession, harness_for_prefix
 from shad.sessions.model import Entry
 from shad.tmux import Tmux, split_session_name
@@ -39,7 +39,7 @@ class Running:
         )
 
 
-def collect(cfg: Config, tmux: Tmux, harnesses: Harnesses) -> list[Running]:
+def collect(projects: ProjectTable, tmux: Tmux, harnesses: Harnesses) -> list[Running]:
     """
     Every running shad tmux session, in config order.
 
@@ -52,7 +52,7 @@ def collect(cfg: Config, tmux: Tmux, harnesses: Harnesses) -> list[Running]:
     attached = tmux.attached_sessions()
     commands = tmux.pane_commands()
     found: list[Running] = []
-    for project in all_projects(cfg):
+    for project in projects.all():
         for session in tmux.list_project_sessions(project.session):
             scoped = split_session_name(project.session, session)
             if scoped is None:

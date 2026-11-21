@@ -18,7 +18,6 @@ from rich.table import Table
 from rich.text import Text
 
 from shad import parsers
-from shad.deps import Deps
 from shad.output import Output
 from shad.tmux import Tmux
 
@@ -126,8 +125,8 @@ def register(sub: parsers.Subparsers) -> None:
     )
 
 
-def run(args: argparse.Namespace, deps: Deps) -> int:
-    return cheat(deps.out, deps.tmux)
+def run(args: argparse.Namespace, *, out: Output, tmux: Tmux) -> int:
+    return cheat(out, tmux)
 
 
 def cheat(out: Output, tmux: Tmux) -> int:

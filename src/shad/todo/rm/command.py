@@ -8,7 +8,7 @@ from pathlib import Path
 from rich.text import Text
 
 from shad import parsers
-from shad.deps import Deps
+from shad.output import Output
 from shad.todo import store
 
 
@@ -17,11 +17,10 @@ def register(sub: parsers.Subparsers) -> None:
     parser.add_argument("key", metavar="KEY", help="Item key, or a unique prefix")
 
 
-def run(args: argparse.Namespace, deps: Deps) -> None:
-    directory = deps.config.todo_dir
-    key = store.resolve_key(directory, args.key)
-    path = remove(directory, key)
-    deps.out.print(
+def run(args: argparse.Namespace, *, out: Output, todo_dir: Path) -> None:
+    key = store.resolve_key(todo_dir, args.key)
+    path = remove(todo_dir, key)
+    out.print(
         Text("  ✓ ", style="bold green")
         + Text(f"removed {key}", style="bright_white")
         + Text(f"  {path}", style="dim")

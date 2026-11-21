@@ -39,7 +39,11 @@ class PlanTests(unittest.TestCase):
 
     def _plan(self, *entries: Entry, live: list[Running] | None = None) -> list[Step]:
         return plan(
-            CFG, Snapshot(saved_at=0, entries=entries), live or [], self.tmux, self.harnesses
+            CFG.project_table,
+            Snapshot(saved_at=0, entries=entries),
+            live or [],
+            self.tmux,
+            self.harnesses,
         )
 
     def test_resumes_a_saved_conversation_that_has_a_transcript(self) -> None:

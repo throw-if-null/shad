@@ -10,8 +10,7 @@ from pathlib import Path
 
 from shad import parsers
 from shad.addressing import resolve_target
-from shad.config import Config
-from shad.deps import Deps
+from shad.config import ProjectTable
 from shad.errors import ShadError
 from shad.git import discover
 from shad.git.model import Repo
@@ -66,14 +65,14 @@ def register(sub: parsers.Subparsers) -> None:
     )
 
 
-def run(args: argparse.Namespace, deps: Deps) -> None:
-    open_panel(deps.config, list(args.name), fetch=not getattr(args, "no_fetch", False))
+def run(args: argparse.Namespace, *, projects: ProjectTable) -> None:
+    open_panel(projects, list(args.name), fetch=not getattr(args, "no_fetch", False))
 
 
-def open_panel(cfg: Config, name: list[str], *, fetch: bool) -> None:
+def open_panel(projects: ProjectTable, name: list[str], *, fetch: bool) -> None:
     """Run the read-only git panel against exactly one repository."""
     require_git()
-    repo = _resolve_one(cfg, name)
+    repo = _resolve_one(projects, name)
     # Imported here, not at module scope: textual costs roughly 100ms to
     # import, and `shad git sync` must not pay it.
     from shad.git.panel.app import run_panel
@@ -81,7 +80,7 @@ def open_panel(cfg: Config, name: list[str], *, fetch: bool) -> None:
     run_panel(repo, fetch=fetch)
 
 
-def _resolve_one(cfg: Config, name: list[str]) -> Repo:
+def _resolve_one(projects: ProjectTable, name: list[str]) -> Repo:
     """
     The single repository the panel shows.
 
@@ -93,7 +92,7 @@ def _resolve_one(cfg: Config, name: list[str]) -> Repo:
     if not name:
         path = Path.cwd()
     else:
-        target = resolve_target(cfg, name, usage="shad git panel")
+        target = resolve_target(projects, name, usage="shad git panel")
         if len(target.projects) != 1:
             names = ", ".join(p.display_name for p in target.projects)
             raise ShadError.usage(

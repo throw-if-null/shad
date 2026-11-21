@@ -16,11 +16,13 @@ import argparse
 from rich.text import Text
 
 from shad import parsers
-from shad.deps import Deps
+from shad.config import ProjectTable
 from shad.errors import ShadError
+from shad.harness import Harnesses
 from shad.output import Output
 from shad.sessions import live, render
 from shad.sessions.pick import pick
+from shad.tmux import Tmux
 
 
 def register(sub: parsers.Subparsers) -> None:
@@ -37,10 +39,15 @@ def register(sub: parsers.Subparsers) -> None:
     )
 
 
-def run(args: argparse.Namespace, deps: Deps) -> None:
-    out = deps.out
-    tmux = deps.tmux
-    running = live.collect(deps.config, tmux, deps.harnesses)
+def run(
+    args: argparse.Namespace,
+    *,
+    out: Output,
+    tmux: Tmux,
+    harnesses: Harnesses,
+    projects: ProjectTable,
+) -> None:
+    running = live.collect(projects, tmux, harnesses)
     current = tmux.current_session()
     rows = [item for item in running if item.session != current]
     if not rows:

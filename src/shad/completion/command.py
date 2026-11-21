@@ -22,7 +22,7 @@ import argparse
 
 from shad import parsers
 from shad.config import HARNESSES, OC_POSITIONS
-from shad.deps import Deps
+from shad.output import Output
 from shad.todo import STATUSES
 
 # Helper functions read `cur`, `args`, `flags`, `_shad_cmd` and the project
@@ -450,5 +450,5 @@ def register(sub: parsers.Subparsers) -> None:
     parser.add_argument("shell", choices=["bash"], help="Shell to generate completions for")
 
 
-def run(args: argparse.Namespace, deps: Deps) -> None:
-    deps.out.plain(BASH_COMPLETION)
+def run(args: argparse.Namespace, *, out: Output) -> None:
+    out.plain(BASH_COMPLETION)

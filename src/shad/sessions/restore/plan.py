@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from shad.config import Config, Project
+from shad.config import Project, ProjectTable
 from shad.harness import Harnesses
 from shad.sessions.live import Running
 from shad.sessions.model import Entry, Snapshot
@@ -50,7 +50,7 @@ class Step:
 
 
 def plan(
-    cfg: Config,
+    projects: ProjectTable,
     snapshot: Snapshot,
     running: Sequence[Running],
     tmux: Tmux,
@@ -66,17 +66,17 @@ def plan(
                 would use, exists; it is left alone
       skipped   nothing can be created; the reason says why
     """
-    return [_step(cfg, entry, running, tmux, harnesses) for entry in snapshot.entries]
+    return [_step(projects, entry, running, tmux, harnesses) for entry in snapshot.entries]
 
 
 def _step(
-    cfg: Config,
+    projects: ProjectTable,
     entry: Entry,
     running: Sequence[Running],
     tmux: Tmux,
     harnesses: Harnesses,
 ) -> Step:
-    project = _find_project(cfg, entry)
+    project = projects.find(entry.group, entry.key)
     if project is None:
         return Step(entry, "skipped", reason="project is no longer configured")
     support = harnesses.for_harness(entry.harness)
@@ -133,12 +133,6 @@ def _holding(running: Sequence[Running], entry: Entry) -> Running | None:
         ):
             return live
     return None
-
-
-def _find_project(cfg: Config, entry: Entry) -> Project | None:
-    if entry.group is None:
-        return cfg.projects.get(entry.key)
-    return cfg.groups.get(entry.group, {}).get(entry.key)
 
 
 def attach_target(steps: list[Step]) -> str | None:

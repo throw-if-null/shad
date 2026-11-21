@@ -79,3 +79,16 @@ class ShowTests(SessionsCase):
         self.assertRegex(result.err, r"^no_snapshot: .+\n$")
         self.assertIn("no saved sessions", result.err)
         self.assertIn("shad sessions save", result.err)
+
+    def test_show_reads_the_snapshot_when_the_config_does_not_load(self) -> None:
+        """
+        Criterion:  show-does-not-need-the-config
+          Given:    the snapshot holds kb, and shad.toml is not valid TOML.
+          When:     `shad sessions show`.
+          Then:     exit 0, stderr empty, stdout names kb.
+        """
+        self.write_snapshot(entry("kb", UUID_A))
+        self.write_config("[defaults\n")
+        result = self.run_shad("sessions", "show")
+        self.assertEqual((result.code, result.err), (0, ""), result.out)
+        self.assertIn("kb", result.out)

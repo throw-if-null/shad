@@ -9,9 +9,8 @@ from pathlib import Path
 from rich.text import Text
 
 from shad import parsers
-from shad.config import Config, Project, raw
+from shad.config import Config, Project, load, raw
 from shad.config.render import display
-from shad.deps import Deps
 from shad.errors import ShadError
 from shad.output import Output
 from shad.style import make_table
@@ -81,15 +80,16 @@ def register(sub: parsers.Subparsers) -> None:
     )
 
 
-def run(args: argparse.Namespace, deps: Deps) -> ConfigView | ConfigText:
-    path = deps.config_file
+def run(args: argparse.Namespace, *, config_file: Path, data_dir: Path) -> ConfigView | ConfigText:
+    path = config_file
     if getattr(args, "raw", False):
         if getattr(args, "json", False):
             raise ShadError.usage("no_json", "--raw prints the file itself; it has no --json form")
         return ConfigText(path=str(path), text=_read_text(path))
 
     parsed = raw.parse(_read_text(path))
-    cfg = deps.config
+    # Loaded here, not declared: --raw prints a file that does not load.
+    cfg = load(path, data_dir=data_dir)
     configured = parsed.get("defaults", {})
     if not isinstance(configured, dict):
         configured = {}

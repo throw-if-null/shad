@@ -15,7 +15,7 @@ from shad.config import Config, Defaults, Project
 from shad.errors import ShadError
 from shad.projects.command import run
 from shad.projects.list.command import ProjectList
-from shad.testing import deps
+from shad.testing import supplied
 
 
 def _make_project(key: str, group: str | None = None, session: str | None = None) -> Project:
@@ -42,7 +42,7 @@ class ResolutionTests(unittest.TestCase):
             patch("shad.projects.command.print_banner"),
             patch("shad.projects.command.open_project", return_value=0) as open_project,
         ):
-            code = run(_args(["tin", "shad"]), deps(cfg))
+            code = run(_args(["tin", "shad"]), **supplied(run, cfg))
         self.assertEqual(code, 0)
         open_project.assert_called_once_with(project, cfg.defaults, ANY, ANY, harness=None, resume=None, pick=False)
 
@@ -53,7 +53,7 @@ class ResolutionTests(unittest.TestCase):
             patch("shad.projects.command.print_banner"),
             patch("shad.projects.command.open_project", return_value=0) as open_project,
         ):
-            code = run(_args(["shad"]), deps(cfg))
+            code = run(_args(["shad"]), **supplied(run, cfg))
         self.assertEqual(code, 0)
         open_project.assert_called_once_with(project, cfg.defaults, ANY, ANY, harness=None, resume=None, pick=False)
 
@@ -63,7 +63,7 @@ class ResolutionTests(unittest.TestCase):
             projects={"myapp": _make_project("myapp")},
             groups={"tin": {"shad": _make_project("shad", group="tin")}},
         )
-        result = run(_args([]), deps(cfg))
+        result = run(_args([]), **supplied(run, cfg))
         self.assertIsInstance(result, ProjectList)
         assert isinstance(result, ProjectList)
         self.assertIsNone(result.group)
@@ -74,14 +74,14 @@ class ResolutionTests(unittest.TestCase):
             defaults=Defaults(),
             groups={"tin": {"shad": _make_project("shad", group="tin")}},
         )
-        result = run(_args(["tin"]), deps(cfg))
+        result = run(_args(["tin"]), **supplied(run, cfg))
         assert isinstance(result, ProjectList)
         self.assertEqual(result.group, "tin")
         self.assertEqual([p.key for p in result.projects], ["shad"])
 
     def test_an_unknown_name_is_not_found(self) -> None:
         with self.assertRaises(ShadError) as ctx:
-            run(_args(["xyz"]), deps(Config(defaults=Defaults())))
+            run(_args(["xyz"]), **supplied(run, Config(defaults=Defaults())))
         self.assertEqual(ctx.exception.code, "no_such_project")
         self.assertIn("xyz", str(ctx.exception))
 
@@ -91,7 +91,7 @@ class ResolutionTests(unittest.TestCase):
             projects={"shad": _make_project("shad"), "shell": _make_project("shell")},
         )
         with self.assertRaises(ShadError) as ctx:
-            run(_args(["sh"]), deps(cfg))
+            run(_args(["sh"]), **supplied(run, cfg))
         self.assertIn("ambiguous", str(ctx.exception))
 
     def test_an_action_on_a_group_is_a_usage_error(self) -> None:
@@ -100,32 +100,32 @@ class ResolutionTests(unittest.TestCase):
             groups={"tin": {"shad": _make_project("shad", group="tin")}},
         )
         with self.assertRaises(ShadError) as ctx:
-            run(_args(["tin", "status"]), deps(cfg))
+            run(_args(["tin", "status"]), **supplied(run, cfg))
         self.assertEqual(ctx.exception.code, "group_needs_project")
 
     def test_an_action_without_a_project_is_a_usage_error(self) -> None:
         with self.assertRaises(ShadError) as ctx:
-            run(_args(["status"]), deps(Config(defaults=Defaults())))
+            run(_args(["status"]), **supplied(run, Config(defaults=Defaults())))
         self.assertEqual(ctx.exception.code, "no_project")
 
     def test_status_reads_the_project(self) -> None:
         project = _make_project("shad", group="tin")
         cfg = Config(defaults=Defaults(), groups={"tin": {"shad": project}})
         with patch("shad.projects.command.status") as status:
-            run(_args(["tin", "shad", "status"]), deps(cfg))
+            run(_args(["tin", "shad", "status"]), **supplied(run, cfg))
         status.assert_called_once()
         self.assertIs(status.call_args.args[0], project)
 
     def test_a_project_name_in_the_group_position_points_at_the_project(self) -> None:
         cfg = Config(defaults=Defaults(), projects={"shad": _make_project("shad")})
         with self.assertRaises(ShadError) as ctx:
-            run(_args(["shad", "something"]), deps(cfg))
+            run(_args(["shad", "something"]), **supplied(run, cfg))
         self.assertEqual(ctx.exception.code, "no_such_group")
         self.assertIn("did you mean", str(ctx.exception))
 
     def test_an_unknown_group_is_not_found(self) -> None:
         with self.assertRaises(ShadError) as ctx:
-            run(_args(["xyz", "proj"]), deps(Config(defaults=Defaults())))
+            run(_args(["xyz", "proj"]), **supplied(run, Config(defaults=Defaults())))
         self.assertIn("no group matching", str(ctx.exception))
 
     def test_an_unknown_project_within_a_group_is_not_found(self) -> None:
@@ -134,13 +134,13 @@ class ResolutionTests(unittest.TestCase):
             groups={"tin": {"shad": _make_project("shad", group="tin")}},
         )
         with self.assertRaises(ShadError) as ctx:
-            run(_args(["tin", "zzz"]), deps(cfg))
+            run(_args(["tin", "zzz"]), **supplied(run, cfg))
         self.assertIn("no project matching", str(ctx.exception))
         self.assertIn("tin", str(ctx.exception))
 
     def test_too_many_names_is_a_usage_error(self) -> None:
         with self.assertRaises(ShadError) as ctx:
-            run(_args(["a", "b", "c"]), deps(Config(defaults=Defaults())))
+            run(_args(["a", "b", "c"]), **supplied(run, Config(defaults=Defaults())))
         self.assertEqual(ctx.exception.code, "too_many_arguments")
 
     def test_a_cancelled_open_returns_none(self) -> None:
@@ -150,7 +150,7 @@ class ResolutionTests(unittest.TestCase):
             patch("shad.projects.command.print_banner"),
             patch("shad.projects.command.open_project", return_value=None),
         ):
-            self.assertIsNone(run(_args(["shad"]), deps(cfg)))
+            self.assertIsNone(run(_args(["shad"]), **supplied(run, cfg)))
 
     def test_the_attach_exit_code_is_returned(self) -> None:
         project = _make_project("shad")
@@ -159,7 +159,7 @@ class ResolutionTests(unittest.TestCase):
             patch("shad.projects.command.print_banner"),
             patch("shad.projects.command.open_project", return_value=3),
         ):
-            self.assertEqual(run(_args(["shad"]), deps(cfg)), 3)
+            self.assertEqual(run(_args(["shad"]), **supplied(run, cfg)), 3)
 
     def test_json_on_an_open_is_refused_before_the_banner(self) -> None:
         project = _make_project("shad")
@@ -169,7 +169,7 @@ class ResolutionTests(unittest.TestCase):
             patch("shad.projects.command.open_project") as open_project,
             self.assertRaises(ShadError) as ctx,
         ):
-            run(_args(["shad"], json=True), deps(cfg))
+            run(_args(["shad"], json=True), **supplied(run, cfg))
         self.assertEqual(ctx.exception.code, "no_json")
         banner.assert_not_called()
         open_project.assert_not_called()
@@ -183,7 +183,7 @@ class HarnessOverrideTests(unittest.TestCase):
             patch("shad.projects.command.print_banner"),
             patch("shad.projects.command.open_project", return_value=0) as open_project,
         ):
-            run(_args(["shad"], harness="claude"), deps(cfg))
+            run(_args(["shad"], harness="claude"), **supplied(run, cfg))
         open_project.assert_called_once_with(project, cfg.defaults, ANY, ANY, harness="claude", resume=None, pick=False)
 
     def test_the_override_reaches_a_grouped_open(self) -> None:
@@ -193,7 +193,7 @@ class HarnessOverrideTests(unittest.TestCase):
             patch("shad.projects.command.print_banner"),
             patch("shad.projects.command.open_project", return_value=0) as open_project,
         ):
-            run(_args(["tin", "shad"], harness="opencode"), deps(cfg))
+            run(_args(["tin", "shad"], harness="opencode"), **supplied(run, cfg))
         open_project.assert_called_once_with(project, cfg.defaults, ANY, ANY, harness="opencode", resume=None, pick=False)
 
     def test_status_ignores_the_override(self) -> None:
@@ -203,7 +203,7 @@ class HarnessOverrideTests(unittest.TestCase):
             patch("shad.projects.command.status") as status,
             patch("shad.projects.command.open_project") as open_project,
         ):
-            run(_args(["shad", "status"], harness="claude"), deps(cfg))
+            run(_args(["shad", "status"], harness="claude"), **supplied(run, cfg))
         status.assert_called_once()
         self.assertIs(status.call_args.args[0], project)
         open_project.assert_not_called()

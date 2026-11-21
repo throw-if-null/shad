@@ -9,7 +9,6 @@ from pathlib import Path
 from rich.text import Text
 
 from shad import parsers
-from shad.deps import Deps
 from shad.errors import ShadError
 from shad.output import Output
 from shad.sessions import render, store
@@ -27,8 +26,8 @@ def register(sub: parsers.Subparsers) -> None:
     parsers.command(sub, "show", run=run, render=render_saved, help="Print the saved sessions")
 
 
-def run(args: argparse.Namespace, deps: Deps) -> SavedSessions:
-    snapshot = parse(_read(store.snapshot_path(deps.config)))
+def run(args: argparse.Namespace, *, data_dir: Path) -> SavedSessions:
+    snapshot = parse(_read(store.snapshot_path(data_dir)))
     return SavedSessions(saved_at=snapshot.saved_at, sessions=snapshot.entries)
 
 

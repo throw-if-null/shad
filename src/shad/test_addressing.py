@@ -58,35 +58,35 @@ class ResolvePrefixTests(unittest.TestCase):
 
 class ResolveTargetTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.cfg = _config()
+        self.projects = _config().project_table
 
     def test_no_tokens_returns_every_project(self) -> None:
-        target = resolve_target(self.cfg, [])
+        target = resolve_target(self.projects, [])
         self.assertEqual(len(target.projects), 5)
 
     def test_one_token_resolves_a_top_level_project(self) -> None:
-        target = resolve_target(self.cfg, ["kb"])
+        target = resolve_target(self.projects, ["kb"])
         self.assertEqual([p.key for p in target.projects], ["kb"])
 
     def test_one_token_prefix_resolves_a_top_level_project(self) -> None:
-        target = resolve_target(self.cfg, ["or"])
+        target = resolve_target(self.projects, ["or"])
         self.assertEqual([p.key for p in target.projects], ["orfe"])
 
     def test_one_token_group_expands_to_every_member_sorted(self) -> None:
-        target = resolve_target(self.cfg, ["tin"])
+        target = resolve_target(self.projects, ["tin"])
         self.assertEqual([p.key for p in target.projects], ["coral", "shad"])
 
     def test_two_tokens_resolve_one_grouped_project(self) -> None:
-        target = resolve_target(self.cfg, ["tin", "shad"])
+        target = resolve_target(self.projects, ["tin", "shad"])
         self.assertEqual([p.display_name for p in target.projects], ["tin shad"])
 
     def test_two_tokens_use_prefix_matching_at_each_level(self) -> None:
-        target = resolve_target(self.cfg, ["ti", "sh"])
+        target = resolve_target(self.projects, ["ti", "sh"])
         self.assertEqual([p.display_name for p in target.projects], ["tin shad"])
 
     def test_unknown_single_token_raises(self) -> None:
         with self.assertRaises(ShadError) as ctx:
-            resolve_target(self.cfg, ["nope"])
+            resolve_target(self.projects, ["nope"])
         self.assertIn("no project or group matching 'nope'", str(ctx.exception))
 
     def test_ambiguous_single_token_raises(self) -> None:
@@ -95,29 +95,29 @@ class ResolveTargetTests(unittest.TestCase):
             projects={"shad": _project("shad"), "shell": _project("shell")},
         )
         with self.assertRaises(ShadError) as ctx:
-            resolve_target(cfg, ["sh"])
+            resolve_target(cfg.project_table, ["sh"])
         self.assertIn("ambiguous", str(ctx.exception))
 
     def test_unknown_group_raises(self) -> None:
         with self.assertRaises(ShadError) as ctx:
-            resolve_target(self.cfg, ["zzz", "shad"])
+            resolve_target(self.projects, ["zzz", "shad"])
         self.assertIn("no group matching 'zzz'", str(ctx.exception))
 
     def test_unknown_project_in_group_lists_available(self) -> None:
         with self.assertRaises(ShadError) as ctx:
-            resolve_target(self.cfg, ["tin", "zzz"])
+            resolve_target(self.projects, ["tin", "zzz"])
         message = str(ctx.exception)
         self.assertIn("no project matching 'zzz' in group 'tin'", message)
         self.assertIn("coral, shad", message)
 
     def test_top_level_project_used_as_a_group_hint_uses_the_usage_string(self) -> None:
         with self.assertRaises(ShadError) as ctx:
-            resolve_target(self.cfg, ["kb", "shad"], usage="shad git sync")
+            resolve_target(self.projects, ["kb", "shad"], usage="shad git sync")
         self.assertIn("did you mean: shad git sync kb?", str(ctx.exception))
 
     def test_too_many_tokens_uses_the_usage_string(self) -> None:
         with self.assertRaises(ShadError) as ctx:
-            resolve_target(self.cfg, ["a", "b", "c"], usage="shad git sync")
+            resolve_target(self.projects, ["a", "b", "c"], usage="shad git sync")
         message = str(ctx.exception)
         self.assertIn("too many arguments (3)", message)
         self.assertIn("shad git sync [<group>] [<name>]", message)

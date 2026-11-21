@@ -6,6 +6,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from typing import Any
 from unittest.mock import Mock, patch
 
 from shad.config import Config, Defaults, Project
@@ -23,7 +24,7 @@ from shad.sessions.testing import (
     entry,
     running,
 )
-from shad.testing import deps
+from shad.testing import supplied
 from shad.tmux import Tmux
 
 DOC = Project(key="doc", group=None, path=Path("/p/doc"), session="doc", harness="claude")
@@ -224,8 +225,8 @@ class KittyTabTests(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
 
-    def _deps(self, cfg: Config = CFG):
-        return deps(cfg, out=self.out, tmux=self.tmux)
+    def _supplied(self, cfg: Config = CFG) -> dict[str, Any]:
+        return supplied(restore, cfg, out=self.out, tmux=self.tmux)
 
     def _args(self, *, no_attach: bool = False) -> argparse.Namespace:
         return argparse.Namespace(sessions_action="restore", no_attach=no_attach)
@@ -238,7 +239,7 @@ class KittyTabTests(unittest.TestCase):
             _entry("kb", UUID_A, attached=True), _entry("shad", UUID_B, group="tin", attached=True)
         )
         with patch("shad.sessions.restore.terminal.open_tab", return_value=None) as open_tab:
-            restore(self._args(), self._deps())
+            restore(self._args(), **self._supplied())
 
         open_tab.assert_called_once_with(
             "kitty",
@@ -250,7 +251,7 @@ class KittyTabTests(unittest.TestCase):
     def test_no_tab_for_a_session_detached_at_save(self) -> None:
         self._write_snapshot(_entry("kb", UUID_A, attached=True), _entry("shad", UUID_B, group="tin"))
         with patch("shad.sessions.restore.terminal.open_tab") as open_tab:
-            restore(self._args(), self._deps())
+            restore(self._args(), **self._supplied())
 
         open_tab.assert_not_called()
 
@@ -264,7 +265,7 @@ class KittyTabTests(unittest.TestCase):
             patch("shad.sessions.live.collect", return_value=[live]),
             patch("shad.sessions.restore.terminal.open_tab") as open_tab,
         ):
-            restore(self._args(), self._deps())
+            restore(self._args(), **self._supplied())
 
         open_tab.assert_not_called()
 
@@ -273,7 +274,7 @@ class KittyTabTests(unittest.TestCase):
             _entry("kb", UUID_A, attached=True), _entry("shad", UUID_B, group="tin", attached=True)
         )
         with patch("shad.sessions.restore.terminal.open_tab") as open_tab:
-            restore(self._args(no_attach=True), self._deps())
+            restore(self._args(no_attach=True), **self._supplied())
 
         open_tab.assert_not_called()
 
@@ -285,7 +286,7 @@ class KittyTabTests(unittest.TestCase):
             _entry("doc", UUID_C, attached=True),
         )
         with patch("shad.sessions.restore.terminal.open_tab", return_value="kitty said no") as open_tab:
-            restore(self._args(), self._deps(cfg))
+            restore(self._args(), **self._supplied(cfg))
 
         open_tab.assert_called_once()
         output = self.output.getvalue()

@@ -2,14 +2,14 @@
 How a name on the command line finds what it names: exact match first,
 then a unique prefix, for projects, groups and todo keys alike.
 
-Pure functions over the loaded configuration; shared-and-safe.
+Pure functions over the project table and the todo keys; shared-and-safe.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from shad.config import Config, Project, all_projects
+from shad.config import Project, ProjectTable
 from shad.errors import ShadError
 
 
@@ -41,7 +41,7 @@ class Target:
 
 
 def resolve_target(
-    cfg: Config, tokens: list[str], *, usage: str = "shad projects"
+    projects: ProjectTable, tokens: list[str], *, usage: str = "shad projects"
 ) -> Target:
     """
     Resolve 0-2 CLI tokens to the projects they name.
@@ -54,25 +54,25 @@ def resolve_target(
     unknown, ambiguous, or when there are too many tokens.
     """
     if not tokens:
-        return Target(projects=all_projects(cfg))
+        return Target(projects=projects.all())
 
     if len(tokens) == 1:
         token = tokens[0]
-        match = resolve_prefix(list(cfg.projects) + list(cfg.groups), token)
+        match = resolve_prefix(list(projects.top) + list(projects.groups), token)
         if match is None:
             raise ShadError.not_found("no_such_project", f"no project or group matching '{token}'")
-        if match in cfg.projects:
-            return Target(projects=[cfg.projects[match]])
-        group = cfg.groups[match]
+        if match in projects.top:
+            return Target(projects=[projects.top[match]])
+        group = projects.groups[match]
         return Target(projects=[group[key] for key in sorted(group)])
 
     if len(tokens) == 2:
         group_token, proj_token = tokens
 
-        group_match = resolve_prefix(list(cfg.groups), group_token)
+        group_match = resolve_prefix(list(projects.groups), group_token)
         if group_match is None:
-            if group_token in cfg.projects or any(
-                k.startswith(group_token) for k in cfg.projects
+            if group_token in projects.top or any(
+                k.startswith(group_token) for k in projects.top
             ):
                 raise ShadError.not_found(
                     "no_such_group",
@@ -81,7 +81,7 @@ def resolve_target(
                 )
             raise ShadError.not_found("no_such_group", f"no group matching '{group_token}'")
 
-        group_projects = cfg.groups[group_match]
+        group_projects = projects.groups[group_match]
         proj_match = resolve_prefix(list(group_projects), proj_token)
         if proj_match is None:
             raise ShadError.not_found(

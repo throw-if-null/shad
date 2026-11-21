@@ -9,7 +9,7 @@ from __future__ import annotations
 import argparse
 
 from shad import parsers
-from shad.deps import Deps
+from shad.output import Output
 
 
 def register(sub: parsers.Subparsers) -> None:
@@ -21,6 +21,6 @@ def register(sub: parsers.Subparsers) -> None:
     )
 
 
-def run(args: argparse.Namespace, deps: Deps) -> None:
-    for label in deps.config.todo_labels:
-        deps.out.plain(label)
+def run(args: argparse.Namespace, *, out: Output, todo_labels: list[str]) -> None:
+    for label in todo_labels:
+        out.plain(label)

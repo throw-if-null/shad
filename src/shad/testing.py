@@ -28,18 +28,18 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import TypeVar
+from typing import Any, TypeVar
 from unittest.mock import patch
 
 import shad
 from shad.cli import main
 from shad.config import Config
-from shad.deps import Deps
 from shad.editor import Editor
 from shad.harness import Harnesses
 from shad.output import Output
 from shad.tmux import Tmux
 from shad.trace import Trace
+from shad.wiring import Supply, arguments
 
 # The directory `import shad` resolved to. A shad subprocess gets it as
 # PYTHONPATH so it runs the code under test: an editable install of another
@@ -89,7 +89,8 @@ def run(argv: Sequence[str], *, env: Mapping[str, str | None] | None = None) -> 
     return Result(code, out.getvalue(), err.getvalue())
 
 
-def deps(
+def supplied(
+    run: Callable[..., object],
     cfg: Config,
     *,
     out: Output | None = None,
@@ -97,23 +98,29 @@ def deps(
     editor: Editor | None = None,
     harnesses: Harnesses | None = None,
     config_file: Path | None = None,
-) -> Deps:
+) -> dict[str, Any]:
     """
-    The Deps a unit test hands a slice's `run` directly: *cfg* stands in for
-    the file, *out* captures nothing unless given, and *tmux* is the user's
-    unless a fake is given. `[TEST-3]`.
+    The arguments the root hands *run*, for a unit test that calls it
+    directly: *cfg* stands in for the file, so nothing is read, *out*
+    captures nothing unless given, and *tmux* is the user's unless a fake is
+    given. `[TEST-3]`.
     """
-    result = Deps(
+    supply = Supply(
         out=out or Output(stdout=io.StringIO(), stderr=io.StringIO()),
         trace=Trace(),
-        tmux=tmux or Tmux(os.environ),
-        editor=editor or Editor(None),
-        harnesses=harnesses or Harnesses.from_env(os.environ),
-        config_file=config_file or Path(os.devnull),
-        data_dir=cfg.data_dir,
+        config_arg=str(config_file or os.devnull),
+        environ=os.environ,
     )
-    result.__dict__["config"] = cfg  # seeds the cached_property, so no file is read
-    return result
+    # Seeds the cached properties, so the supply constructs none of these.
+    seeded = {
+        "config": cfg,
+        "data_dir": cfg.data_dir,
+        "tmux": tmux,
+        "editor": editor or Editor(None),
+        "harnesses": harnesses,
+    }
+    supply.__dict__.update({name: value for name, value in seeded.items() if value is not None})
+    return arguments(run, supply)
 
 
 def shad_argv(*args: str) -> list[str]:

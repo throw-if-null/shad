@@ -11,8 +11,8 @@ from pathlib import Path
 from rich.text import Text
 
 from shad import parsers
-from shad.deps import Deps
 from shad.editor import Editor
+from shad.output import Output
 from shad.todo import store
 from shad.todo.model import Item, problems
 
@@ -22,11 +22,17 @@ def register(sub: parsers.Subparsers) -> None:
     parser.add_argument("key", metavar="KEY", help="Item key, or a unique prefix")
 
 
-def run(args: argparse.Namespace, deps: Deps) -> None:
-    cfg = deps.config
-    item = edit_in_editor(cfg.todo_dir, args.key, deps.editor)
-    for problem in problems(item, cfg.todo_labels):
-        deps.out.note(Text("  ! ", style="bold yellow") + Text(f"{item.key}: {problem}"))
+def run(
+    args: argparse.Namespace,
+    *,
+    out: Output,
+    editor: Editor,
+    todo_dir: Path,
+    todo_labels: list[str],
+) -> None:
+    item = edit_in_editor(todo_dir, args.key, editor)
+    for problem in problems(item, todo_labels):
+        out.note(Text("  ! ", style="bold yellow") + Text(f"{item.key}: {problem}"))
 
 
 def edit_in_editor(directory: Path, key: str, editor: Editor) -> Item:

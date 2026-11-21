@@ -17,14 +17,16 @@ from pathlib import Path
 from rich.text import Text
 
 from shad import parsers
-from shad.deps import Deps
+from shad.config import Defaults, ProjectTable
 from shad.errors import ShadError
+from shad.harness import Harnesses
 from shad.layout import create_session
 from shad.output import Output
 from shad.sessions import live, render, store
 from shad.sessions.model import parse
 from shad.sessions.restore import plan, terminal
 from shad.tmux import Tmux
+from shad.trace import Trace
 
 
 def register(sub: parsers.Subparsers) -> None:
@@ -41,26 +43,34 @@ def register(sub: parsers.Subparsers) -> None:
     )
 
 
-def run(args: argparse.Namespace, deps: Deps) -> int | None:
+def run(
+    args: argparse.Namespace,
+    *,
+    out: Output,
+    trace: Trace,
+    tmux: Tmux,
+    harnesses: Harnesses,
+    defaults: Defaults,
+    projects: ProjectTable,
+    data_dir: Path,
+) -> int | None:
     """Returns the tmux exit code when a session was attached, else None."""
-    cfg = deps.config
-    out = deps.out
-    tmux = deps.tmux
-    harnesses = deps.harnesses
-    snapshot = parse(_read(store.snapshot_path(cfg)))
-    steps = plan.plan(cfg, snapshot, live.collect(cfg, tmux, harnesses), tmux, harnesses)
+    snapshot = parse(_read(store.snapshot_path(data_dir)))
+    steps = plan.plan(
+        projects, snapshot, live.collect(projects, tmux, harnesses), tmux, harnesses
+    )
     failures: list[str] = []
     for step in steps:
         creation = step.creation
         if creation is None:
             continue
         try:
-            create_session(tmux, creation.project, cfg.defaults, creation.command, creation.session)
+            create_session(tmux, creation.project, defaults, creation.command, creation.session)
         except ShadError as exc:
             # One session that cannot be created must not abort the rest
             # ([ERR-4]); it is reported and the run exits 1.
             failures.append(f"{step.entry.display_name}: {exc.message}")
-            deps.trace.exception(exc)
+            trace.exception(exc)
 
     out.print(
         render.table("restored", [(step.entry, _outcome(step)) for step in steps], out.width)

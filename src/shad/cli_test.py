@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from shad.cheat import command as cheat
 from shad.cli import build_parser, main
-from shad.config import Config, Defaults
+from shad.config import Config, Defaults, Project
 from shad.config.show import command as config_show
 from shad.errors import ShadError
 from shad.git.panel import command as git_panel
@@ -180,14 +181,14 @@ class MainErrorHandlingTests(unittest.TestCase):
     """
 
     def test_an_undeclared_exception_is_internal(self) -> None:
-        with patch("shad.deps.load", side_effect=RuntimeError("boom")):
+        with patch("shad.wiring.load", side_effect=RuntimeError("boom")):
             result = run(["projects"])
         self.assertEqual((result.code, result.out), (1, ""), result.err)
         self.assertEqual(result.err, "unexpected: RuntimeError: boom\n")
 
     def test_the_error_line_carries_the_code_and_the_debug_traceback(self) -> None:
         boom = ShadError.conflict("todo_exists", "todo 'x' already exists")
-        with patch("shad.deps.load", side_effect=boom):
+        with patch("shad.wiring.load", side_effect=boom):
             plain = run(["projects"])
             debug = run(["--debug", "projects"])
         self.assertEqual((plain.code, plain.err), (1, "todo_exists: todo 'x' already exists\n"))
@@ -197,21 +198,21 @@ class MainErrorHandlingTests(unittest.TestCase):
 
     def test_shad_error_exits_1(self) -> None:
         with (
-            patch("shad.deps.load", side_effect=ShadError.internal("boom", "boom")),
+            patch("shad.wiring.load", side_effect=ShadError.internal("boom", "boom")),
             patch("sys.stderr"),
         ):
             self.assertEqual(main(["projects"]), 1)
 
     def test_keyboard_interrupt_exits_130(self) -> None:
         with (
-            patch("shad.deps.load", side_effect=KeyboardInterrupt()),
+            patch("shad.wiring.load", side_effect=KeyboardInterrupt()),
             patch("sys.stderr"),
         ):
             self.assertEqual(main(["projects"]), 130)
 
     def test_eof_error_exits_130(self) -> None:
         with (
-            patch("shad.deps.load", side_effect=EOFError()),
+            patch("shad.wiring.load", side_effect=EOFError()),
             patch("sys.stderr"),
         ):
             self.assertEqual(main(["projects"]), 130)
@@ -268,16 +269,16 @@ class GitCliTests(unittest.TestCase):
         self.assertEqual(args.command, "git")
         self.assertIsNone(args.git_action)
 
-    def test_main_hands_sync_the_loaded_config(self) -> None:
-        cfg = Config(defaults=Defaults())
+    def test_main_hands_sync_the_projects_of_the_loaded_config(self) -> None:
+        cfg = Config(defaults=Defaults(), projects={"kb": Project("kb", None, Path("/kb"), "kb")})
         with (
-            patch("shad.deps.load", return_value=cfg) as load,
+            patch("shad.wiring.load", return_value=cfg) as load,
             patch("shad.git.sync.command.run", autospec=True, return_value=None) as run_sync,
         ):
             self.assertEqual(main(["git", "sync"]), 0)
             run_sync.assert_called_once()
-            # The config loads on first use, through the Deps the root supplied.
-            self.assertIs(run_sync.call_args.kwargs["deps"].config, cfg)
+            self.assertEqual(run_sync.call_args.kwargs["projects"], cfg.project_table)
+            self.assertNotIn("config", run_sync.call_args.kwargs)
             load.assert_called_once()
 
     def test_git_errors_exit_one(self) -> None:

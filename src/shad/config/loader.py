@@ -223,6 +223,36 @@ class Config:
         """Where the todo files are: [todo] path, else <data dir>/todo."""
         return self.todo_path if self.todo_path is not None else self.data_dir / "todo"
 
+    @property
+    def project_table(self) -> ProjectTable:
+        return ProjectTable(top=self.projects, groups=self.groups)
+
+
+@dataclass(frozen=True)
+class ProjectTable:
+    """
+    The configured projects and nothing else of the config: what a command
+    that names, lists or finds projects receives.
+    """
+
+    # top-level projects keyed by their key
+    top: dict[str, Project] = field(default_factory=dict)
+    # groups[group_name][project_key] = Project
+    groups: dict[str, dict[str, Project]] = field(default_factory=dict)
+
+    def all(self) -> list[Project]:
+        """Every project: top-level by key, then grouped by group then key."""
+        result = [self.top[key] for key in sorted(self.top)]
+        for group in sorted(self.groups):
+            result.extend(self.groups[group][key] for key in sorted(self.groups[group]))
+        return result
+
+    def find(self, group: str | None, key: str) -> Project | None:
+        """The project *key*, top-level when *group* is None; None when there is none."""
+        if group is None:
+            return self.top.get(key)
+        return self.groups.get(group, {}).get(key)
+
 
 def _parse_project(
     key: str, data: dict, group: str | None = None, default_harness: str = "opencode"
@@ -377,7 +407,7 @@ def _reject_duplicate_paths(cfg: Config) -> None:
     case by deduplicating on --git-common-dir, not by rejecting the config.
     """
     seen: dict[Path, str] = {}
-    for project in all_projects(cfg):
+    for project in cfg.project_table.all():
         resolved = project.path.expanduser().resolve()
         first = seen.get(resolved)
         if first is not None:
@@ -387,11 +417,3 @@ def _reject_duplicate_paths(cfg: Config) -> None:
                 f"two projects must not name the same directory"
             )
         seen[resolved] = project.display_name
-
-
-def all_projects(cfg: Config) -> list[Project]:
-    """Every configured project: top-level by key, then grouped by group then key."""
-    result = [cfg.projects[key] for key in sorted(cfg.projects)]
-    for group in sorted(cfg.groups):
-        result.extend(cfg.groups[group][key] for key in sorted(cfg.groups[group]))
-    return result

@@ -31,8 +31,7 @@ from rich.text import Text
 
 from shad import parsers
 from shad.addressing import resolve_target
-from shad.config import Project
-from shad.deps import Deps
+from shad.config import Project, ProjectTable
 from shad.errors import ShadError
 from shad.git import apply, discover, refs
 from shad.git.model import ProjectOutcome, ProjectPlan, Repo, SyncRun
@@ -578,14 +577,16 @@ def register(sub: parsers.Subparsers) -> None:
     )
 
 
-def run(args: argparse.Namespace, deps: Deps) -> None:
-    target = resolve_target(deps.config, list(args.name), usage="shad git sync")
+def run(
+    args: argparse.Namespace, *, out: Output, trace: Trace, projects: ProjectTable
+) -> None:
+    target = resolve_target(projects, list(args.name), usage="shad git sync")
     outcome = sync_projects(
         target.projects,
-        deps.out,
+        out,
         yes=getattr(args, "yes", False),
         dry_run=getattr(args, "dry_run", False),
         switch=getattr(args, "switch", False),
-        trace=deps.trace,
+        trace=trace,
     )
     raise_for_failures(outcome)

@@ -15,7 +15,6 @@ from pathlib import Path
 from rich.text import Text
 
 from shad import parsers
-from shad.deps import Deps
 from shad.editor import Editor
 from shad.errors import ShadError
 from shad.output import Output
@@ -39,15 +38,21 @@ def register(sub: parsers.Subparsers) -> None:
     )
 
 
-def run(args: argparse.Namespace, deps: Deps) -> None:
-    cfg = deps.config
-    directory = cfg.todo_dir
+def run(
+    args: argparse.Namespace,
+    *,
+    out: Output,
+    editor: Editor,
+    todo_dir: Path,
+    todo_labels: list[str],
+) -> None:
+    directory = todo_dir
     labels = list(args.label or [])
     if args.title is None:
-        item = add_in_editor(directory, labels, cfg.todo_labels, deps.out, deps.editor)
+        item = add_in_editor(directory, labels, todo_labels, out, editor)
     else:
-        item = store.add(directory, args.title, labels, cfg.todo_labels)
-    deps.out.print(
+        item = store.add(directory, args.title, labels, todo_labels)
+    out.print(
         Text("  ✓ ", style="bold green")
         + Text(item.key, style="bright_white")
         + Text(f"  {store.item_path(directory, item.key)}", style="dim")

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from rich.text import Text
 
-from shad.config import Config, Project
+from shad.config import Project, ProjectTable
 from shad.output import Output
 
 
@@ -16,16 +16,12 @@ class ProjectList:
     projects: tuple[Project, ...]
 
 
-def list_projects(cfg: Config, group: str | None = None) -> ProjectList:
+def list_projects(projects: ProjectTable, group: str | None = None) -> ProjectList:
     """Every project, top-level first then by group, or the projects of *group*."""
     if group is not None:
-        members = cfg.groups[group]
+        members = projects.groups[group]
         return ProjectList(group=group, projects=tuple(members[key] for key in sorted(members)))
-    top = [cfg.projects[key] for key in sorted(cfg.projects)]
-    grouped = [
-        cfg.groups[name][key] for name in sorted(cfg.groups) for key in sorted(cfg.groups[name])
-    ]
-    return ProjectList(group=None, projects=tuple(top + grouped))
+    return ProjectList(group=None, projects=tuple(projects.all()))
 
 
 def render(result: ProjectList, out: Output) -> None:
