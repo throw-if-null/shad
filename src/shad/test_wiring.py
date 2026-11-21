@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import inspect
 import io
 import os
 import unittest
@@ -8,7 +9,7 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, get_type_hints
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from shad.cli import build_parser
 from shad.errors import ShadError
@@ -40,15 +41,18 @@ def _runs(
 
 def _mismatches(run: Callable[..., Any]) -> list[str]:
     """
-    Each name *run* declares whose annotation the provider's type does not
-    satisfy: the same type, or a subclass of the annotated class. A missing
-    annotation is a mismatch, because nothing then verifies the binding.
+    Each parameter of *run* whose annotation its value does not satisfy: the
+    first must be `argparse.Namespace`, the root's parsed arguments, and each
+    later one the provider's type or a superclass of it.
     """
     hints = get_type_hints(run)
+    first = next(iter(inspect.signature(run).parameters))
     found = []
+    if hints.get(first) is not argparse.Namespace:
+        found.append(f"{first}: {hints.get(first)!r} is declared, argparse.Namespace is passed")
     for name in declared(run):
-        provided, wanted = PROVIDED.get(name), hints.get(name)
-        if provided is not None and provided == wanted:
+        provided, wanted = PROVIDED[name], hints.get(name)
+        if provided == wanted:
             continue
         if isinstance(provided, type) and isinstance(wanted, type) and issubclass(provided, wanted):
             continue
@@ -63,12 +67,12 @@ class RegisteredCommandTests(unittest.TestCase):
     the only supported configuration.
     """
 
-    def test_every_command_declares_only_provided_names(self) -> None:
+    def test_every_command_has_a_signature_the_root_can_call(self) -> None:
         runs = list(_runs(build_parser()))
         self.assertGreater(len(runs), 20)
         for path, run in runs:
             with self.subTest(command=" ".join(path)):
-                self.assertLessEqual(set(declared(run)), set(PROVIDED))
+                declared(run)
 
     def test_every_declared_dependency_has_the_type_its_provider_supplies(self) -> None:
         for path, run in _runs(build_parser()):
@@ -76,11 +80,71 @@ class RegisteredCommandTests(unittest.TestCase):
                 self.assertEqual(_mismatches(run), [])
 
     def test_a_declared_type_the_provider_does_not_supply_is_a_mismatch(self) -> None:
-        def run(args: argparse.Namespace, *, out: Output, tmux: Path, editor) -> None: ...  # type: ignore[no-untyped-def]
+        def run(args: str, *, out: Output, tmux: Path) -> None: ...
 
-        self.assertEqual(
-            [entry.split(":")[0] for entry in _mismatches(run)], ["tmux", "editor"]
-        )
+        self.assertEqual([entry.split(":")[0] for entry in _mismatches(run)], ["args", "tmux"])
+
+
+def _out_positional_only(args: argparse.Namespace, out: Output, /) -> None: ...
+
+
+def _out_positional(args: argparse.Namespace, out: Output) -> None: ...
+
+
+def _variadic_positional(args: argparse.Namespace, *rest: Output) -> None: ...
+
+
+def _variadic_keyword(args: argparse.Namespace, **deps: Output) -> None: ...
+
+
+def _variadic_only(*args: object, **kwargs: object) -> None: ...
+
+
+def _no_parameters() -> None: ...
+
+
+def _keyword_only_arguments(*, args: argparse.Namespace, out: Output) -> None: ...
+
+
+def _unannotated(args: argparse.Namespace, *, out) -> None: ...  # type: ignore[no-untyped-def]
+
+
+def _unknown(args: argparse.Namespace, *, out: Output, nope: object) -> None: ...
+
+
+class SignatureTests(unittest.TestCase):
+    """
+    A signature the root cannot call by name is `internal`/`unexpected`
+    before anything is constructed (`[DEPS-1]`). `[TEST-3]` unit tests.
+    """
+
+    def test_an_invalid_signature_is_rejected_and_names_the_problem(self) -> None:
+        cases: dict[Callable[..., Any], str] = {
+            _out_positional_only: "out is positional-only, not keyword-only",
+            _out_positional: "out is positional or keyword, not keyword-only",
+            _variadic_positional: "rest is variadic positional",
+            _variadic_keyword: "deps is variadic keyword",
+            _variadic_only: "no positional first parameter",
+            _no_parameters: "no positional first parameter",
+            _keyword_only_arguments: "no positional first parameter",
+            _unannotated: "out has no annotation",
+            _unknown: "nope is not provided by the root",
+        }
+        for run, problem in cases.items():
+            with self.subTest(run=run.__name__):
+                with (
+                    patch("shad.wiring.load") as load,
+                    patch("shad.wiring.Tmux") as tmux,
+                    self.assertRaises(ShadError) as raised,
+                ):
+                    arguments(run, _supply())
+                self.assertEqual(
+                    (raised.exception.category, raised.exception.code), ("internal", "unexpected")
+                )
+                self.assertIn(run.__qualname__, raised.exception.message)
+                self.assertIn(problem, raised.exception.message)
+                load.assert_not_called()
+                tmux.assert_not_called()
 
 
 class ProvidedTests(unittest.TestCase):
@@ -129,19 +193,6 @@ class ArgumentsTests(unittest.TestCase):
             with self.assertRaises(ShadError) as raised:
                 arguments(run, _supply(str(path)))
         self.assertEqual(raised.exception.category, "validation")
-
-    def test_an_unknown_name_is_internal_and_names_it(self) -> None:
-        def run(args: argparse.Namespace, *, out: Output, nope: object) -> None: ...
-
-        with self.assertRaises(ShadError) as raised:
-            arguments(run, _supply())
-        self.assertEqual(
-            (raised.exception.category, raised.exception.code), ("internal", "unexpected")
-        )
-        self.assertIn("nope", raised.exception.message)
-
-    def test_a_signature_with_only_variadic_parameters_receives_nothing(self) -> None:
-        self.assertEqual(arguments(MagicMock(), _supply()), {})
 
     def test_each_value_is_constructed_once_per_run(self) -> None:
         supply = _supply()

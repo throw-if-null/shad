@@ -127,24 +127,39 @@ PROVIDED = _provided()
 
 
 def declared(run: Callable[..., Any]) -> list[str]:
-    """The names *run* declares after its first parameter, the parsed arguments."""
-    parameters = list(inspect.signature(run).parameters.values())[1:]
-    variadic = (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
-    return [p.name for p in parameters if p.kind not in variadic]
+    """
+    The names *run* declares after its first parameter, the parsed arguments.
+
+    The root calls `run(args, **arguments(run, supply))`, so the first
+    parameter takes a positional argument, and every later parameter is
+    keyword-only, annotated, and named in `PROVIDED`. A positional or
+    variadic dependency parameter would accept a value the root never binds
+    by name, or none. Any other signature is `internal`/`unexpected`, raised
+    before anything is constructed. The types are compared with `PROVIDED`
+    by `test_wiring.py`, not here: resolving annotations costs every run and
+    adds nothing the test of every registered command does not establish.
+    """
+    parameters = list(inspect.signature(run).parameters.values())
+    positional = (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    problems = []
+    if not parameters or parameters[0].kind not in positional:
+        problems.append("no positional first parameter for the parsed arguments")
+    for p in parameters[1:]:
+        if p.kind is not inspect.Parameter.KEYWORD_ONLY:
+            problems.append(f"{p.name} is {p.kind.description}, not keyword-only")
+        elif p.annotation is inspect.Parameter.empty:
+            problems.append(f"{p.name} has no annotation")
+        elif p.name not in PROVIDED:
+            problems.append(f"{p.name} is not provided by the root")
+    if problems:
+        name = f"{run.__module__}.{run.__qualname__}"
+        raise ShadError.internal("unexpected", f"{name}: {'; '.join(problems)}")
+    return [p.name for p in parameters[1:]]
 
 
 def arguments(run: Callable[..., Any], supply: Supply) -> dict[str, object]:
     """
-    The keyword arguments *run* declares, constructed from *supply*. A name
-    outside `PROVIDED` is `internal`/`unexpected`, raised before anything is
-    constructed.
+    The keyword arguments *run* declares, constructed from *supply*. A
+    signature `declared` rejects raises before anything is constructed.
     """
-    names = declared(run)
-    unknown = [name for name in names if name not in PROVIDED]
-    if unknown:
-        raise ShadError.internal(
-            "unexpected",
-            f"{run.__module__}.{run.__qualname__} declares {', '.join(unknown)}, "
-            "which the root does not provide",
-        )
-    return {name: getattr(supply, name) for name in names}
+    return {name: getattr(supply, name) for name in declared(run)}
