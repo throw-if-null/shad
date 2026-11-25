@@ -13,25 +13,28 @@ A small CLI to attach or create project-specific tmux sessions from the current 
 
 ## Install
 
-### From GitHub (recommended for other machines)
+### From a release (recommended)
 
-Install directly from the GitHub repository — no cloning required:
+Each release is a `vX.Y.Z` tag with a GitHub release that carries the wheel. The
+[releases page](https://github.com/throw-if-null/shad/releases) lists them.
+
+Install a release with `uv` or `pipx`. Both keep the CLI in its own environment:
 
 ```sh
-pip install git+https://github.com/throw-if-null/shad.git
+uv tool install git+https://github.com/throw-if-null/shad.git@vX.Y.Z
+pipx install git+https://github.com/throw-if-null/shad.git@vX.Y.Z
 ```
 
-Or with `pipx` (keeps the CLI isolated in its own environment):
+To upgrade, run the same command with the new tag. `pipx` needs `--force` to replace an
+installed version; `uv` does not.
+
+### From GitHub, unreleased
+
+Install the latest commit on `main`, or any commit:
 
 ```sh
-pipx install git+https://github.com/throw-if-null/shad.git
-```
-
-To install a specific version or commit:
-
-```sh
-pip install git+https://github.com/throw-if-null/shad.git@v0.1.0
-pip install git+https://github.com/throw-if-null/shad.git@abc1234
+uv tool install git+https://github.com/throw-if-null/shad.git
+uv tool install git+https://github.com/throw-if-null/shad.git@abc1234
 ```
 
 ### From a local clone
@@ -1062,3 +1065,21 @@ shad/
             └── status/
                 └── command.py
 ```
+
+## Releasing
+
+The version is declared once, as `__version__` in `src/shad/__init__.py`. The build reads it from
+there.
+
+1. Set `__version__` to the new version in a pull request, and merge it.
+2. Tag the merge commit on `main` with `v` and the version, and push the tag:
+
+   ```sh
+   git switch main && git pull
+   git tag -a v0.3.0 -m "shad 0.3.0"
+   git push origin v0.3.0
+   ```
+
+3. CI runs the checks on the tag. It fails when the tag is not `v` + `__version__` or the tagged
+   commit is not on `main`. Otherwise it builds the wheel and creates the GitHub release, with
+   notes generated from the pull requests merged since the previous release.
