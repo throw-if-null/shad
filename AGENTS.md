@@ -147,6 +147,7 @@ Key data flow for the main `open` command:
 - Type checking: `mypy src/`
 - All three checks run in CI and can be run locally via `make check`.
 - CI also runs `make coral-contract`: it fetches the Coral release tag that `CORAL.md` targets, runs that release's contract generator, and fails when `CORAL-CONTRACT.md` differs or `AGENTS.md` names another Coral revision. It needs network access, Node 24 and npm, so `make check` does not run it.
+- A `v*` tag runs the CI checks and then the release job, which creates the GitHub release. README "Releasing" holds the procedure.
 
 ## Testing
 
